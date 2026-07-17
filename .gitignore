@@ -1,0 +1,16 @@
+
+# PDF resources
+resources
+
+# macOS / editor junk
+.DS_Store
+
+# Python build artifacts
+__pycache__/
+*.pyc
+
+# Runtime failure logs (may contain excerpts of ingested PDF content).
+# logs/progress/ is tracked deliberately — it's a human-written journal.
+logs/*
+!logs/README.md
+!logs/progress/
