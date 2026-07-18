@@ -1,21 +1,13 @@
 #TODO: Table/Chart format is not handled yet.
 
-import os
-
 import psycopg2
 
-# BAAI/bge-base-en-v1.5 output dimension. Switching embedding models (e.g. to
-# an AWS-hosted model later) changes this and requires recreating the
-# `embedding` column plus its index and re-ingesting every document.
-EMBEDDING_DIMENSIONS = 768
+from retrieval.utils import DB_CONFIG, load_config
 
-DB_CONFIG = {
-    "host": os.environ.get("WMP_DB_HOST", "localhost"),
-    "port": os.environ.get("WMP_DB_PORT", "5432"),
-    "dbname": os.environ.get("WMP_DB_NAME", "postgres"),
-    "user": os.environ.get("WMP_DB_USER", "postgres"),
-    "password": os.environ.get("WMP_DB_PASSWORD", "devpass"),
-}
+# TODO: Switching embedding models (e.g. to an AWS-hosted model later) changes
+# config.yaml's local.embedding.dimensions and requires recreating the
+# `embedding` column plus its index and re-ingesting every document.
+EMBEDDING_DIMENSIONS = load_config()["local"]["embedding"]["dimensions"]
 
 
 def setup_database() -> None:
@@ -31,7 +23,7 @@ def setup_database() -> None:
                     id serial PRIMARY KEY,
                     filename text UNIQUE NOT NULL,
                     page_count int NOT NULL,
-                    content_hash text NOT NULL,     
+                    content_hash text NOT NULL,
                     ingested_at timestamptz NOT NULL DEFAULT now()
                 );
                 """

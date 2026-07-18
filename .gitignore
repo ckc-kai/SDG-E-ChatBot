@@ -14,3 +14,9 @@ __pycache__/
 logs/*
 !logs/README.md
 !logs/progress/
+
+# configurations
+config/config.yaml
+
+# secrets
+.env

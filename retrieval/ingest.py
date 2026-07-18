@@ -49,37 +49,28 @@ from __future__ import annotations
 import argparse
 import hashlib
 import logging
-import os
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-import psycopg2
 import pypdf
-from pgvector.psycopg2 import register_vector
 from psycopg2.extras import execute_values
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
 
 from retrieval.failure_log import get_failure_logger
+from retrieval.utils import connect_db, get_embedding_model, load_config
 
 logger = logging.getLogger(__name__)
 log_failure = get_failure_logger("ingest")
 
-EMBEDDING_MODEL_NAME = "BAAI/bge-base-en-v1.5"
-MAX_TOKENS_PER_CHUNK = 400
-TOKEN_OVERLAP = 50
-MIN_CHUNK_CHARS = 20
+_embedding_config = load_config()["local"]["embedding"]
+EMBEDDING_MODEL_NAME = _embedding_config["model"]
+MAX_TOKENS_PER_CHUNK = _embedding_config["max_tokens_per_chunk"]
+TOKEN_OVERLAP = _embedding_config["token_overlap"]
+MIN_CHUNK_CHARS = _embedding_config["minimum_chunk_chars"]
 DEFAULT_CONTENT_TYPE = "narrative"
-
-DB_CONFIG = {
-    "host": os.environ.get("WMP_DB_HOST", "localhost"),
-    "port": os.environ.get("WMP_DB_PORT", "5432"),
-    "dbname": os.environ.get("WMP_DB_NAME", "postgres"),
-    "user": os.environ.get("WMP_DB_USER", "postgres"),
-    "password": os.environ.get("WMP_DB_PASSWORD", "devpass"),
-}
 
 _SECTION_NUMBER_RE = re.compile(r"^(\d+(?:\.\d+)*)\.?\s")
 
@@ -403,9 +394,8 @@ def main() -> None:
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
-    model = SentenceTransformer(EMBEDDING_MODEL_NAME)
-    conn = psycopg2.connect(**DB_CONFIG)
-    register_vector(conn)
+    model = get_embedding_model()
+    conn = connect_db()
     try:
         pdf_paths = sorted(args.pdf_dir.glob("*.pdf"))
         for pdf_path in tqdm(pdf_paths, desc="Ingesting PDFs", unit="file"):
