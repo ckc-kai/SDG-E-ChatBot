@@ -207,6 +207,60 @@ class EvaluationHarnessTests(unittest.TestCase):
         self.assertEqual(payload["per_query"][0]["gold_full_rerank_rank"], 6)
         connect_db.return_value.close.assert_called_once()
 
+    @patch("builtins.print")
+    @patch("eval.run_eval.score_row")
+    @patch("eval.run_eval.connect_db")
+    @patch("eval.run_eval.load_eval", return_value=[{"id": "row-1"}])
+    def test_metric_k_expands_default_rerank_cutoff(
+        self,
+        _load_rows: Mock,
+        _connect_db: Mock,
+        score_row_mock: Mock,
+        _print: Mock,
+    ) -> None:
+        score_row_mock.return_value = QueryScore(
+            id="row-1",
+            difficulty="simple",
+            question_type="risk_assessment",
+            num_gold=1,
+            hit_at_1=1.0,
+            recall_at_k=1.0,
+            mrr=1.0,
+            ndcg_at_k=1.0,
+            first_gold_rank=1,
+            retrieved_ids=[20],
+            api_rewrite_calls=0,
+            rewrite_source="simple",
+            rewrite_reason="single_intent",
+            search_queries=["question"],
+            vector_candidate_ids=[[20]],
+            pooled_candidate_ids=[20],
+            gold_best_vector_rank=1,
+            gold_full_rerank_rank=1,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "result.json"
+            argv = [
+                "run_eval",
+                "--eval",
+                "unused.jsonl",
+                "--out",
+                str(output),
+                "--metric-k",
+                "10",
+            ]
+
+            with patch.object(sys, "argv", argv):
+                main()
+
+            payload = json.loads(output.read_text())
+
+        self.assertEqual(payload["summary"]["k"], 10)
+        self.assertEqual(payload["retrieval_diagnostics"]["metric_k"], 10)
+        self.assertEqual(payload["retrieval_diagnostics"]["rerank_top_k"], 10)
+        self.assertEqual(score_row_mock.call_args.args[2], 10)
+        self.assertEqual(score_row_mock.call_args.kwargs["rerank_top_k"], 10)
+
 
 if __name__ == "__main__":
     unittest.main()
