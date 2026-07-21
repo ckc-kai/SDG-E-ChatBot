@@ -42,6 +42,45 @@ _DECOMPOSE_SYSTEM_PROMPT = (
     "If the question is already simple, return a single-element array containing it unchanged."
 )
 
+_JSON_FENCE_RE = re.compile(r"^```[a-zA-Z]*\s*\n?|\n?```\s*$")
+
+
+def _strip_json_fence(text: str) -> str:
+    """Strip a leading/trailing ```json ... ``` markdown fence, if present.
+
+    Claude reliably follows "respond with ONLY a JSON array" for the array's
+    CONTENT, but still sometimes wraps it in a markdown code fence. That leading
+    backtick makes json.loads fail with "Expecting value: line 1 column 1", so we
+    strip the fence (if any) before parsing. A no-op on already-bare JSON.
+    """
+    return _JSON_FENCE_RE.sub("", text.strip()).strip()
+
+
+_rewrite_call_count = 0
+_last_rewrite_trace: dict | None = None
+
+
+def get_rewrite_call_count() -> int:
+    """Total number of Claude API calls made by query_rewrite() since the last reset."""
+    return _rewrite_call_count
+
+
+def reset_rewrite_call_count() -> None:
+    global _rewrite_call_count
+    _rewrite_call_count = 0
+
+
+def get_last_rewrite_trace() -> dict | None:
+    """Full record of the most recent query_rewrite() call.
+
+    {"question": str, "sub_questions": list[str], "source": "simple"|"api"|"fallback",
+     "error": str | None}
+    `source` tells you what actually happened: "simple" = no API call needed,
+    "api" = Claude successfully decomposed it, "fallback" = an API call was made
+    but failed (see "error"), so the original question was used unchanged.
+    """
+    return _last_rewrite_trace
+
 
 @dataclass(frozen=True)
 class QueryObject:
@@ -78,26 +117,37 @@ def _is_simple_question(question: str) -> bool:
 
 
 def query_rewrite(question: str) -> list[str]:
+    global _rewrite_call_count, _last_rewrite_trace
     question = question.strip()
     if _is_simple_question(question):
+        _last_rewrite_trace = {
+            "question": question, "sub_questions": [question], "source": "simple", "error": None,
+        }
         return [question]
 
     try:
+        _rewrite_call_count += 1
         response = get_anthropic_client().messages.create(
             model=QUERY_REWRITE_MODEL,
             max_tokens=512,
             system=_DECOMPOSE_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": question}],
         )
-        sub_questions = json.loads(response.content[0].text)
+        sub_questions = json.loads(_strip_json_fence(response.content[0].text))
         if not isinstance(sub_questions, list) or not sub_questions or not all(
             isinstance(item, str) for item in sub_questions
         ):
             raise ValueError(f"Unexpected rewrite response shape: {sub_questions!r}")
+        _last_rewrite_trace = {
+            "question": question, "sub_questions": sub_questions, "source": "api", "error": None,
+        }
         return sub_questions
     except Exception as exc:
         log_failure("query_rewrite", question, exc)
         logger.warning("query_rewrite failed, falling back to original question: %s", exc)
+        _last_rewrite_trace = {
+            "question": question, "sub_questions": [question], "source": "fallback", "error": str(exc),
+        }
         return [question]
 
 

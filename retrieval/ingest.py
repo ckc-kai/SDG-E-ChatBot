@@ -35,6 +35,14 @@ Chunking strategy: Hierachy
      skipped rather than stored as noise (covers figure/map-only pages).
    - PDFs with no outline at all fall back to a single whole-document
      section (no breadcrumb) split purely by token count.
+   - Heading-anchor trim: a bookmark only resolves to a PAGE, not a position
+     within it. When a page holds the tail of the previous section followed by
+     this section's heading, naive whole-page extraction would glue that
+     leftover prose onto this section's first chunk. `extract_section_text`
+     locates this section's own bookmark title on its first page (a literal,
+     whitespace/case/punctuation-tolerant text search, not a semantic match)
+     and trims everything before it. If the title can't be confidently located
+     (too short/generic, or not found), the page is left untouched.
 
 6. TODO: Tables and figures are intentionally out of scope for now: their content
    is extracted as flattened plain text through the same leaf-section path,
@@ -88,6 +96,7 @@ class SectionNode:
 
 @dataclass(frozen=True)
 class LeafSection:
+    title: str  # this leaf's own heading text (not the full breadcrumb path), used to anchor extraction
     breadcrumb: str
     sub_document: str | None
     section_number: str | None
@@ -206,6 +215,7 @@ def _leaf_sections(flat: list[SectionNode], doc_page_count: int) -> list[LeafSec
 
         leaves.append(
             LeafSection(
+                title=node.title,
                 breadcrumb=node.breadcrumb,
                 sub_document=node.sub_document,
                 section_number=node.section_number,
@@ -220,6 +230,7 @@ def build_leaf_sections(pdf_path: Path, reader: pypdf.PdfReader) -> list[LeafSec
     if not reader.outline:
         return [
             LeafSection(
+                title="",  # no bookmark title to anchor on; extraction stays whole-page
                 breadcrumb=pdf_path.name,
                 sub_document=None,
                 section_number=None,
@@ -233,30 +244,85 @@ def build_leaf_sections(pdf_path: Path, reader: pypdf.PdfReader) -> list[LeafSec
     return _leaf_sections(_flatten(tree), len(reader.pages))
 
 
-def extract_section_text(reader: pypdf.PdfReader, page_start: int, page_end: int) -> str:
+MIN_HEADING_MATCH_CHARS = 8  # titles shorter/more generic than this are too risky to anchor on
+
+_PUNCT_NORMALIZE = str.maketrans({
+    "‘": "'", "’": "'", "“": '"', "”": '"',
+    "–": "-", "—": "-",
+})
+
+
+def _normalize_punct(text: str) -> str:
+    """1:1 character substitution (curly quotes/dashes -> ASCII) that preserves length,
+    so a match offset found on the normalized text is still valid on the original."""
+    return text.translate(_PUNCT_NORMALIZE)
+
+
+def _heading_pattern(text: str) -> re.Pattern[str]:
+    """Whitespace-tolerant, case-insensitive regex for a literal heading string."""
+    words = text.split()
+    return re.compile(r"\s+".join(re.escape(w) for w in words), re.IGNORECASE)
+
+
+def _trim_to_heading(page_text: str, title: str) -> str:
+    """Drop any text before this leaf section's own heading on its first page.
+
+    A bookmark resolves to a page, not a position within it. Locates the section's
+    own title (a literal, normalized text search -- not a semantic match) on the
+    page and trims everything before it. Falls back to the untouched page if the
+    title is too short/generic to trust or can't be found.
+    """
+    normalized_title = _normalize_punct(title)
+    words = normalized_title.split()
+    # single generic words ("Overview", "Summary") are too likely to recur in body
+    # prose unrelated to the real heading; require >=2 words AND a length floor.
+    if len(words) < 2 or len(normalized_title.replace(" ", "")) < MIN_HEADING_MATCH_CHARS:
+        return page_text
+    match = _heading_pattern(normalized_title).search(_normalize_punct(page_text))
+    return page_text[match.start():] if match else page_text
+
+
+def extract_section_text(reader: pypdf.PdfReader, page_start: int, page_end: int, title: str = "") -> str:
     page_end = min(page_end, len(reader.pages))
     texts = [reader.pages[i].extract_text() or "" for i in range(page_start, page_end)]
+    if texts and title:
+        texts[0] = _trim_to_heading(texts[0], title)
     return "\n".join(texts).strip()
 
 
 def chunk_text(text: str, tokenizer, max_tokens: int, overlap: int) -> list[str]:
+    """Split text into overlapping token windows, sliced from the ORIGINAL string.
+
+    We window over the token stream but reconstruct each piece by slicing the
+    original text at the tokens' character offsets, NOT by ``tokenizer.decode``.
+    The embedding tokenizer is uncased, so decoding token ids would lowercase and
+    re-space the text (e.g. "SDG&E" -> "sdg & e"), corrupting the stored content.
+    Offset slicing keeps the original casing and punctuation while using the exact
+    same window boundaries.
+    """
     if not text:
         return []
+    if not getattr(tokenizer, "is_fast", False):
+        raise TypeError(
+            "chunk_text requires a fast tokenizer (return_offsets_mapping support); "
+            f"got {type(tokenizer).__name__}"
+        )
 
-    token_ids = tokenizer.encode(text, add_special_tokens=False)
-    if len(token_ids) <= max_tokens:
+    offsets = tokenizer(text, add_special_tokens=False, return_offsets_mapping=True)["offset_mapping"]
+    if len(offsets) <= max_tokens:
         return [text]
 
     stride = max_tokens - overlap
     pieces: list[str] = []
-    for start in range(0, len(token_ids), stride):
-        window = token_ids[start : start + max_tokens]
+    for start in range(0, len(offsets), stride):
+        window = offsets[start : start + max_tokens]
         if not window:
             break
-        piece = tokenizer.decode(window, skip_special_tokens=True).strip()
+        char_start, char_end = window[0][0], window[-1][1]
+        piece = text[char_start:char_end].strip()
         if piece:
             pieces.append(piece)
-        if start + max_tokens >= len(token_ids):
+        if start + max_tokens >= len(offsets):
             break
     return pieces
 
@@ -264,7 +330,7 @@ def chunk_text(text: str, tokenizer, max_tokens: int, overlap: int) -> list[str]
 def build_chunks(pdf_path: Path, reader: pypdf.PdfReader, tokenizer) -> list[Chunk]:
     chunks: list[Chunk] = []
     for section in build_leaf_sections(pdf_path, reader):
-        text = extract_section_text(reader, section.page_start, section.page_end)
+        text = extract_section_text(reader, section.page_start, section.page_end, section.title)
         if len(text) < MIN_CHUNK_CHARS:
             logger.debug("Skipping near-empty section %r in %s", section.breadcrumb, pdf_path.name)
             continue
