@@ -49,6 +49,7 @@ class RewriteRoutingTests(unittest.TestCase):
             "Who participates in the working group and what topics does it address?",
             "What changed; why did it change?",
             "What changed? Why did it change?",
+            "Is the mitigation required, and does it apply in the HFTD?",
         ]
 
         for question_text in questions:
@@ -102,8 +103,31 @@ class RewriteRoutingTests(unittest.TestCase):
         self.assertEqual(trace["reason"], "independent_interrogative_clauses")
         self.assertEqual(trace["api_sub_questions"], api_subquestions)
 
+    def test_unknown_internal_mode_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            query.query_rewrite("What changed?", mode="sometimes")
+
+    @patch("retrieval.query.log_failure")
+    @patch("retrieval.query.get_anthropic_client")
+    def test_api_failure_falls_back_to_original_question(
+        self, client_factory: Mock, failure_log: Mock
+    ) -> None:
+        client_factory.return_value.messages.create.side_effect = RuntimeError("offline")
+        question_text = "What changed, and why did it change?"
+
+        rewritten = query.query_rewrite(question_text, mode="auto")
+
+        self.assertEqual(rewritten, [question_text])
+        self.assertEqual(query.get_last_rewrite_trace()["source"], "fallback")
+        failure_log.assert_called_once()
+
 
 class RetrievalTests(unittest.TestCase):
+    def test_empty_candidate_list_does_not_load_reranker(self) -> None:
+        with patch("retrieval.query.get_reranker_model") as model_factory:
+            self.assertEqual(query.rerank("question", [], top_k=5), [])
+            model_factory.assert_not_called()
+
     @patch("retrieval.query.get_reranker_model")
     def test_reranker_receives_section_context(self, model_factory: Mock) -> None:
         candidate = _candidate(1)
@@ -157,6 +181,18 @@ class RetrievalTests(unittest.TestCase):
             [2, 1],
         )
         self.assertEqual(search.call_args.args[1], 20)
+
+    @patch("retrieval.query.retrieve_with_diagnostics")
+    def test_retrieve_returns_ranked_results_without_diagnostics(self, retrieve_debug: Mock) -> None:
+        expected = [query.RankedResult(_candidate(1), 0.8)]
+        retrieve_debug.return_value = (
+            expected,
+            query.RetrievalDiagnostics([], [], [], []),
+        )
+
+        actual = query.retrieve("question", conn=object(), rewrite_mode="off")
+
+        self.assertEqual(actual, expected)
 
 
 if __name__ == "__main__":

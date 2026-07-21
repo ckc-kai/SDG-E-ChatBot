@@ -34,7 +34,17 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-from retrieval.query import get_last_rewrite_trace, get_rewrite_call_count, reset_rewrite_call_count, retrieve
+from retrieval.query import (
+    QUERY_REWRITE_MODE,
+    RERANK_TOP_K,
+    RETRIEVAL_TOP_K,
+    QueryObject,
+    RankedResult,
+    get_last_rewrite_trace,
+    get_rewrite_call_count,
+    reset_rewrite_call_count,
+    retrieve_with_diagnostics,
+)
 from retrieval.utils import connect_db
 
 DEFAULT_EVAL_PATH = "eval/pdf/evaluation.jsonl"
@@ -59,8 +69,13 @@ class QueryScore:
     first_gold_rank: int | None  # 1-indexed rank of first gold hit, None if missed
     retrieved_ids: list[int]
     api_rewrite_calls: int  # Claude API calls query_rewrite() made for this question
-    rewrite_source: str  # "simple" | "api" | "fallback" -- see query.get_last_rewrite_trace
-    sub_questions: list[str]  # the actual sub-question(s) retrieval was run against
+    rewrite_source: str  # "simple" | "api" | "fallback" | "disabled"
+    rewrite_reason: str
+    search_queries: list[str]
+    vector_candidate_ids: list[list[int]]
+    pooled_candidate_ids: list[int]
+    gold_best_vector_rank: int | None
+    gold_full_rerank_rank: int | None
 
 
 def load_eval(path: str) -> list[dict]:
@@ -134,6 +149,23 @@ def _distinct_gold_hits(ranked, gold_ids: set[int], gold_contents: set[str]) -> 
     return flags
 
 
+def _candidate_query_object(candidate: QueryObject | RankedResult) -> QueryObject:
+    return candidate.query_object if isinstance(candidate, RankedResult) else candidate
+
+
+def _first_gold_rank_in_candidates(
+    candidates: list[QueryObject] | list[RankedResult],
+    gold_ids: set[int],
+    gold_contents: set[str],
+) -> int | None:
+    """Return the first gold rank, including duplicate-content twin credit."""
+    for rank, candidate in enumerate(candidates, start=1):
+        query_object = _candidate_query_object(candidate)
+        if query_object.chunk_id in gold_ids or normalize(query_object.content) in gold_contents:
+            return rank
+    return None
+
+
 def _ndcg(flags: list[bool], num_gold: int, k: int) -> float:
     dcg = sum(1.0 / math.log2(rank + 1) for rank, flag in enumerate(flags[:k], start=1) if flag)
     ideal_hits = min(num_gold, k)
@@ -141,20 +173,50 @@ def _ndcg(flags: list[bool], num_gold: int, k: int) -> float:
     return dcg / idcg if idcg > 0 else 0.0
 
 
-def score_row(row: dict, conn, k: int) -> QueryScore:
+def score_row(
+    row: dict,
+    conn,
+    k: int,
+    *,
+    rewrite_mode: str = QUERY_REWRITE_MODE,
+    retrieval_top_k: int = RETRIEVAL_TOP_K,
+    rerank_top_k: int = RERANK_TOP_K,
+) -> QueryScore:
     gold_ids, gold_contents = gold_signatures(conn, row["evidence"])
     num_gold = len(gold_contents)  # distinct gold items (twins collapse to one)
 
     calls_before = get_rewrite_call_count()
-    ranked = retrieve(row["question"], conn)[:k]
+    ranked, diagnostics = retrieve_with_diagnostics(
+        row["question"],
+        conn,
+        rewrite_mode=rewrite_mode,
+        retrieval_top_k=retrieval_top_k,
+        rerank_top_k=rerank_top_k,
+    )
+    ranked = ranked[:k]
     api_rewrite_calls = get_rewrite_call_count() - calls_before
-    trace = get_last_rewrite_trace() or {"source": "unknown", "sub_questions": [row["question"]]}
+    trace = get_last_rewrite_trace() or {
+        "source": "unknown",
+        "reason": "unknown",
+        "sub_questions": [row["question"]],
+    }
     if trace["source"] == "api":
         print(f"  [rewrite] {row['id']}: -> {trace['sub_questions']}")
     elif trace["source"] == "fallback":
         print(f"  [rewrite] {row['id']}: API call FAILED ({trace.get('error')}), used original question")
 
     flags = _distinct_gold_hits(ranked, gold_ids, gold_contents)
+
+    vector_gold_ranks = [
+        rank
+        for candidates in diagnostics.candidate_sets
+        if (rank := _first_gold_rank_in_candidates(candidates, gold_ids, gold_contents))
+        is not None
+    ]
+    gold_best_vector_rank = min(vector_gold_ranks) if vector_gold_ranks else None
+    gold_full_rerank_rank = _first_gold_rank_in_candidates(
+        diagnostics.reranked_candidates, gold_ids, gold_contents
+    )
 
     found = sum(flags)
     first_rank = next((i for i, flag in enumerate(flags, start=1) if flag), None)
@@ -172,7 +234,15 @@ def score_row(row: dict, conn, k: int) -> QueryScore:
         retrieved_ids=[r.query_object.chunk_id for r in ranked],
         api_rewrite_calls=api_rewrite_calls,
         rewrite_source=trace["source"],
-        sub_questions=trace["sub_questions"],
+        rewrite_reason=trace.get("reason", "unknown"),
+        search_queries=diagnostics.search_queries,
+        vector_candidate_ids=[
+            [candidate.chunk_id for candidate in candidates]
+            for candidates in diagnostics.candidate_sets
+        ],
+        pooled_candidate_ids=[candidate.chunk_id for candidate in diagnostics.pooled_candidates],
+        gold_best_vector_rank=gold_best_vector_rank,
+        gold_full_rerank_rank=gold_full_rerank_rank,
     )
 
 
@@ -242,7 +312,7 @@ def print_report(
         by_source[s.rewrite_source].append(s)
     total_calls = sum(s.api_rewrite_calls for s in scores)
     print(f"\nCLAUDE API REWRITE CALLS: {total_calls} call(s) across {len(scores)} question(s)")
-    for source in ("api", "fallback", "simple"):
+    for source in ("api", "fallback", "simple", "disabled"):
         subset = by_source.get(source, [])
         if subset:
             print(f"  {source:<9} n={len(subset)}: " + ", ".join(s.id for s in subset))
@@ -254,7 +324,29 @@ def main() -> None:
     parser.add_argument("--k", type=int, default=DEFAULT_K, help="Cutoff for @k metrics.")
     parser.add_argument("--out", type=Path, default=None, help="Optional JSON results output path.")
     parser.add_argument("--misses", action="store_true", help="List questions with no gold in top-k.")
+    parser.add_argument(
+        "--rewrite-mode",
+        choices=("auto", "off", "always"),
+        default=QUERY_REWRITE_MODE,
+        help="Internal experiment control; production defaults to automatic heuristic routing.",
+    )
+    parser.add_argument(
+        "--retrieval-top-k",
+        type=int,
+        default=RETRIEVAL_TOP_K,
+        help="Vector candidates retrieved per search query before pooling.",
+    )
+    parser.add_argument(
+        "--rerank-top-k",
+        type=int,
+        default=RERANK_TOP_K,
+        help="Candidates retained after reranking (must be at least --k).",
+    )
     args = parser.parse_args()
+    if args.rerank_top_k < args.k:
+        parser.error("--rerank-top-k must be greater than or equal to --k")
+    if args.retrieval_top_k < 1:
+        parser.error("--retrieval-top-k must be positive")
 
     rows = load_eval(args.eval)
     reset_rewrite_call_count()  # so the totals reflect only this run
@@ -264,7 +356,16 @@ def main() -> None:
     try:
         for row in rows:
             try:
-                scores.append(score_row(row, conn, args.k))
+                scores.append(
+                    score_row(
+                        row,
+                        conn,
+                        args.k,
+                        rewrite_mode=args.rewrite_mode,
+                        retrieval_top_k=args.retrieval_top_k,
+                        rerank_top_k=args.rerank_top_k,
+                    )
+                )
             except GoldNotFoundError as exc:
                 skipped.append({"id": row["id"], "reason": str(exc)})
                 print(f"  [SKIP] {row['id']}: {exc}")
@@ -283,7 +384,21 @@ def main() -> None:
                 "questions_rewritten": sum(1 for s in scores if s.rewrite_source == "api"),
                 "questions_fallback": sum(1 for s in scores if s.rewrite_source == "fallback"),
                 "questions_simple": sum(1 for s in scores if s.rewrite_source == "simple"),
+                "questions_disabled": sum(1 for s in scores if s.rewrite_source == "disabled"),
                 "questions_total": len(scores),
+            },
+            "retrieval_diagnostics": {
+                "rewrite_mode": args.rewrite_mode,
+                "retrieval_top_k": args.retrieval_top_k,
+                "rerank_top_k": args.rerank_top_k,
+                "candidate_generation_misses": sum(
+                    1 for s in scores if s.gold_best_vector_rank is None
+                ),
+                "reranker_top_k_misses": sum(
+                    1
+                    for s in scores
+                    if s.gold_best_vector_rank is not None and s.first_gold_rank is None
+                ),
             },
             "per_query": [
                 {
@@ -299,7 +414,13 @@ def main() -> None:
                     "retrieved_ids": s.retrieved_ids,
                     "api_rewrite_calls": s.api_rewrite_calls,
                     "rewrite_source": s.rewrite_source,
-                    "sub_questions": s.sub_questions,
+                    "rewrite_reason": s.rewrite_reason,
+                    "sub_questions": s.search_queries,
+                    "search_queries": s.search_queries,
+                    "vector_candidate_ids": s.vector_candidate_ids,
+                    "pooled_candidate_ids": s.pooled_candidate_ids,
+                    "gold_best_vector_rank": s.gold_best_vector_rank,
+                    "gold_full_rerank_rank": s.gold_full_rerank_rank,
                 }
                 for s in scores
             ],

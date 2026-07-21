@@ -28,16 +28,25 @@ log_failure = get_failure_logger("query")
 
 _config = load_config()["local"]
 QUERY_REWRITE_MODEL = _config["query_rewrite"]["model"]
-SIMPLE_QUESTION_MAX_WORDS = _config["query_rewrite"]["simple_question_max_words"]
+QUERY_REWRITE_MODE = _config["query_rewrite"].get("mode", "auto")
+MAX_REWRITE_SUBQUESTIONS = _config["query_rewrite"].get("max_subquestions", 2)
 RETRIEVAL_TOP_K = _config["retrieval"]["retrieval_top_k"]
 RERANK_TOP_K = _config["retrieval"]["rerank_top_k"]
 
-_COMPOUND_MARKERS = (" and ", " or ", ";", ".")
-_WH_WORDS = ("what", "who", "when", "where", "why", "how", "which", "is", "has", "have", "does", "do")
+_REWRITE_MODES = {"auto", "off", "always"}
+_INTERROGATIVE = (
+    r"(?:what|who|when|where|why|how|which|"
+    r"is|are|was|were|do|does|did|has|have|can|could|should|would|will)"
+)
+_SECOND_INTERROGATIVE_CLAUSE_RE = re.compile(
+    rf"(?:\b(?:and|or)\b|[.;?])\s*,?\s*{_INTERROGATIVE}\b",
+    re.IGNORECASE,
+)
 
 _DECOMPOSE_SYSTEM_PROMPT = (
     "You split a compound question about SDG&E's Wildfire Mitigation Plan into "
     "focused, self-contained sub-questions that can each be answered independently. "
+    f"Return no more than {MAX_REWRITE_SUBQUESTIONS} sub-questions. "
     "Respond with ONLY a JSON array of strings, no other text. "
     "If the question is already simple, return a single-element array containing it unchanged."
 )
@@ -73,8 +82,8 @@ def reset_rewrite_call_count() -> None:
 def get_last_rewrite_trace() -> dict | None:
     """Full record of the most recent query_rewrite() call.
 
-    {"question": str, "sub_questions": list[str], "source": "simple"|"api"|"fallback",
-     "error": str | None}
+    {"question": str, "sub_questions": list[str], "source": str,
+     "reason": str, "api_sub_questions": list[str], "error": str | None}
     `source` tells you what actually happened: "simple" = no API call needed,
     "api" = Claude successfully decomposed it, "fallback" = an API call was made
     but failed (see "error"), so the original question was used unchanged.
@@ -104,26 +113,80 @@ class RankedResult:
     rerank_score: float
 
 
-def _is_simple_question(question: str) -> bool:
-    normalized = question.strip().lower()
+@dataclass(frozen=True)
+class RetrievalDiagnostics:
+    search_queries: list[str]
+    candidate_sets: list[list[QueryObject]]
+    pooled_candidates: list[QueryObject]
+    reranked_candidates: list[RankedResult]
+
+
+def _decomposition_reason(question: str) -> str | None:
+    """Return a high-precision reason to decompose, independent of eval labels.
+
+    Length, auxiliary verbs, identifiers containing periods, and noun lists are
+    deliberately not treated as evidence of multiple retrieval intents. The API
+    is reserved for a second explicit interrogative clause.
+    """
+    normalized = " ".join(question.strip().split())
     if normalized.count("?") > 1:
-        return False
-    if any(marker in normalized for marker in _COMPOUND_MARKERS):
-        return False
-    wh_count = sum(1 for word in _WH_WORDS if re.search(rf"\b{word}\b", normalized))
-    if wh_count > 1:
-        return False
-    return len(normalized.split()) <= SIMPLE_QUESTION_MAX_WORDS
+        return "multiple_questions"
+    if _SECOND_INTERROGATIVE_CLAUSE_RE.search(normalized):
+        return "independent_interrogative_clauses"
+    return None
 
 
-def query_rewrite(question: str) -> list[str]:
+def _needs_decomposition(question: str) -> bool:
+    return _decomposition_reason(question) is not None
+
+
+def _deduplicate_subquestions(question: str, sub_questions: list[str]) -> list[str]:
+    seen = {question.casefold()}
+    unique: list[str] = []
+    for item in sub_questions:
+        cleaned = " ".join(item.strip().split())
+        signature = cleaned.casefold()
+        if not cleaned or signature in seen:
+            continue
+        seen.add(signature)
+        unique.append(cleaned)
+        if len(unique) >= MAX_REWRITE_SUBQUESTIONS:
+            break
+    return unique
+
+
+def query_rewrite(question: str, mode: str | None = None) -> list[str]:
     global _rewrite_call_count, _last_rewrite_trace
     question = question.strip()
-    if _is_simple_question(question):
+    selected_mode = mode or QUERY_REWRITE_MODE
+    if selected_mode not in _REWRITE_MODES:
+        raise ValueError(
+            f"Unknown rewrite mode {selected_mode!r}; expected one of {sorted(_REWRITE_MODES)}"
+        )
+
+    reason = _decomposition_reason(question)
+    if selected_mode == "off":
         _last_rewrite_trace = {
-            "question": question, "sub_questions": [question], "source": "simple", "error": None,
+            "question": question,
+            "sub_questions": [question],
+            "source": "disabled",
+            "reason": "mode_off",
+            "api_sub_questions": [],
+            "error": None,
         }
         return [question]
+    if selected_mode == "auto" and reason is None:
+        _last_rewrite_trace = {
+            "question": question,
+            "sub_questions": [question],
+            "source": "simple",
+            "reason": "single_intent",
+            "api_sub_questions": [],
+            "error": None,
+        }
+        return [question]
+    if selected_mode == "always":
+        reason = "mode_always"
 
     try:
         _rewrite_call_count += 1
@@ -138,15 +201,26 @@ def query_rewrite(question: str) -> list[str]:
             isinstance(item, str) for item in sub_questions
         ):
             raise ValueError(f"Unexpected rewrite response shape: {sub_questions!r}")
+        search_queries = [question, *_deduplicate_subquestions(question, sub_questions)]
         _last_rewrite_trace = {
-            "question": question, "sub_questions": sub_questions, "source": "api", "error": None,
+            "question": question,
+            "sub_questions": search_queries,
+            "source": "api",
+            "reason": reason,
+            "api_sub_questions": sub_questions,
+            "error": None,
         }
-        return sub_questions
+        return search_queries
     except Exception as exc:
         log_failure("query_rewrite", question, exc)
         logger.warning("query_rewrite failed, falling back to original question: %s", exc)
         _last_rewrite_trace = {
-            "question": question, "sub_questions": [question], "source": "fallback", "error": str(exc),
+            "question": question,
+            "sub_questions": [question],
+            "source": "fallback",
+            "reason": reason,
+            "api_sub_questions": [],
+            "error": str(exc),
         }
         return [question]
 
@@ -198,24 +272,76 @@ def _merge_candidates(candidate_sets: list[list[QueryObject]]) -> list[QueryObje
     return list(best_by_id.values())
 
 
-def rerank(question: str, candidates: list[QueryObject], top_k: int) -> list[RankedResult]:
+def _candidate_text(candidate: QueryObject) -> str:
+    context: list[str] = []
+    if candidate.breadcrumb:
+        context.append(f"Section: {candidate.breadcrumb}")
+    if candidate.section_number:
+        context.append(f"Section number: {candidate.section_number}")
+    context.append(candidate.content)
+    return "\n".join(context)
+
+
+def rerank(
+    question: str, candidates: list[QueryObject], top_k: int | None
+) -> list[RankedResult]:
     if not candidates:
         return []
-    pairs = [(question, candidate.content) for candidate in candidates]
+    pairs = [(question, _candidate_text(candidate)) for candidate in candidates]
     scores = get_reranker_model().predict(pairs)
     ranked = sorted(zip(candidates, scores), key=lambda pair: pair[1], reverse=True)
-    return [RankedResult(query_object=candidate, rerank_score=float(score)) for candidate, score in ranked[:top_k]]
+    if top_k is not None:
+        ranked = ranked[:top_k]
+    return [
+        RankedResult(query_object=candidate, rerank_score=float(score))
+        for candidate, score in ranked
+    ]
 
 
-def retrieve(question: str, conn) -> list[RankedResult]:
+def retrieve_with_diagnostics(
+    question: str,
+    conn,
+    *,
+    rewrite_mode: str | None = None,
+    retrieval_top_k: int = RETRIEVAL_TOP_K,
+    rerank_top_k: int = RERANK_TOP_K,
+) -> tuple[list[RankedResult], RetrievalDiagnostics]:
     """
     rewrite -> search -> merge -> rerank
     """
-    sub_questions = query_rewrite(question)
+    search_queries = query_rewrite(question, mode=rewrite_mode)
     model = get_embedding_model()
-    candidate_sets = [search(sub_question, RETRIEVAL_TOP_K, conn, model) for sub_question in sub_questions]
+    candidate_sets = [
+        search(search_query, retrieval_top_k, conn, model)
+        for search_query in search_queries
+    ]
     pooled = _merge_candidates(candidate_sets)
-    return rerank(question, pooled, RERANK_TOP_K)
+    all_ranked = rerank(question, pooled, top_k=None)
+    diagnostics = RetrievalDiagnostics(
+        search_queries=search_queries,
+        candidate_sets=candidate_sets,
+        pooled_candidates=pooled,
+        reranked_candidates=all_ranked,
+    )
+    return all_ranked[:rerank_top_k], diagnostics
+
+
+def retrieve(
+    question: str,
+    conn,
+    *,
+    rewrite_mode: str | None = None,
+    retrieval_top_k: int = RETRIEVAL_TOP_K,
+    rerank_top_k: int = RERANK_TOP_K,
+) -> list[RankedResult]:
+    ranked, _ = retrieve_with_diagnostics(
+        question,
+        conn,
+        rewrite_mode=rewrite_mode,
+        retrieval_top_k=retrieval_top_k,
+        rerank_top_k=rerank_top_k,
+    )
+    return ranked
 
 
 def main() -> None:
