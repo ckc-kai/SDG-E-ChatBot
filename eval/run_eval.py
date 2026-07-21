@@ -21,7 +21,7 @@ stored content is identical to a gold chunk's content.
 
 Usage:
     python -m eval.run_eval                         # scores eval/pdf/evaluation.jsonl
-    python -m eval.run_eval --eval PATH --k 5 --out results.json --misses
+    python -m eval.run_eval --eval PATH --metric-k 5 --out results.json --misses
 """
 
 from __future__ import annotations
@@ -321,7 +321,14 @@ def print_report(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Score retrieval against an evaluation JSONL.")
     parser.add_argument("--eval", default=DEFAULT_EVAL_PATH, help="Path to evaluation JSONL.")
-    parser.add_argument("--k", type=int, default=DEFAULT_K, help="Cutoff for @k metrics.")
+    parser.add_argument(
+        "--metric-k",
+        "--k",
+        dest="k",
+        type=int,
+        default=DEFAULT_K,
+        help="Final ranking cutoff used for recall@k and nDCG@k (--k remains an alias).",
+    )
     parser.add_argument("--out", type=Path, default=None, help="Optional JSON results output path.")
     parser.add_argument("--misses", action="store_true", help="List questions with no gold in top-k.")
     parser.add_argument(
@@ -334,19 +341,38 @@ def main() -> None:
         "--retrieval-top-k",
         type=int,
         default=RETRIEVAL_TOP_K,
-        help="Vector candidates retrieved per search query before pooling.",
+        help=(
+            "Vector candidates retrieved per search query before pooling; "
+            "this does not change the metric cutoff."
+        ),
     )
     parser.add_argument(
         "--rerank-top-k",
         type=int,
-        default=RERANK_TOP_K,
-        help="Candidates retained after reranking (must be at least --k).",
+        default=None,
+        help=(
+            "Candidates retained after reranking. Defaults to the larger of the configured "
+            "value and --metric-k."
+        ),
     )
     args = parser.parse_args()
-    if args.rerank_top_k < args.k:
-        parser.error("--rerank-top-k must be greater than or equal to --k")
+    if args.k < 1:
+        parser.error("--metric-k must be positive")
     if args.retrieval_top_k < 1:
         parser.error("--retrieval-top-k must be positive")
+    rerank_top_k = (
+        max(RERANK_TOP_K, args.k)
+        if args.rerank_top_k is None
+        else args.rerank_top_k
+    )
+    if rerank_top_k < args.k:
+        parser.error("--rerank-top-k must be greater than or equal to --metric-k")
+
+    print(
+        "EVAL CUTOFFS: "
+        f"metric_k={args.k}, retrieval_top_k={args.retrieval_top_k}, "
+        f"rerank_top_k={rerank_top_k}"
+    )
 
     rows = load_eval(args.eval)
     reset_rewrite_call_count()  # so the totals reflect only this run
@@ -363,7 +389,7 @@ def main() -> None:
                         args.k,
                         rewrite_mode=args.rewrite_mode,
                         retrieval_top_k=args.retrieval_top_k,
-                        rerank_top_k=args.rerank_top_k,
+                        rerank_top_k=rerank_top_k,
                     )
                 )
             except GoldNotFoundError as exc:
@@ -388,9 +414,10 @@ def main() -> None:
                 "questions_total": len(scores),
             },
             "retrieval_diagnostics": {
+                "metric_k": args.k,
                 "rewrite_mode": args.rewrite_mode,
                 "retrieval_top_k": args.retrieval_top_k,
-                "rerank_top_k": args.rerank_top_k,
+                "rerank_top_k": rerank_top_k,
                 "candidate_generation_misses": sum(
                     1 for s in scores if s.gold_best_vector_rank is None
                 ),
