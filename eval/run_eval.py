@@ -31,7 +31,7 @@ import json
 import math
 import re
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from retrieval.query import (
@@ -76,6 +76,10 @@ class QueryScore:
     pooled_candidate_ids: list[int]
     gold_best_vector_rank: int | None
     gold_full_rerank_rank: int | None
+    cutoff_metrics: dict[int, dict[str, float]] = field(default_factory=dict)
+    retrieval_candidates: list[dict] = field(default_factory=list)
+    reranked_candidates: list[dict] = field(default_factory=list)
+    gold_positions: list[dict] = field(default_factory=list)
 
 
 def load_eval(path: str) -> list[dict]:
@@ -173,11 +177,107 @@ def _ndcg(flags: list[bool], num_gold: int, k: int) -> float:
     return dcg / idcg if idcg > 0 else 0.0
 
 
+def _metrics_at_cutoff(flags: list[bool], num_gold: int, k: int) -> dict[str, float]:
+    cutoff_flags = flags[:k]
+    found = sum(cutoff_flags)
+    first_rank = next((rank for rank, flag in enumerate(cutoff_flags, start=1) if flag), None)
+    return {
+        "recall": found / num_gold if num_gold else 0.0,
+        "mrr": 1.0 / first_rank if first_rank else 0.0,
+        "ndcg": _ndcg(flags, num_gold, k),
+    }
+
+
+def _is_gold_candidate(
+    candidate: QueryObject | RankedResult,
+    gold_ids: set[int],
+    gold_contents: set[str],
+) -> bool:
+    query_object = _candidate_query_object(candidate)
+    return query_object.chunk_id in gold_ids or normalize(query_object.content) in gold_contents
+
+
+def _position_for_gold_content(
+    candidates: list[QueryObject] | list[RankedResult], gold_content: str
+) -> int | str:
+    for position, candidate in enumerate(candidates, start=1):
+        if normalize(_candidate_query_object(candidate).content) == gold_content:
+            return position
+    return "not_found"
+
+
+def _candidate_position_details(
+    diagnostics,
+    gold_ids: set[int],
+    gold_contents: set[str],
+) -> tuple[list[dict], list[dict], list[dict]]:
+    retrieval_candidates = [
+        {
+            "search_query_index": query_index,
+            "search_query": diagnostics.search_queries[query_index - 1],
+            "candidates": [
+                {
+                    "position": position,
+                    "chunk_id": candidate.chunk_id,
+                    "source_pdf": candidate.source_pdf,
+                    "breadcrumb": candidate.breadcrumb,
+                    "section_number": candidate.section_number,
+                    "chunk_index": candidate.chunk_index,
+                    "distance": float(candidate.distance),
+                    "is_gold": _is_gold_candidate(candidate, gold_ids, gold_contents),
+                }
+                for position, candidate in enumerate(candidates, start=1)
+            ],
+        }
+        for query_index, candidates in enumerate(diagnostics.candidate_sets, start=1)
+    ]
+    reranked_candidates = [
+        {
+            "position": position,
+            "chunk_id": result.query_object.chunk_id,
+            "source_pdf": result.query_object.source_pdf,
+            "breadcrumb": result.query_object.breadcrumb,
+            "section_number": result.query_object.section_number,
+            "chunk_index": result.query_object.chunk_index,
+            "rerank_score": float(result.rerank_score),
+            "is_gold": _is_gold_candidate(result, gold_ids, gold_contents),
+        }
+        for position, result in enumerate(diagnostics.reranked_candidates, start=1)
+    ]
+
+    gold_positions: list[dict] = []
+    for gold_index, gold_content in enumerate(sorted(gold_contents), start=1):
+        retrieval_positions = [
+            {
+                "search_query_index": query_index,
+                "position": _position_for_gold_content(candidates, gold_content),
+            }
+            for query_index, candidates in enumerate(diagnostics.candidate_sets, start=1)
+        ]
+        found_positions = [
+            item["position"]
+            for item in retrieval_positions
+            if isinstance(item["position"], int)
+        ]
+        gold_positions.append(
+            {
+                "gold_item": gold_index,
+                "retrieval_positions": retrieval_positions,
+                "best_retrieval_position": min(found_positions) if found_positions else "not_found",
+                "rerank_position": _position_for_gold_content(
+                    diagnostics.reranked_candidates, gold_content
+                ),
+            }
+        )
+    return retrieval_candidates, reranked_candidates, gold_positions
+
+
 def score_row(
     row: dict,
     conn,
     k: int,
     *,
+    metric_cutoffs: list[int] | None = None,
     rewrite_mode: str = QUERY_REWRITE_MODE,
     retrieval_top_k: int = RETRIEVAL_TOP_K,
     rerank_top_k: int = RERANK_TOP_K,
@@ -193,7 +293,8 @@ def score_row(
         retrieval_top_k=retrieval_top_k,
         rerank_top_k=rerank_top_k,
     )
-    ranked = ranked[:k]
+    cutoffs = sorted(set(metric_cutoffs or []) | {k})
+    ranked = ranked[:max(cutoffs)]
     api_rewrite_calls = get_rewrite_call_count() - calls_before
     trace = get_last_rewrite_trace() or {
         "source": "unknown",
@@ -206,6 +307,10 @@ def score_row(
         print(f"  [rewrite] {row['id']}: API call FAILED ({trace.get('error')}), used original question")
 
     flags = _distinct_gold_hits(ranked, gold_ids, gold_contents)
+    cutoff_metrics = {
+        cutoff: _metrics_at_cutoff(flags, num_gold, cutoff)
+        for cutoff in cutoffs
+    }
 
     vector_gold_ranks = [
         rank
@@ -218,8 +323,12 @@ def score_row(
         diagnostics.reranked_candidates, gold_ids, gold_contents
     )
 
-    found = sum(flags)
-    first_rank = next((i for i, flag in enumerate(flags, start=1) if flag), None)
+    primary_flags = flags[:k]
+    first_rank = next((i for i, flag in enumerate(primary_flags, start=1) if flag), None)
+    primary_metrics = cutoff_metrics[k]
+    retrieval_candidates, reranked_candidates, gold_positions = _candidate_position_details(
+        diagnostics, gold_ids, gold_contents
+    )
 
     return QueryScore(
         id=row["id"],
@@ -227,11 +336,11 @@ def score_row(
         question_type=row.get("question_type", "unknown"),
         num_gold=num_gold,
         hit_at_1=1.0 if flags and flags[0] else 0.0,
-        recall_at_k=found / num_gold if num_gold else 0.0,
-        mrr=1.0 / first_rank if first_rank else 0.0,
-        ndcg_at_k=_ndcg(flags, num_gold, k),
+        recall_at_k=primary_metrics["recall"],
+        mrr=primary_metrics["mrr"],
+        ndcg_at_k=primary_metrics["ndcg"],
         first_gold_rank=first_rank,
-        retrieved_ids=[r.query_object.chunk_id for r in ranked],
+        retrieved_ids=[r.query_object.chunk_id for r in ranked[:k]],
         api_rewrite_calls=api_rewrite_calls,
         rewrite_source=trace["source"],
         rewrite_reason=trace.get("reason", "unknown"),
@@ -243,6 +352,10 @@ def score_row(
         pooled_candidate_ids=[candidate.chunk_id for candidate in diagnostics.pooled_candidates],
         gold_best_vector_rank=gold_best_vector_rank,
         gold_full_rerank_rank=gold_full_rerank_rank,
+        cutoff_metrics=cutoff_metrics,
+        retrieval_candidates=retrieval_candidates,
+        reranked_candidates=reranked_candidates,
+        gold_positions=gold_positions,
     )
 
 
@@ -250,15 +363,36 @@ def _mean(scores: list[QueryScore], attr: str) -> float:
     return sum(getattr(s, attr) for s in scores) / len(scores) if scores else 0.0
 
 
-def aggregate(scores: list[QueryScore], k: int) -> dict:
+def aggregate(
+    scores: list[QueryScore], k: int, metric_cutoffs: list[int] | None = None
+) -> dict:
+    cutoffs = sorted(set(metric_cutoffs or []) | {k})
+
+    def cutoff_mean(subset: list[QueryScore], cutoff: int, metric: str) -> float:
+        values = []
+        for score in subset:
+            if cutoff in score.cutoff_metrics:
+                values.append(score.cutoff_metrics[cutoff][metric])
+            elif cutoff == k:
+                fallback = {
+                    "recall": score.recall_at_k,
+                    "mrr": score.mrr,
+                    "ndcg": score.ndcg_at_k,
+                }
+                values.append(fallback[metric])
+        return sum(values) / len(values) if values else 0.0
+
     def block(subset: list[QueryScore]) -> dict:
-        return {
+        metrics = {
             "count": len(subset),
             "hit@1": round(_mean(subset, "hit_at_1"), 4),
-            f"recall@{k}": round(_mean(subset, "recall_at_k"), 4),
-            "mrr": round(_mean(subset, "mrr"), 4),
-            f"ndcg@{k}": round(_mean(subset, "ndcg_at_k"), 4),
         }
+        for cutoff in cutoffs:
+            metrics[f"recall@{cutoff}"] = round(cutoff_mean(subset, cutoff, "recall"), 4)
+            metrics[f"mrr@{cutoff}"] = round(cutoff_mean(subset, cutoff, "mrr"), 4)
+            metrics[f"ndcg@{cutoff}"] = round(cutoff_mean(subset, cutoff, "ndcg"), 4)
+        metrics["mrr"] = metrics[f"mrr@{k}"]
+        return metrics
 
     by_difficulty = defaultdict(list)
     by_type = defaultdict(list)
@@ -268,6 +402,7 @@ def aggregate(scores: list[QueryScore], k: int) -> dict:
 
     return {
         "k": k,
+        "metric_cutoffs": cutoffs,
         "overall": block(scores),
         "by_difficulty": {name: block(rows) for name, rows in sorted(by_difficulty.items())},
         "by_question_type": {name: block(rows) for name, rows in sorted(by_type.items())},
@@ -327,7 +462,10 @@ def main() -> None:
         dest="k",
         type=int,
         default=DEFAULT_K,
-        help="Final ranking cutoff used for recall@k and nDCG@k (--k remains an alias).",
+        help=(
+            "Primary final-ranking cutoff. Reports metrics at both the default cutoff 5 "
+            "and this requested cutoff (--k remains an alias)."
+        ),
     )
     parser.add_argument("--out", type=Path, default=None, help="Optional JSON results output path.")
     parser.add_argument("--misses", action="store_true", help="List questions with no gold in top-k.")
@@ -360,17 +498,20 @@ def main() -> None:
         parser.error("--metric-k must be positive")
     if args.retrieval_top_k < 1:
         parser.error("--retrieval-top-k must be positive")
+    metric_cutoffs = sorted({DEFAULT_K, args.k})
     rerank_top_k = (
-        max(RERANK_TOP_K, args.k)
+        max(RERANK_TOP_K, max(metric_cutoffs))
         if args.rerank_top_k is None
         else args.rerank_top_k
     )
-    if rerank_top_k < args.k:
-        parser.error("--rerank-top-k must be greater than or equal to --metric-k")
+    if rerank_top_k < max(metric_cutoffs):
+        parser.error(
+            "--rerank-top-k must be greater than or equal to every reported metric cutoff"
+        )
 
     print(
         "EVAL CUTOFFS: "
-        f"metric_k={args.k}, retrieval_top_k={args.retrieval_top_k}, "
+        f"metric_cutoffs={metric_cutoffs}, retrieval_top_k={args.retrieval_top_k}, "
         f"rerank_top_k={rerank_top_k}"
     )
 
@@ -387,6 +528,7 @@ def main() -> None:
                         row,
                         conn,
                         args.k,
+                        metric_cutoffs=metric_cutoffs,
                         rewrite_mode=args.rewrite_mode,
                         retrieval_top_k=args.retrieval_top_k,
                         rerank_top_k=rerank_top_k,
@@ -398,7 +540,7 @@ def main() -> None:
     finally:
         conn.close()
 
-    summary = aggregate(scores, args.k)
+    summary = aggregate(scores, args.k, metric_cutoffs)
     print_report(summary, scores, args.k, args.misses, skipped)
 
     if args.out:
@@ -415,6 +557,7 @@ def main() -> None:
             },
             "retrieval_diagnostics": {
                 "metric_k": args.k,
+                "metric_cutoffs": metric_cutoffs,
                 "rewrite_mode": args.rewrite_mode,
                 "retrieval_top_k": args.retrieval_top_k,
                 "rerank_top_k": rerank_top_k,
@@ -434,9 +577,31 @@ def main() -> None:
                     "question_type": s.question_type,
                     "num_gold": s.num_gold,
                     "hit@1": s.hit_at_1,
-                    f"recall@{args.k}": s.recall_at_k,
                     "mrr": s.mrr,
-                    f"ndcg@{args.k}": s.ndcg_at_k,
+                    **{
+                        metric_name: value
+                        for cutoff in metric_cutoffs
+                        for metric_name, value in (
+                            (
+                                f"recall@{cutoff}",
+                                s.cutoff_metrics.get(cutoff, {}).get(
+                                    "recall", s.recall_at_k if cutoff == args.k else 0.0
+                                ),
+                            ),
+                            (
+                                f"mrr@{cutoff}",
+                                s.cutoff_metrics.get(cutoff, {}).get(
+                                    "mrr", s.mrr if cutoff == args.k else 0.0
+                                ),
+                            ),
+                            (
+                                f"ndcg@{cutoff}",
+                                s.cutoff_metrics.get(cutoff, {}).get(
+                                    "ndcg", s.ndcg_at_k if cutoff == args.k else 0.0
+                                ),
+                            ),
+                        )
+                    },
                     "first_gold_rank": s.first_gold_rank,
                     "retrieved_ids": s.retrieved_ids,
                     "api_rewrite_calls": s.api_rewrite_calls,
@@ -446,8 +611,19 @@ def main() -> None:
                     "search_queries": s.search_queries,
                     "vector_candidate_ids": s.vector_candidate_ids,
                     "pooled_candidate_ids": s.pooled_candidate_ids,
-                    "gold_best_vector_rank": s.gold_best_vector_rank,
-                    "gold_full_rerank_rank": s.gold_full_rerank_rank,
+                    "gold_best_vector_rank": (
+                        s.gold_best_vector_rank
+                        if s.gold_best_vector_rank is not None
+                        else "not_found"
+                    ),
+                    "gold_full_rerank_rank": (
+                        s.gold_full_rerank_rank
+                        if s.gold_full_rerank_rank is not None
+                        else "not_found"
+                    ),
+                    "retrieval_candidates": s.retrieval_candidates,
+                    "reranked_candidates": s.reranked_candidates,
+                    "gold_positions": s.gold_positions,
                 }
                 for s in scores
             ],

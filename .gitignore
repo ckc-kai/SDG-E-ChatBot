@@ -20,3 +20,5 @@ config/config.yaml
 
 # secrets
 .env
+
+.tests
