@@ -12,7 +12,10 @@ Metrics (averaged over all questions, and broken down by difficulty / type):
 
 Gold chunks are resolved by the stable key (source_pdf, page_start, chunk_index)
 carried in each row's `evidence`, NOT by the serial `gold_chunk_ids`, so the eval
-survives a re-ingest that renumbers ids.
+survives a re-ingest that renumbers ids. Rows may additionally define
+`evidence_groups`: each outer item is required evidence, while the chunks inside
+that item are interchangeable alternatives. Legacy `evidence` rows are treated
+as one required group per evidence item.
 
 Duplicate-aware matching ("credit identical twins"): the corpus contains
 byte-identical duplicate documents (e.g. the two SDG&E WMP Decision PDFs), so a
@@ -101,52 +104,87 @@ class GoldNotFoundError(Exception):
     """
 
 
-def gold_signatures(conn, evidence: list[dict]) -> tuple[set[int], set[str]]:
-    """Resolve gold chunks by the stable key (source_pdf, page_start, chunk_index).
+GoldGroup = tuple[set[int], set[str]]
+
+
+def _row_evidence_groups(row: dict) -> list[list[dict]]:
+    """Return required evidence groups, preserving legacy row semantics."""
+    if "evidence_groups" not in row:
+        return [[evidence] for evidence in row["evidence"]]
+
+    groups = row["evidence_groups"]
+    if not groups or any(not isinstance(group, list) or not group for group in groups):
+        raise ValueError(
+            f"{row.get('id', '<unknown>')}: evidence_groups must contain non-empty lists"
+        )
+    return groups
+
+
+def gold_signatures(conn, row: dict) -> list[GoldGroup]:
+    """Resolve required gold groups by stable chunk keys.
 
     Keyed on the UNIQUE (document, page_start, chunk_index) tuple rather than the
     serial ``gold_chunk_ids`` so the eval survives a re-ingest that renumbers ids.
-    Returns the resolved gold chunk id set plus the set of normalized gold contents
-    (the latter powers credit-twins matching against byte-identical duplicate docs).
+    Each returned group contains the ids and normalized contents of interchangeable
+    alternatives. Normalized contents also power matching against byte-identical
+    duplicate documents.
     """
-    ids: set[int] = set()
-    contents: set[str] = set()
+    resolved_groups: list[GoldGroup] = []
     with conn.cursor() as cur:
-        for e in evidence:
-            cur.execute(
-                """
-                SELECT c.id, c.content
-                FROM chunks c JOIN documents d ON d.id = c.document_id
-                WHERE d.filename = %s AND c.page_start = %s AND c.chunk_index = %s
-                """,
-                (e["source_pdf"], e["page_start_db"], e["chunk_index"]),
-            )
-            row = cur.fetchone()
-            if row is None:
-                raise GoldNotFoundError(
-                    "gold chunk not found by stable key "
-                    f"(source_pdf={e['source_pdf']!r}, page_start={e['page_start_db']}, "
-                    f"chunk_index={e['chunk_index']})"
+        for group in _row_evidence_groups(row):
+            ids: set[int] = set()
+            contents: set[str] = set()
+            for evidence in group:
+                cur.execute(
+                    """
+                    SELECT c.id, c.content
+                    FROM chunks c JOIN documents d ON d.id = c.document_id
+                    WHERE d.filename = %s AND c.page_start = %s AND c.chunk_index = %s
+                    """,
+                    (
+                        evidence["source_pdf"],
+                        evidence["page_start_db"],
+                        evidence["chunk_index"],
+                    ),
                 )
-            ids.add(row[0])
-            contents.add(normalize(row[1]))
-    return ids, contents
+                resolved = cur.fetchone()
+                if resolved is None:
+                    raise GoldNotFoundError(
+                        "gold chunk not found by stable key "
+                        f"(source_pdf={evidence['source_pdf']!r}, "
+                        f"page_start={evidence['page_start_db']}, "
+                        f"chunk_index={evidence['chunk_index']})"
+                    )
+                ids.add(resolved[0])
+                contents.add(normalize(resolved[1]))
+            resolved_groups.append((ids, contents))
+    return resolved_groups
 
 
-def _distinct_gold_hits(ranked, gold_ids: set[int], gold_contents: set[str]) -> list[bool]:
-    """Per-rank flag that is True only the FIRST time each distinct gold item is seen.
+def _matches_gold_group(candidate: QueryObject | RankedResult, group: GoldGroup) -> bool:
+    query_object = _candidate_query_object(candidate)
+    ids, contents = group
+    return query_object.chunk_id in ids or normalize(query_object.content) in contents
 
-    Prevents a duplicate twin (identical content, different id) from being counted
-    as a second, separate gold hit.
+
+def _distinct_gold_hits(ranked, gold_groups: list[GoldGroup]) -> list[bool]:
+    """Flag the first ranked result that satisfies each required evidence group.
+
+    Alternative chunks and byte-identical twins satisfy the same group only once.
     """
-    credited: set[str] = set()
+    credited_groups: set[int] = set()
     flags: list[bool] = []
     for result in ranked:
-        qo = result.query_object
-        signature = normalize(qo.content)
-        is_gold = qo.chunk_id in gold_ids or signature in gold_contents
-        if is_gold and signature not in credited:
-            credited.add(signature)
+        matching_group = next(
+            (
+                index
+                for index, group in enumerate(gold_groups)
+                if index not in credited_groups and _matches_gold_group(result, group)
+            ),
+            None,
+        )
+        if matching_group is not None:
+            credited_groups.add(matching_group)
             flags.append(True)
         else:
             flags.append(False)
@@ -197,17 +235,18 @@ def _is_gold_candidate(
     return query_object.chunk_id in gold_ids or normalize(query_object.content) in gold_contents
 
 
-def _position_for_gold_content(
-    candidates: list[QueryObject] | list[RankedResult], gold_content: str
+def _position_for_gold_group(
+    candidates: list[QueryObject] | list[RankedResult], gold_group: GoldGroup
 ) -> int | str:
     for position, candidate in enumerate(candidates, start=1):
-        if normalize(_candidate_query_object(candidate).content) == gold_content:
+        if _matches_gold_group(candidate, gold_group):
             return position
     return "not_found"
 
 
 def _candidate_position_details(
     diagnostics,
+    gold_groups: list[GoldGroup],
     gold_ids: set[int],
     gold_contents: set[str],
 ) -> tuple[list[dict], list[dict], list[dict]]:
@@ -246,11 +285,11 @@ def _candidate_position_details(
     ]
 
     gold_positions: list[dict] = []
-    for gold_index, gold_content in enumerate(sorted(gold_contents), start=1):
+    for gold_index, gold_group in enumerate(gold_groups, start=1):
         retrieval_positions = [
             {
                 "search_query_index": query_index,
-                "position": _position_for_gold_content(candidates, gold_content),
+                "position": _position_for_gold_group(candidates, gold_group),
             }
             for query_index, candidates in enumerate(diagnostics.candidate_sets, start=1)
         ]
@@ -262,10 +301,11 @@ def _candidate_position_details(
         gold_positions.append(
             {
                 "gold_item": gold_index,
+                "alternative_count": len(gold_group[0]),
                 "retrieval_positions": retrieval_positions,
                 "best_retrieval_position": min(found_positions) if found_positions else "not_found",
-                "rerank_position": _position_for_gold_content(
-                    diagnostics.reranked_candidates, gold_content
+                "rerank_position": _position_for_gold_group(
+                    diagnostics.reranked_candidates, gold_group
                 ),
             }
         )
@@ -282,8 +322,10 @@ def score_row(
     retrieval_top_k: int = RETRIEVAL_TOP_K,
     rerank_top_k: int = RERANK_TOP_K,
 ) -> QueryScore:
-    gold_ids, gold_contents = gold_signatures(conn, row["evidence"])
-    num_gold = len(gold_contents)  # distinct gold items (twins collapse to one)
+    gold_groups = gold_signatures(conn, row)
+    gold_ids = set().union(*(ids for ids, _ in gold_groups))
+    gold_contents = set().union(*(contents for _, contents in gold_groups))
+    num_gold = len(gold_groups)
 
     calls_before = get_rewrite_call_count()
     ranked, diagnostics = retrieve_with_diagnostics(
@@ -306,7 +348,7 @@ def score_row(
     elif trace["source"] == "fallback":
         print(f"  [rewrite] {row['id']}: API call FAILED ({trace.get('error')}), used original question")
 
-    flags = _distinct_gold_hits(ranked, gold_ids, gold_contents)
+    flags = _distinct_gold_hits(ranked, gold_groups)
     cutoff_metrics = {
         cutoff: _metrics_at_cutoff(flags, num_gold, cutoff)
         for cutoff in cutoffs
@@ -327,7 +369,7 @@ def score_row(
     first_rank = next((i for i, flag in enumerate(primary_flags, start=1) if flag), None)
     primary_metrics = cutoff_metrics[k]
     retrieval_candidates, reranked_candidates, gold_positions = _candidate_position_details(
-        diagnostics, gold_ids, gold_contents
+        diagnostics, gold_groups, gold_ids, gold_contents
     )
 
     return QueryScore(
