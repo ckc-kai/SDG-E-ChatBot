@@ -1,0 +1,25 @@
+local:
+  db:
+    host: localhost
+    port: 5433
+    dbname: postgres
+    user: postgres
+    password: change-me
+  embedding:
+    model: BAAI/bge-base-en-v1.5
+    dimensions: 768
+    max_tokens_per_chunk: 400
+    minimum_chunk_chars: 20
+    token_overlap: 50
+  rerank:
+    model: BAAI/bge-reranker-base
+  query_rewrite:
+    model: claude-haiku-4-5-20251001
+    mode: auto
+    max_subquestions: 2
+  retrieval:
+    embedding_mode: hybrid
+    hybrid_pool_mode: union
+    retrieval_top_k: 30
+    rerank_top_k: 10
+    rrf_k: 60

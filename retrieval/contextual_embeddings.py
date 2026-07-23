@@ -1,4 +1,4 @@
-"""Shared contextual-document formatting for embedding ingestion and backfill."""
+"""Contextual-document formatting shared by ingestion and in-place refresh."""
 
 from __future__ import annotations
 

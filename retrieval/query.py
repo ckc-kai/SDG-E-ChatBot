@@ -261,7 +261,7 @@ def _validate_embedding_mode(conn, embedding_mode: str) -> str:
         if incomplete:
             raise RuntimeError(
                 f"Contextual embeddings are missing or stale for {incomplete} chunk(s). "
-                "Run `uv run python -m retrieval.backfill_contextual_embeddings` first."
+                "Run `uv run python -m retrieval.ingest` to refresh them in place."
             )
     return _EMBEDDING_COLUMNS[embedding_mode]
 
@@ -547,7 +547,8 @@ def main() -> None:
         default=DEFAULT_HYBRID_POOL_MODE,
         help=(
             "How hybrid mode builds the reranker pool: fixed-size RRF or a "
-            "raw-preserving deduplicated union (default: rrf)."
+            "raw-preserving deduplicated union "
+            f"(default: {DEFAULT_HYBRID_POOL_MODE})."
         ),
     )
     parser.add_argument(

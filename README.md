@@ -1,114 +1,152 @@
-# SDG-E-ChatBot
-Capstone Project
+# SDG&E WMP Text Retrieval
 
-## A2: contextual embedding ablation
+This project retrieves supporting text from SDG&E Wildfire Mitigation Plan
+(WMP) PDFs. It uses PostgreSQL with pgvector, BGE embeddings, and a cross-encoder
+reranker.
 
-The contextual experiment preserves the existing chunks and raw embeddings. It
-adds an embedding-only representation with this format:
+The accepted retrieval pipeline is the raw-preserving hybrid union:
 
 ```text
-Document: <source PDF filename>
-Section: <full breadcrumb>
-Chunk: <stored chunk content>
+question
+   ├─ raw embedding search ───────── top 30 ──┐
+   └─ contextual embedding search ─ top 30 ──┤
+                                              ├─ deduplicated union
+                                              └─ BGE reranker ── top 10
 ```
 
-The stored/displayed chunk content is unchanged. The default retrieval mode is
-still `raw`. If the complete contextual input would exceed the embedding
-model's token limit, the supplementary `Document:` line is omitted for that
-chunk; the full breadcrumb and complete chunk content are preserved.
+All raw candidates are retained. Candidates found only by contextual retrieval
+are appended before the combined pool is reranked. This prevents the contextual
+channel from evicting strong raw candidates while preserving its complementary
+recall.
 
-### 1. Add the columns and backfill existing chunks
+## Current models
 
-The backfill performs the schema migration automatically and updates chunks in
-place; it does not re-ingest PDFs or change chunk ids.
+- Embedding: `BAAI/bge-base-en-v1.5`
+- Reranker: `BAAI/bge-reranker-base`
+- Vector dimensions: 768
+- Raw candidates per query: 30
+- Contextual candidates per query: 30
+- Final reranked results: 10
+
+Each stored chunk has two embeddings:
+
+1. **Raw embedding** — the stored chunk content.
+2. **Contextual embedding** — an embedding-only representation:
+
+   ```text
+   Document: <source PDF filename>
+   Section: <full breadcrumb>
+   Chunk: <stored chunk content>
+   ```
+
+The stored/displayed content is not modified. If the complete contextual input
+exceeds the embedding model limit, only the supplementary `Document:` line is
+removed; the full breadcrumb and chunk content are preserved.
+
+## Evaluation result
+
+The accepted system was evaluated on the 150-question natural dataset:
+
+`eval/pdf/results/2026-07-23-a3b-hybrid-union-natural.json`
+
+| Metric | Score |
+|---|---:|
+| Hit@1 | 0.8533 |
+| Recall@5 | 0.9400 |
+| MRR@5 | 0.8919 |
+| nDCG@5 | 0.9006 |
+| Recall@10 | 0.9633 |
+| MRR@10 | 0.8945 |
+| nDCG@10 | 0.9084 |
+
+The deduplicated reranker pool contained 32–53 chunks per question, with a mean
+of 41.83. Candidate generation missed gold evidence for 3 questions, and the
+reranker missed gold evidence in its top 10 for 2 additional questions.
+
+Historical ablation outputs remain under `eval/pdf/results/` for reproducibility,
+but they are not part of the supported retrieval workflow.
+
+## Setup
+
+Requirements:
+
+- Python 3.12+
+- [`uv`](https://docs.astral.sh/uv/)
+- PostgreSQL with the pgvector extension
+
+Install the Python dependencies:
 
 ```bash
-uv run python -m retrieval.backfill_contextual_embeddings
+uv sync
 ```
 
-The command is resumable. It skips rows already generated with the configured
-embedding model and contextual-format recipe. Use `--force` only when you
-intentionally want to rebuild every contextual vector.
-
-### 2. Run the contextual evaluation
+Create a local configuration:
 
 ```bash
-uv run python -m eval.run_eval \
-  --eval eval/pdf/evaluation_natural.jsonl \
-  --embedding-mode contextual \
-  --rewrite-mode off \
-  --retrieval-top-k 30 \
-  --metric-k 10 \
-  --out eval/pdf/results/2026-07-22-a2-contextual-off-metric10-candidates30.json \
-  --misses
+cp config/config.example.yaml config/config.yaml
 ```
 
-This is directly comparable to the corrected raw baseline:
+Update the database credentials in `config/config.yaml`. If automatic query
+decomposition is enabled, also copy `.env.example` to `.env` and provide an
+Anthropic API key.
 
-`eval/pdf/results/2026-07-22-off-metric10-candidates30-label-audit.json`
+Place the source PDFs in:
 
-To rerun the raw control with the current code, use the same command with
-`--embedding-mode raw` and a different output filename.
+```text
+resources/wmp/pdf/
+```
 
-### 3. Try a single contextual query
+The `resources/` directory and local configuration are intentionally ignored by
+Git.
+
+## Ingest PDFs
+
+Run:
+
+```bash
+uv run python -m retrieval.ingest
+```
+
+Ingestion now performs the complete database preparation and embedding workflow:
+
+1. Creates or updates the PostgreSQL/pgvector schema.
+2. Extracts bookmark-based leaf sections from each PDF.
+3. Builds stable, overlapping token chunks.
+4. Generates both raw and contextual embeddings.
+5. Stores both vectors with the chunk in one transaction.
+
+No separate contextual-embedding backfill command is required:
+
+- New or changed PDFs are chunked and receive both embeddings.
+- Unchanged PDFs with current embeddings are skipped.
+- Unchanged PDFs with missing or stale contextual embeddings are updated in
+  place without deleting chunks or changing chunk IDs.
+
+## Query
+
+The example configuration selects the accepted hybrid-union pipeline by
+default:
 
 ```bash
 uv run python -m retrieval.query \
-  --embedding-mode contextual \
   "What is the purpose of the WiNGS-Planning model?"
 ```
 
-## A3: raw + contextual RRF ablation
-
-Hybrid mode retrieves the configured candidate count independently from the raw
-and contextual columns, combines their ranks with reciprocal-rank fusion, keeps
-the same configured candidate count, and sends that fixed-size pool to the
-existing reranker:
-
-```text
-raw top 30 --------\
-                    RRF (k=60) -> fused top 30 -> existing reranker
-contextual top 30 -/
-```
-
-Run the A3 evaluation with:
+The equivalent explicit command is:
 
 ```bash
-uv run python -m eval.run_eval \
-  --eval eval/pdf/evaluation_natural.jsonl \
+uv run python -m retrieval.query \
   --embedding-mode hybrid \
-  --rrf-k 60 \
-  --rewrite-mode off \
-  --retrieval-top-k 30 \
-  --rerank-top-k 10 \
-  --metric-k 10 \
-  --out eval/pdf/results/2026-07-22-a3-hybrid-rrf60.json \
-  --misses
+  --hybrid-pool-mode union \
+  "What is the purpose of the WiNGS-Planning model?"
 ```
 
-The output records the fused candidate ids in `vector_candidate_ids` and the
-underlying raw/contextual rankings in `channel_candidate_ids`.
+Automatic query decomposition is controlled by `query_rewrite.mode` in
+`config/config.yaml`. Use `off` when reproducing the accepted evaluation.
 
-## A3b: raw-preserving contextual union
+## Reproduce the accepted evaluation
 
-A3b keeps all 30 candidates from the champion raw channel, appends candidates
-that appear only in the contextual top 30, deduplicates by chunk id, and sends
-the resulting pool to the existing reranker:
-
-```text
-raw top 30 --------------------\
-                                deduplicated union (up to 60) -> existing reranker
-contextual-only from top 30 ---/
-```
-
-Unlike A3's fixed-size equal-weight RRF, contextual retrieval cannot evict a
-raw candidate. The only experimental change from A3 is the hybrid candidate
-pool policy; embeddings, query rewriting, and reranker model remain unchanged.
-`--retrieval-top-k 30` applies independently to each channel, while
-`--rerank-top-k 10` controls the final returned ranking rather than the number
-of candidates scored by the reranker.
-
-Run A3b on the natural dataset with:
+The full evaluation is intentionally run manually:
 
 ```bash
 uv run python -m eval.run_eval \
@@ -119,10 +157,38 @@ uv run python -m eval.run_eval \
   --retrieval-top-k 30 \
   --rerank-top-k 10 \
   --metric-k 10 \
-  --out eval/pdf/results/2026-07-23-a3b-hybrid-union-natural.json \
+  --out eval/pdf/results/a3b-hybrid-union-natural-recheck.json \
   --misses
 ```
 
-The result diagnostics include the hybrid pool mode and the minimum, maximum,
-and mean deduplicated reranker-pool sizes. A3 remains reproducible because
-`--hybrid-pool-mode rrf` is still the default.
+## Tests
+
+```bash
+uv run python -m unittest discover -s tests
+```
+
+## Project layout
+
+```text
+config/
+  config.example.yaml       Reproducible non-secret configuration template
+eval/
+  pdf/evaluation_natural.jsonl
+  pdf/results/              Evaluation artifacts
+  run_eval.py               Retrieval evaluation harness
+retrieval/
+  contextual_embeddings.py Contextual embedding input recipe
+  ingest.py                 Schema setup, chunking, and both embeddings
+  query.py                  Hybrid retrieval, union pooling, and reranking
+  setup_db.py               PostgreSQL/pgvector schema
+  utils.py                  Configuration, database, and model loaders
+tests/
+  test_ingest_contextual_embeddings.py
+  test_query_fusion.py
+```
+
+## Current scope
+
+The system evaluates text retrieval only. Tables, charts, figures, and
+structure-aware extraction are deferred; PDF text from those elements may be
+flattened into narrative chunks.

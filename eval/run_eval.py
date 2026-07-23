@@ -559,7 +559,8 @@ def main() -> None:
         default=DEFAULT_HYBRID_POOL_MODE,
         help=(
             "How hybrid mode builds the reranker pool: fixed-size RRF or a "
-            "raw-preserving deduplicated union (default: rrf)."
+            "raw-preserving deduplicated union "
+            f"(default: {DEFAULT_HYBRID_POOL_MODE})."
         ),
     )
     parser.add_argument(

@@ -72,6 +72,7 @@ from retrieval.contextual_embeddings import (
     contextual_embedding_text_for_model,
 )
 from retrieval.failure_log import get_failure_logger
+from retrieval.setup_db import setup_database
 from retrieval.utils import connect_db, get_embedding_model, load_config
 
 logger = logging.getLogger(__name__)
@@ -371,6 +372,29 @@ def _existing_document(cur, filename: str) -> tuple[int, str] | None:
     return (row[0], row[1]) if row else None
 
 
+def _contextual_embeddings_need_refresh(cur, document_id: int) -> bool:
+    cur.execute(
+        """
+        SELECT EXISTS (
+            SELECT 1
+            FROM chunks
+            WHERE document_id = %s
+              AND (
+                  contextual_embedding IS NULL
+                  OR contextual_embedding_model IS DISTINCT FROM %s
+                  OR contextual_embedding_recipe IS DISTINCT FROM %s
+              )
+        )
+        """,
+        (
+            document_id,
+            EMBEDDING_MODEL_NAME,
+            CONTEXTUAL_EMBEDDING_RECIPE,
+        ),
+    )
+    return bool(cur.fetchone()[0])
+
+
 def upsert_document(cur, filename: str, page_count: int, content_hash: str) -> int:
     cur.execute(
         """
@@ -468,12 +492,103 @@ def embed_contextual_chunks(
     return [embedding.tolist() for embedding in embeddings]
 
 
+def refresh_contextual_embeddings(
+    conn,
+    document_id: int,
+    source_pdf: str,
+    model: SentenceTransformer,
+) -> int:
+    """Populate missing or stale contextual vectors without rebuilding chunks."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id, breadcrumb, content
+            FROM chunks
+            WHERE document_id = %s
+              AND (
+                  contextual_embedding IS NULL
+                  OR contextual_embedding_model IS DISTINCT FROM %s
+                  OR contextual_embedding_recipe IS DISTINCT FROM %s
+              )
+            ORDER BY id
+            """,
+            (
+                document_id,
+                EMBEDDING_MODEL_NAME,
+                CONTEXTUAL_EMBEDDING_RECIPE,
+            ),
+        )
+        rows = cur.fetchall()
+
+    if not rows:
+        return 0
+
+    contextual_texts = [
+        contextual_embedding_text_for_model(
+            source_pdf,
+            breadcrumb,
+            content,
+            model.tokenizer,
+            model.max_seq_length,
+        )
+        for _, breadcrumb, content in rows
+    ]
+    embeddings = model.encode(
+        contextual_texts,
+        normalize_embeddings=True,
+        show_progress_bar=True,
+    )
+    values = [
+        (
+            chunk_id,
+            EMBEDDING_MODEL_NAME,
+            CONTEXTUAL_EMBEDDING_RECIPE,
+            embedding.tolist(),
+        )
+        for (chunk_id, *_), embedding in zip(rows, embeddings, strict=True)
+    ]
+    with conn.cursor() as cur:
+        execute_values(
+            cur,
+            """
+            UPDATE chunks AS c
+            SET contextual_embedding_model = data.embedding_model,
+                contextual_embedding_recipe = data.embedding_recipe,
+                contextual_embedding = data.embedding
+            FROM (VALUES %s) AS data(id, embedding_model, embedding_recipe, embedding)
+            WHERE c.id = data.id
+            """,
+            values,
+            template="(%s, %s, %s, %s::vector)",
+        )
+    return len(values)
+
+
 def ingest_pdf(pdf_path: Path, conn, model: SentenceTransformer) -> None:
     content_hash = hash_file(pdf_path)
     with conn.cursor() as cur:
         existing = _existing_document(cur, pdf_path.name)
+        contextual_refresh_needed = (
+            bool(existing)
+            and existing[1] == content_hash
+            and _contextual_embeddings_need_refresh(cur, existing[0])
+        )
     if existing and existing[1] == content_hash:
-        logger.info("Skipping %s (unchanged)", pdf_path.name)
+        if not contextual_refresh_needed:
+            logger.info("Skipping %s (unchanged and embeddings current)", pdf_path.name)
+            return
+        updated = refresh_contextual_embeddings(
+            conn,
+            existing[0],
+            pdf_path.name,
+            model,
+        )
+        conn.commit()
+        logger.info(
+            "Updated %d contextual embedding(s) for unchanged %s",
+            updated,
+            pdf_path.name,
+        )
         return
 
     reader = pypdf.PdfReader(pdf_path)
@@ -506,6 +621,7 @@ def main() -> None:
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
+    setup_database()
     model = get_embedding_model()
     conn = connect_db()
     try:
