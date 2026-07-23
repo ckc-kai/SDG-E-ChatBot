@@ -4,9 +4,9 @@ import psycopg2
 
 from retrieval.utils import DB_CONFIG, load_config
 
-# TODO: Switching embedding models (e.g. to an AWS-hosted model later) changes
-# config.yaml's local.embedding.dimensions and requires recreating the
-# `embedding` column plus its index and re-ingesting every document.
+# Switching embedding models with a different dimension requires migrating both
+# vector columns. Contextual embeddings use the same model and dimensions as raw
+# content embeddings so the two retrieval modes remain a controlled ablation.
 EMBEDDING_DIMENSIONS = load_config()["local"]["embedding"]["dimensions"]
 
 
@@ -49,9 +49,28 @@ def setup_database() -> None:
                     token_count int NOT NULL,
                     embedding_model text NOT NULL,
                     embedding vector({EMBEDDING_DIMENSIONS}) NOT NULL,
+                    contextual_embedding_model text,
+                    contextual_embedding_recipe text,
+                    contextual_embedding vector({EMBEDDING_DIMENSIONS}),
                     created_at timestamptz NOT NULL DEFAULT now(),
                     UNIQUE (document_id, page_start, chunk_index)
                 );
+                """
+            )
+
+            # CREATE TABLE IF NOT EXISTS does not add columns to an existing
+            # installation. These ALTERs are intentionally nullable so schema
+            # migration does not require re-ingesting or renumbering chunks.
+            cur.execute(
+                "ALTER TABLE chunks ADD COLUMN IF NOT EXISTS contextual_embedding_model text;"
+            )
+            cur.execute(
+                "ALTER TABLE chunks ADD COLUMN IF NOT EXISTS contextual_embedding_recipe text;"
+            )
+            cur.execute(
+                f"""
+                ALTER TABLE chunks
+                ADD COLUMN IF NOT EXISTS contextual_embedding vector({EMBEDDING_DIMENSIONS});
                 """
             )
 
@@ -59,6 +78,13 @@ def setup_database() -> None:
                 """
                 CREATE INDEX IF NOT EXISTS chunks_embedding_hnsw_idx
                 ON chunks USING hnsw (embedding vector_cosine_ops);
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS chunks_contextual_embedding_hnsw_idx
+                ON chunks USING hnsw (contextual_embedding vector_cosine_ops)
+                WHERE contextual_embedding IS NOT NULL;
                 """
             )
         conn.commit()

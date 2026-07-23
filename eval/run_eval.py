@@ -38,9 +38,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from retrieval.query import (
+    DEFAULT_EMBEDDING_MODE,
+    DEFAULT_HYBRID_POOL_MODE,
+    EMBEDDING_MODES,
+    HYBRID_POOL_MODES,
     QUERY_REWRITE_MODE,
     RERANK_TOP_K,
     RETRIEVAL_TOP_K,
+    RRF_K,
     QueryObject,
     RankedResult,
     get_last_rewrite_trace,
@@ -76,6 +81,7 @@ class QueryScore:
     rewrite_reason: str
     search_queries: list[str]
     vector_candidate_ids: list[list[int]]
+    channel_candidate_ids: list[dict[str, list[int]]]
     pooled_candidate_ids: list[int]
     gold_best_vector_rank: int | None
     gold_full_rerank_rank: int | None
@@ -263,6 +269,7 @@ def _candidate_position_details(
                     "section_number": candidate.section_number,
                     "chunk_index": candidate.chunk_index,
                     "distance": float(candidate.distance),
+                    "retrieval_score": candidate.retrieval_score,
                     "is_gold": _is_gold_candidate(candidate, gold_ids, gold_contents),
                 }
                 for position, candidate in enumerate(candidates, start=1)
@@ -279,6 +286,7 @@ def _candidate_position_details(
             "section_number": result.query_object.section_number,
             "chunk_index": result.query_object.chunk_index,
             "rerank_score": float(result.rerank_score),
+            "retrieval_score": result.query_object.retrieval_score,
             "is_gold": _is_gold_candidate(result, gold_ids, gold_contents),
         }
         for position, result in enumerate(diagnostics.reranked_candidates, start=1)
@@ -321,6 +329,9 @@ def score_row(
     rewrite_mode: str = QUERY_REWRITE_MODE,
     retrieval_top_k: int = RETRIEVAL_TOP_K,
     rerank_top_k: int = RERANK_TOP_K,
+    embedding_mode: str = DEFAULT_EMBEDDING_MODE,
+    rrf_k: int = RRF_K,
+    hybrid_pool_mode: str = DEFAULT_HYBRID_POOL_MODE,
 ) -> QueryScore:
     gold_groups = gold_signatures(conn, row)
     gold_ids = set().union(*(ids for ids, _ in gold_groups))
@@ -334,6 +345,9 @@ def score_row(
         rewrite_mode=rewrite_mode,
         retrieval_top_k=retrieval_top_k,
         rerank_top_k=rerank_top_k,
+        embedding_mode=embedding_mode,
+        rrf_k=rrf_k,
+        hybrid_pool_mode=hybrid_pool_mode,
     )
     cutoffs = sorted(set(metric_cutoffs or []) | {k})
     ranked = ranked[:max(cutoffs)]
@@ -390,6 +404,13 @@ def score_row(
         vector_candidate_ids=[
             [candidate.chunk_id for candidate in candidates]
             for candidates in diagnostics.candidate_sets
+        ],
+        channel_candidate_ids=[
+            {
+                channel: [candidate.chunk_id for candidate in candidates]
+                for channel, candidates in channels.items()
+            }
+            for channels in diagnostics.channel_candidate_sets
         ],
         pooled_candidate_ids=[candidate.chunk_id for candidate in diagnostics.pooled_candidates],
         gold_best_vector_rank=gold_best_vector_rank,
@@ -527,6 +548,27 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--embedding-mode",
+        choices=EMBEDDING_MODES,
+        default=DEFAULT_EMBEDDING_MODE,
+        help="Dense retrieval strategy: raw, contextual, or hybrid.",
+    )
+    parser.add_argument(
+        "--hybrid-pool-mode",
+        choices=HYBRID_POOL_MODES,
+        default=DEFAULT_HYBRID_POOL_MODE,
+        help=(
+            "How hybrid mode builds the reranker pool: fixed-size RRF or a "
+            "raw-preserving deduplicated union (default: rrf)."
+        ),
+    )
+    parser.add_argument(
+        "--rrf-k",
+        type=int,
+        default=RRF_K,
+        help="Reciprocal-rank-fusion constant used by hybrid mode (default: 60).",
+    )
+    parser.add_argument(
         "--rerank-top-k",
         type=int,
         default=None,
@@ -540,6 +582,8 @@ def main() -> None:
         parser.error("--metric-k must be positive")
     if args.retrieval_top_k < 1:
         parser.error("--retrieval-top-k must be positive")
+    if args.rrf_k < 1:
+        parser.error("--rrf-k must be positive")
     metric_cutoffs = sorted({DEFAULT_K, args.k})
     rerank_top_k = (
         max(RERANK_TOP_K, max(metric_cutoffs))
@@ -553,8 +597,11 @@ def main() -> None:
 
     print(
         "EVAL CUTOFFS: "
-        f"metric_cutoffs={metric_cutoffs}, retrieval_top_k={args.retrieval_top_k}, "
-        f"rerank_top_k={rerank_top_k}"
+        f"embedding_mode={args.embedding_mode}, "
+        f"hybrid_pool_mode={args.hybrid_pool_mode}, "
+        f"metric_cutoffs={metric_cutoffs}, "
+        f"retrieval_top_k={args.retrieval_top_k}, "
+        f"rerank_top_k={rerank_top_k}, rrf_k={args.rrf_k}"
     )
 
     rows = load_eval(args.eval)
@@ -574,6 +621,9 @@ def main() -> None:
                         rewrite_mode=args.rewrite_mode,
                         retrieval_top_k=args.retrieval_top_k,
                         rerank_top_k=rerank_top_k,
+                        embedding_mode=args.embedding_mode,
+                        rrf_k=args.rrf_k,
+                        hybrid_pool_mode=args.hybrid_pool_mode,
                     )
                 )
             except GoldNotFoundError as exc:
@@ -600,9 +650,29 @@ def main() -> None:
             "retrieval_diagnostics": {
                 "metric_k": args.k,
                 "metric_cutoffs": metric_cutoffs,
+                "embedding_mode": args.embedding_mode,
+                "hybrid_pool_mode": args.hybrid_pool_mode,
+                "rrf_k": args.rrf_k,
                 "rewrite_mode": args.rewrite_mode,
                 "retrieval_top_k": args.retrieval_top_k,
                 "rerank_top_k": rerank_top_k,
+                "candidate_pool_size_min": min(
+                    (len(s.pooled_candidate_ids) for s in scores),
+                    default=0,
+                ),
+                "candidate_pool_size_max": max(
+                    (len(s.pooled_candidate_ids) for s in scores),
+                    default=0,
+                ),
+                "candidate_pool_size_mean": round(
+                    (
+                        sum(len(s.pooled_candidate_ids) for s in scores)
+                        / len(scores)
+                        if scores
+                        else 0.0
+                    ),
+                    2,
+                ),
                 "candidate_generation_misses": sum(
                     1 for s in scores if s.gold_best_vector_rank is None
                 ),
@@ -652,6 +722,7 @@ def main() -> None:
                     "sub_questions": s.search_queries,
                     "search_queries": s.search_queries,
                     "vector_candidate_ids": s.vector_candidate_ids,
+                    "channel_candidate_ids": s.channel_candidate_ids,
                     "pooled_candidate_ids": s.pooled_candidate_ids,
                     "gold_best_vector_rank": (
                         s.gold_best_vector_rank

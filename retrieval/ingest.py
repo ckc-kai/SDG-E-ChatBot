@@ -67,6 +67,10 @@ from psycopg2.extras import execute_values
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
 
+from retrieval.contextual_embeddings import (
+    CONTEXTUAL_EMBEDDING_RECIPE,
+    contextual_embedding_text_for_model,
+)
 from retrieval.failure_log import get_failure_logger
 from retrieval.utils import connect_db, get_embedding_model, load_config
 
@@ -383,7 +387,13 @@ def upsert_document(cur, filename: str, page_count: int, content_hash: str) -> i
     return cur.fetchone()[0]
 
 
-def replace_chunks(cur, document_id: int, chunks: Sequence[Chunk], embeddings: Sequence[Sequence[float]]) -> None:
+def replace_chunks(
+    cur,
+    document_id: int,
+    chunks: Sequence[Chunk],
+    raw_embeddings: Sequence[Sequence[float]],
+    contextual_embeddings: Sequence[Sequence[float]],
+) -> None:
     cur.execute("DELETE FROM chunks WHERE document_id = %s", (document_id,))
     if not chunks:
         return
@@ -401,9 +411,14 @@ def replace_chunks(cur, document_id: int, chunks: Sequence[Chunk], embeddings: S
             chunk.content,
             chunk.token_count,
             EMBEDDING_MODEL_NAME,
-            list(embedding),
+            list(raw_embedding),
+            EMBEDDING_MODEL_NAME,
+            CONTEXTUAL_EMBEDDING_RECIPE,
+            list(contextual_embedding),
         )
-        for chunk, embedding in zip(chunks, embeddings)
+        for chunk, raw_embedding, contextual_embedding in zip(
+            chunks, raw_embeddings, contextual_embeddings, strict=True
+        )
     ]
     execute_values(
         cur,
@@ -411,7 +426,9 @@ def replace_chunks(cur, document_id: int, chunks: Sequence[Chunk], embeddings: S
         INSERT INTO chunks (
             document_id, sub_document, breadcrumb, section_number,
             page_start, page_end, chunk_index, content_type,
-            content, token_count, embedding_model, embedding
+            content, token_count, embedding_model, embedding,
+            contextual_embedding_model, contextual_embedding_recipe,
+            contextual_embedding
         ) VALUES %s
         """,
         rows,
@@ -429,6 +446,28 @@ def embed_chunks(model: SentenceTransformer, chunks: Sequence[Chunk]) -> list[li
     return [embedding.tolist() for embedding in embeddings]
 
 
+def embed_contextual_chunks(
+    model: SentenceTransformer, chunks: Sequence[Chunk]
+) -> list[list[float]]:
+    if not chunks:
+        return []
+    embeddings = model.encode(
+        [
+            contextual_embedding_text_for_model(
+                chunk.source_pdf,
+                chunk.breadcrumb,
+                chunk.content,
+                model.tokenizer,
+                model.max_seq_length,
+            )
+            for chunk in chunks
+        ],
+        normalize_embeddings=True,
+        show_progress_bar=True,
+    )
+    return [embedding.tolist() for embedding in embeddings]
+
+
 def ingest_pdf(pdf_path: Path, conn, model: SentenceTransformer) -> None:
     content_hash = hash_file(pdf_path)
     with conn.cursor() as cur:
@@ -439,11 +478,18 @@ def ingest_pdf(pdf_path: Path, conn, model: SentenceTransformer) -> None:
 
     reader = pypdf.PdfReader(pdf_path)
     chunks = build_chunks(pdf_path, reader, model.tokenizer)
-    embeddings = embed_chunks(model, chunks)
+    raw_embeddings = embed_chunks(model, chunks)
+    contextual_embeddings = embed_contextual_chunks(model, chunks)
 
     with conn.cursor() as cur:
         document_id = upsert_document(cur, pdf_path.name, len(reader.pages), content_hash)
-        replace_chunks(cur, document_id, chunks, embeddings)
+        replace_chunks(
+            cur,
+            document_id,
+            chunks,
+            raw_embeddings,
+            contextual_embeddings,
+        )
     conn.commit()
     logger.info("Ingested %s: %d chunks", pdf_path.name, len(chunks))
 
