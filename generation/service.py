@@ -9,7 +9,7 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
-from generation.citation_validation import validate_and_hydrate_citations
+from generation.citation_validation import CitationValidationError, validate_and_hydrate_citations
 from generation.prompting import build_prompt
 from generation.providers.base import ModelProvider, ProviderError
 from generation.schemas import AnswerRequest, AnswerResponse, ErrorResponse, ModelAnswer
@@ -72,12 +72,18 @@ class AnswerService:
         prompt = build_prompt(request)
         try:
             model_answer = parse_model_answer(self.provider.generate(prompt))
-        except (ModelOutputError, ProviderError, TimeoutError, ConnectionError):
+            valid_ids, citations, warnings = validate_and_hydrate_citations(request, model_answer)
+        except (
+            ModelOutputError,
+            CitationValidationError,
+            ProviderError,
+            TimeoutError,
+            ConnectionError,
+        ):
             # Keep provider/model details in server logs. Task 4 receives only
             # the stable public error contract and never raw exception text.
             logger.exception("Task 3 answer generation failed for request_id=%s", request.request_id)
             return ErrorResponse(request_id=request.request_id)
-        valid_ids, citations, warnings = validate_and_hydrate_citations(request, model_answer)
         latency_ms = round((time.perf_counter() - started) * 1000)
         return AnswerResponse(
             request_id=request.request_id,

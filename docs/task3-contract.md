@@ -59,7 +59,9 @@ handling, and citation checks.
 
 ## What Task 3 returns
 
-Task 3 gives Task 4 this public result:
+Task 3 gives Task 4 one of the public results below.
+
+### Supported answer
 
 ```json
 {
@@ -83,6 +85,64 @@ Task 4 can return this object to the frontend. The `insufficient_context` flag
 lets the frontend distinguish an insufficient-evidence response from a supported
 answer.
 
+### Insufficient context
+
+If Task 2 returns no chunks, Task 3 does not call the model:
+
+```json
+{
+  "request_id": "req_002",
+  "answer": "The provided evidence is insufficient to answer the question.",
+  "cited_chunk_ids": [],
+  "citations": [],
+  "insufficient_context": true
+}
+```
+
+If chunks are present but do not contain enough evidence, the answer may briefly
+describe what is missing. Its wording may vary, so Task 4 should check
+`insufficient_context` instead of matching the answer text:
+
+```json
+{
+  "request_id": "req_003",
+  "answer": "The evidence does not provide the projected 2025 target.",
+  "cited_chunk_ids": [],
+  "citations": [],
+  "insufficient_context": true
+}
+```
+
+### Answer-generation failure
+
+A model timeout, connection failure, invalid model JSON, or a supported answer
+without any valid citation produces the same minimal public error:
+
+```json
+{
+  "request_id": "req_004",
+  "error": "answer_generation_failed"
+}
+```
+
+Task 3 logs the specific cause internally. The public result does not expose
+provider details, exception messages, credentials, or stack traces.
+
+For example, if the model claims that its answer is supported but cites only an
+unknown chunk ID, Task 3 rejects the answer and returns the error above. Task 4
+does not need to inspect or validate model-generated IDs itself.
+
+### How Task 4 distinguishes the results
+
+- `error` is present: Task 3/model processing failed.
+- No `error` and `insufficient_context=true`: Task 3 worked, but the retrieved
+  evidence was not enough to answer.
+- No `error` and `insufficient_context=false`: Task 3 returned a supported
+  answer with validated citations.
+
+`insufficient_context=true` does not always mean Task 2 has a bug. The answer
+may also be missing from the current documents or lost during parsing.
+
 ## Integration notes
 
 1. Please keep the same `request_id` from request to response.
@@ -96,26 +156,11 @@ answer.
 
 ## Error behavior
 
-An empty retrieval result is not a system error. Task 3 returns a normal result
-with `insufficient_context=true` and no citations.
-
-If model generation times out, the model connection fails, or the model returns
-invalid structured output, Task 3 records the detailed exception in its internal
-log and gives Task 4 this result:
-
-```json
-{
-  "request_id": "req_001",
-  "error": "answer_generation_failed"
-}
-```
-
-Task 3 reports the failure without choosing the webpage message or HTTP status.
-Task 4 can decide that mapping as part of the API and frontend behavior. For
-example, a provider connection failure could be mapped to `502 Bad Gateway`.
-
-Raw model/provider error details stay in Task 3 internal logs and are not part
-of the public error JSON.
+An empty retrieval result is an insufficient-context response, not a system
+error. Model timeouts, model connection failures, and invalid model output are
+answer-generation failures. A claimed supported answer with no valid citation is
+also an answer-generation failure. Task 3 defines the JSON above but does not
+choose the webpage message or HTTP status; Task 4 can decide that mapping.
 
 This keeps the first integration small. We can add optional fields or streaming
 later if the application needs them.

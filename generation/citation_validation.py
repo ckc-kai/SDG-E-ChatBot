@@ -5,6 +5,10 @@ from __future__ import annotations
 from generation.schemas import AnswerRequest, Citation, ModelAnswer
 
 
+class CitationValidationError(ValueError):
+    """Raised when a supported answer has no valid citation."""
+
+
 def validate_and_hydrate_citations(
     request: AnswerRequest, model_answer: ModelAnswer
 ) -> tuple[tuple[str, ...], tuple[Citation, ...], tuple[str, ...]]:
@@ -20,7 +24,8 @@ def validate_and_hydrate_citations(
             valid_ids.append(chunk_id)
 
     if not model_answer.insufficient_context and not valid_ids:
-        warnings.append("Answer has no valid supporting citation")
+        details = "; ".join(warnings + ["Answer has no valid supporting citation"])
+        raise CitationValidationError(details)
 
     citations = []
     for chunk_id in valid_ids:
