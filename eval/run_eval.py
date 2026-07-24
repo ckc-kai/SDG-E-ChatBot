@@ -92,7 +92,7 @@ class QueryScore:
 
 
 def load_eval(path: str) -> list[dict]:
-    with open(path, "r") as fh:
+    with open(path, "r", encoding="utf-8") as fh:
         rows = [json.loads(line) for line in fh if line.strip()]
     if not rows:
         raise ValueError(f"No evaluation rows found in {path}")
