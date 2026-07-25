@@ -122,6 +122,62 @@ No separate contextual-embedding backfill command is required:
 - Unchanged PDFs with missing or stale contextual embeddings are updated in
   place without deleting chunks or changing chunk IDs.
 
+## Structured ingest (tables, charts, figures)
+
+An additive second pass extracts tables and figures with
+[docling](https://github.com/docling-project/docling) (local layout +
+TableFormer models, no cloud calls) into a separate `structured_chunks` table.
+The narrative `chunks` table, its ingest, and the accepted text pipeline are
+untouched.
+
+```bash
+uv run python -m retrieval.structured_ingest
+```
+
+What it stores per element:
+
+- **Tables** — a Markdown flattening in `content` (embedded and reranked like
+  any chunk, split row-aware with the header repeated in every piece) plus the
+  exact cell grid as JSONB in `structured_data` for precise cell quoting.
+- **Figures/charts** — caption + a local SmolVLM-256M description + the
+  figure's own page text as `content`, and the cropped PNG under
+  `resources/wmp/figures/` (`image_path`).
+
+Both carry the same breadcrumb / sub-document metadata as narrative chunks
+(mapped by page through the same bookmark leaf-section tree) and both raw and
+contextual embeddings. Noise filters drop table-of-contents "tables"
+(dot-leader density) and captionless branding artwork.
+
+Re-runs skip unchanged PDFs; changing `structured.*` config or the extractor
+version re-extracts automatically (`structured_ingest_state`).
+
+## Query across narrative + structured chunks
+
+```bash
+uv run python -m retrieval.structured_query \
+  "What is the 2024 updated target for the Strategic Pole Replacement program?"
+```
+
+Same accepted pipeline shape (hybrid raw+contextual, raw-preserving union,
+cross-encoder rerank), but each dense search UNIONs `chunks` with
+`structured_chunks`. Structured results are printed with a `[table]`/`[figure]`
+marker and the figure image path when present.
+
+## Structured evaluation
+
+Generate a table/figure question set from ingested structured chunks (drafted
+with the same Claude Haiku model the query-rewrite path uses), then score it:
+
+```bash
+uv run python -m eval.generate_structured_eval --tables 30 --figures 15
+uv run python -m eval.run_structured_eval --misses \
+  --out eval/pdf/results/structured-eval.json
+```
+
+Gold references use the stable key
+(source_pdf, content_type, page_start, chunk_index) against
+`structured_chunks`, so results survive re-extraction.
+
 ## Query
 
 The example configuration selects the accepted hybrid-union pipeline by
@@ -181,14 +237,23 @@ retrieval/
   ingest.py                 Schema setup, chunking, and both embeddings
   query.py                  Hybrid retrieval, union pooling, and reranking
   setup_db.py               PostgreSQL/pgvector schema
+  structured_ingest.py      Docling table/figure extraction and embedding
+  structured_query.py       Retrieval across narrative + structured chunks
+  structured_schema.py      structured_chunks / structured_ingest_state schema
   utils.py                  Configuration, database, and model loaders
+eval/
+  generate_structured_eval.py  Table/figure eval dataset generator
+  run_structured_eval.py       Structured retrieval scoring harness
 tests/
   test_ingest_contextual_embeddings.py
   test_query_fusion.py
+  test_structured_ingest.py
 ```
 
 ## Current scope
 
-The system evaluates text retrieval only. Tables, charts, figures, and
-structure-aware extraction are deferred; PDF text from those elements may be
-flattened into narrative chunks.
+The accepted text-retrieval evaluation covers narrative chunks only. Tables,
+charts, and figures are additionally ingested by the structured pass above and
+evaluated separately (`eval/run_structured_eval.py`); flattened element text
+may still appear inside narrative chunks, which mildly aids recall and is
+accepted.

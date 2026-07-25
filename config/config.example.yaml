@@ -23,3 +23,19 @@ local:
     retrieval_top_k: 30
     rerank_top_k: 10
     rrf_k: 60
+  structured:
+    # Local-only table/figure extraction (docling). No cloud calls at ingest.
+    extractor_version: docling-v1
+    # Tables smaller than this are treated as layout noise and skipped.
+    min_table_rows: 2
+    min_table_cols: 2
+    # Figures smaller than this (rendered pixels) are logos/decorations.
+    min_figure_area_px: 10000
+    # Cropped figure PNGs are written here, relative to the project root.
+    figure_images_dir: resources/wmp/figures
+    images_scale: 2.0
+    # Local SmolVLM-256M figure descriptions (first run downloads the model).
+    picture_description: true
+    # 0 = convert each PDF in one pass; N>0 = convert in N-page batches
+    # (bounds memory on very large PDFs).
+    page_batch_size: 0
