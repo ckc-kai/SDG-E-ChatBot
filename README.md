@@ -139,9 +139,10 @@ What it stores per element:
 - **Tables** — a Markdown flattening in `content` (embedded and reranked like
   any chunk, split row-aware with the header repeated in every piece) plus the
   exact cell grid as JSONB in `structured_data` for precise cell quoting.
-- **Figures/charts** — caption + a local SmolVLM-256M description + the
+- **Figures/charts** — caption + a local SmolVLM-256M retrieval hint + the
   figure's own page text as `content`, and the cropped PNG under
-  `resources/wmp/figures/` (`image_path`).
+  `resources/wmp/figures/` (`image_path`). The generated hint is not a factual
+  answer source; downstream answering should inspect the stored crop on demand.
 
 Both carry the same breadcrumb / sub-document metadata as narrative chunks
 (mapped by page through the same bookmark leaf-section tree) and both raw and
@@ -158,10 +159,16 @@ uv run python -m retrieval.structured_query \
   "What is the 2024 updated target for the Strategic Pole Replacement program?"
 ```
 
-Same accepted pipeline shape (hybrid raw+contextual, raw-preserving union,
-cross-encoder rerank), but each dense search UNIONs `chunks` with
-`structured_chunks`. Structured results are printed with a `[table]`/`[figure]`
-marker and the figure image path when present.
+The structured path combines raw and contextual dense retrieval with a local
+PostgreSQL full-text lane over captions, breadcrumbs, and content. A
+cross-encoder plus deterministic caption prior ranks the union, then a 4:1
+structured/narrative lane fusion keeps exact grids and figure crops visible
+without losing narrative corroboration. Structured results are printed with a
+`[table]`/`[figure]` marker and the figure image path when present.
+
+On the manually audited 60-question structured set, this raises recall@5 from
+0.7167 to 0.9500 and hit@1 from 0.2000 to 0.7500. The reproduced output is
+`eval/pdf/results/2026-07-25-structured-caption-lane-fusion.json`.
 
 ## Structured evaluation
 

@@ -22,8 +22,11 @@ Additive companion to `retrieval.ingest` (which remains narrative-text only):
    -- instead of blind token windows.
 
 4. Figures store caption + local VLM description as `content` and the cropped
-   PNG on disk (`image_path`, relative to the project root). Tiny images
-   (logos, decorations) and text-empty figures are skipped.
+   PNG on disk (`image_path`, relative to the project root). The generated
+   description is a recall hint only; answer generation must inspect the crop
+   (or rely on deterministic caption/page context) rather than treat it as
+   factual evidence. Tiny images (logos, decorations) and text-empty figures
+   are skipped.
 
 5. Skip/refresh: `structured_ingest_state` records (content_hash,
    extractor_signature) per document. Unchanged PDFs with an unchanged
