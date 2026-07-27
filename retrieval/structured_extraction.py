@@ -1,6 +1,4 @@
-"""Docling-based table/figure ingest into `structured_chunks`.
-
-Additive companion to `retrieval.ingest` (which remains narrative-text only):
+"""Specialized local table/figure extraction used by the unified ingest.
 
 1. Extraction: each PDF runs once through docling's layout + TableFormer
    pipeline (local models, no cloud calls). Tables come back as cell grids;
@@ -15,23 +13,15 @@ Additive companion to `retrieval.ingest` (which remains narrative-text only):
    metadata as their narrative siblings, and the contextual-embedding recipe
    applies unchanged.
 
-3. Table storage is dual: a Markdown flattening in `content` (embedded and
-   reranked like any text chunk) plus the exact cell grid in
+3. Table output is dual: a Markdown flattening in ``content`` plus the exact cell grid in
    `structured_data` JSONB so downstream consumers can quote precise cells.
    Oversized tables are split row-aware -- every piece repeats the header row
    -- instead of blind token windows.
 
-4. Figures store caption + local VLM description as `content` and the cropped
-   PNG on disk (`image_path`, relative to the project root). The generated
-   description is a recall hint only; answer generation must inspect the crop
-   (or rely on deterministic caption/page context) rather than treat it as
-   factual evidence. Tiny images (logos, decorations) and text-empty figures
-   are skipped.
-
-5. Skip/refresh: `structured_ingest_state` records (content_hash,
-   extractor_signature) per document. Unchanged PDFs with an unchanged
-   extractor configuration are skipped; changing docling options or versions
-   re-extracts without touching narrative chunks.
+4. Figures keep authoritative caption/page context in ``content`` and return
+   the local VLM description separately as ``retrieval_hint``. The unified
+   ingest decides whether that hint participates in candidate generation; it
+   is excluded from reranking and answer evidence by default.
 
 Known limitations (accepted for this corpus, see module tests):
   - A table split across a `page_batch_size` boundary is extracted as two
@@ -44,42 +34,26 @@ Known limitations (accepted for this corpus, see module tests):
 
 from __future__ import annotations
 
-import argparse
 import logging
 import re
-import shutil
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-import pypdf
-from psycopg2.extras import Json, execute_values
-from sentence_transformers import SentenceTransformer
-from tqdm import tqdm
-
-from retrieval.contextual_embeddings import (
-    CONTEXTUAL_EMBEDDING_RECIPE,
-    contextual_embedding_text_for_model,
-)
-from retrieval.failure_log import get_failure_logger
 from retrieval.ingest import (
+    Chunk,
     LeafSection,
-    build_leaf_sections,
     chunk_text,
-    hash_file,
-    upsert_document,
 )
-from retrieval.structured_schema import setup_structured_database
-from retrieval.utils import connect_db, get_embedding_model, load_config
+from retrieval.object_storage import ObjectStorage
+from retrieval.utils import embedding_config, load_config
 
 logger = logging.getLogger(__name__)
-log_failure = get_failure_logger("structured_ingest")
 
-_config = load_config()["local"]
-_embedding_config = _config["embedding"]
-_structured_config = _config.get("structured", {})
+_config = load_config()
+_embedding_config = embedding_config()
+_structured_config = _config.get("extraction", {}).get("structured", {})
 
-EMBEDDING_MODEL_NAME = _embedding_config["model"]
 MAX_TOKENS_PER_CHUNK = _embedding_config["max_tokens_per_chunk"]
 MIN_CHUNK_CHARS = _embedding_config["minimum_chunk_chars"]
 
@@ -87,9 +61,9 @@ EXTRACTOR_VERSION = _structured_config.get("extractor_version", "docling-v1")
 MIN_TABLE_ROWS = _structured_config.get("min_table_rows", 2)
 MIN_TABLE_COLS = _structured_config.get("min_table_cols", 2)
 MIN_FIGURE_AREA_PX = _structured_config.get("min_figure_area_px", 10000)
-FIGURE_IMAGES_DIR = Path(_structured_config.get("figure_images_dir", "resources/wmp/figures"))
 IMAGES_SCALE = float(_structured_config.get("images_scale", 2.0))
-PICTURE_DESCRIPTION = bool(_structured_config.get("picture_description", True))
+_description_config = _structured_config.get("figure_description", {})
+PICTURE_DESCRIPTION = bool(_description_config.get("generate", True))
 PAGE_BATCH_SIZE = int(_structured_config.get("page_batch_size", 0))
 
 # Reserved headroom when packing table rows against MAX_TOKENS_PER_CHUNK, so
@@ -129,23 +103,6 @@ class StructuredElement:
     image: object | None = None  # figures only (PIL.Image)
 
 
-@dataclass(frozen=True)
-class StructuredChunk:
-    source_pdf: str
-    sub_document: str | None
-    breadcrumb: str
-    section_number: str | None
-    page_start: int
-    page_end: int
-    chunk_index: int
-    content_type: str
-    content: str
-    caption: str | None
-    structured_data: dict | None
-    image_path: str | None
-    token_count: int
-
-
 def extractor_signature() -> str:
     """Encodes every option that changes extraction output, so config changes
     invalidate the per-document skip cache."""
@@ -159,7 +116,8 @@ def extractor_signature() -> str:
         f"{EXTRACTOR_VERSION}|docling={docling_version}"
         f"|desc={PICTURE_DESCRIPTION}|scale={IMAGES_SCALE}"
         f"|min_table={MIN_TABLE_ROWS}x{MIN_TABLE_COLS}"
-        f"|min_fig={MIN_FIGURE_AREA_PX}|filters={_FILTERS_VERSION}"
+        f"|min_fig={MIN_FIGURE_AREA_PX}|page_batch={PAGE_BATCH_SIZE}"
+        f"|filters={_FILTERS_VERSION}"
     )
 
 
@@ -265,12 +223,10 @@ def compose_table_text(caption: str, markdown: str) -> str:
     return "\n".join(parts).strip()
 
 
-def compose_figure_text(caption: str, description: str, page_context: str = "") -> str:
+def compose_figure_text(caption: str, page_context: str = "") -> str:
     parts = []
     if caption:
         parts.append(f"Figure: {caption}")
-    if description:
-        parts.append(f"Description: {description}")
     if page_context:
         context = " ".join(page_context.split())[:_FIGURE_PAGE_CONTEXT_CHARS]
         if context:
@@ -433,20 +389,19 @@ def extract_elements(pdf_path: Path, page_count: int) -> list[StructuredElement]
 # ---------------------------------------------------------------------------
 
 
-def _save_figure_image(image, document_slug: str, page_idx: int, ordinal: int) -> str | None:
+def _save_figure_image(
+    image,
+    object_prefix: str,
+    page_idx: int,
+    ordinal: int,
+    storage: ObjectStorage | None,
+) -> str | None:
     if image is None:
         return None
-    target_dir = FIGURE_IMAGES_DIR / document_slug
-    target_dir.mkdir(parents=True, exist_ok=True)
-    target = target_dir / f"p{page_idx:04d}_f{ordinal}.png"
-    image.save(target)
-    return str(target)
-
-
-def clear_figure_images(source_pdf: str) -> None:
-    target_dir = FIGURE_IMAGES_DIR / safe_document_slug(source_pdf)
-    if target_dir.exists():
-        shutil.rmtree(target_dir)
+    if storage is None:
+        return None
+    key = f"{object_prefix}/p{page_idx:04d}_f{ordinal}.png"
+    return storage.put_png(key, image)
 
 
 def build_structured_chunks(
@@ -455,12 +410,15 @@ def build_structured_chunks(
     leaves: Sequence[LeafSection],
     tokenizer,
     page_text_fn=None,
-) -> list[StructuredChunk]:
+    storage: ObjectStorage | None = None,
+    object_prefix: str | None = None,
+) -> list[Chunk]:
     """`page_text_fn(page_idx) -> str` supplies figure page context (optional)."""
     document_slug = safe_document_slug(pdf_path.name)
+    object_prefix = object_prefix or document_slug
     counters: dict[tuple[str, int], int] = {}
     figure_ordinals: dict[int, int] = {}
-    chunks: list[StructuredChunk] = []
+    chunks: list[Chunk] = []
 
     def next_index(content_type: str, page_start: int) -> int:
         key = (content_type, page_start)
@@ -473,12 +431,13 @@ def build_structured_chunks(
     def add_chunk(
         element: StructuredElement,
         content: str,
+        retrieval_hint: str | None,
         structured_data: dict | None,
-        image_path: str | None,
+        object_key: str | None,
     ) -> None:
         leaf = map_page_to_leaf(leaves, element.page_start)
         chunks.append(
-            StructuredChunk(
+            Chunk(
                 source_pdf=pdf_path.name,
                 sub_document=leaf.sub_document if leaf else None,
                 breadcrumb=leaf.breadcrumb if leaf else pdf_path.name,
@@ -488,10 +447,13 @@ def build_structured_chunks(
                 chunk_index=next_index(element.content_type, element.page_start),
                 content_type=element.content_type,
                 content=content,
+                retrieval_hint=retrieval_hint,
                 caption=element.caption or None,
                 structured_data=structured_data,
-                image_path=image_path,
+                object_key=object_key,
+                media_type="image/png" if object_key else None,
                 token_count=token_count(content),
+                extractor=extractor_signature(),
             )
         )
 
@@ -526,6 +488,7 @@ def build_structured_chunks(
                     add_chunk(
                         element,
                         piece,
+                        None,
                         {**base_data, "piece_rows": list(row_range)},
                         None,
                     )
@@ -538,223 +501,33 @@ def build_structured_chunks(
                     MAX_TOKENS_PER_CHUNK,
                     overlap=0,
                 ):
-                    add_chunk(element, piece, base_data, None)
+                    add_chunk(element, piece, None, base_data, None)
         else:
             page_context = page_text_fn(element.page_start) if page_text_fn else ""
-            content = compose_figure_text(element.caption, element.description, page_context)
-            if len(content) < MIN_CHUNK_CHARS:
+            content = compose_figure_text(element.caption, page_context)
+            if not content:
                 logger.debug(
-                    "Skipping text-empty figure on page %d of %s",
+                    "Skipping figure without authoritative caption/page context "
+                    "on page %d of %s",
                     element.page_start,
                     pdf_path.name,
                 )
                 continue
             ordinal = figure_ordinals.get(element.page_start, 0)
             figure_ordinals[element.page_start] = ordinal + 1
-            image_path = _save_figure_image(
-                element.image, document_slug, element.page_start, ordinal
+            object_key = _save_figure_image(
+                element.image,
+                object_prefix,
+                element.page_start,
+                ordinal,
+                storage,
             )
-            add_chunk(element, content, None, image_path)
+            add_chunk(
+                element,
+                content,
+                element.description or None,
+                None,
+                object_key,
+            )
 
     return chunks
-
-
-# ---------------------------------------------------------------------------
-# Embedding + persistence
-# ---------------------------------------------------------------------------
-
-
-def embed_structured_chunks(
-    model: SentenceTransformer, chunks: Sequence[StructuredChunk]
-) -> tuple[list[list[float]], list[list[float]]]:
-    if not chunks:
-        return [], []
-    raw = model.encode(
-        [chunk.content for chunk in chunks],
-        normalize_embeddings=True,
-        show_progress_bar=True,
-    )
-    contextual = model.encode(
-        [
-            contextual_embedding_text_for_model(
-                chunk.source_pdf,
-                chunk.breadcrumb,
-                chunk.content,
-                model.tokenizer,
-                model.max_seq_length,
-            )
-            for chunk in chunks
-        ],
-        normalize_embeddings=True,
-        show_progress_bar=True,
-    )
-    return (
-        [embedding.tolist() for embedding in raw],
-        [embedding.tolist() for embedding in contextual],
-    )
-
-
-def replace_structured_chunks(
-    cur,
-    document_id: int,
-    chunks: Sequence[StructuredChunk],
-    raw_embeddings: Sequence[Sequence[float]],
-    contextual_embeddings: Sequence[Sequence[float]],
-) -> None:
-    cur.execute("DELETE FROM structured_chunks WHERE document_id = %s", (document_id,))
-    if not chunks:
-        return
-    rows = [
-        (
-            document_id,
-            chunk.sub_document,
-            chunk.breadcrumb,
-            chunk.section_number,
-            chunk.page_start,
-            chunk.page_end,
-            chunk.chunk_index,
-            chunk.content_type,
-            chunk.content,
-            chunk.caption,
-            Json(chunk.structured_data) if chunk.structured_data is not None else None,
-            chunk.image_path,
-            chunk.token_count,
-            EMBEDDING_MODEL_NAME,
-            list(raw_embedding),
-            EMBEDDING_MODEL_NAME,
-            CONTEXTUAL_EMBEDDING_RECIPE,
-            list(contextual_embedding),
-            extractor_signature(),
-        )
-        for chunk, raw_embedding, contextual_embedding in zip(
-            chunks, raw_embeddings, contextual_embeddings, strict=True
-        )
-    ]
-    execute_values(
-        cur,
-        """
-        INSERT INTO structured_chunks (
-            document_id, sub_document, breadcrumb, section_number,
-            page_start, page_end, chunk_index, content_type,
-            content, caption, structured_data, image_path, token_count,
-            embedding_model, embedding,
-            contextual_embedding_model, contextual_embedding_recipe,
-            contextual_embedding, extractor
-        ) VALUES %s
-        """,
-        rows,
-    )
-
-
-def _existing_state(cur, document_id: int) -> tuple[str, str] | None:
-    cur.execute(
-        "SELECT content_hash, extractor_signature FROM structured_ingest_state WHERE document_id = %s",
-        (document_id,),
-    )
-    row = cur.fetchone()
-    return (row[0], row[1]) if row else None
-
-
-def upsert_state(
-    cur, document_id: int, content_hash: str, table_chunks: int, figure_chunks: int
-) -> None:
-    cur.execute(
-        """
-        INSERT INTO structured_ingest_state (
-            document_id, content_hash, extractor_signature,
-            table_chunks, figure_chunks
-        ) VALUES (%s, %s, %s, %s, %s)
-        ON CONFLICT (document_id)
-        DO UPDATE SET content_hash = EXCLUDED.content_hash,
-                      extractor_signature = EXCLUDED.extractor_signature,
-                      table_chunks = EXCLUDED.table_chunks,
-                      figure_chunks = EXCLUDED.figure_chunks,
-                      ingested_at = now()
-        """,
-        (document_id, content_hash, extractor_signature(), table_chunks, figure_chunks),
-    )
-
-
-def ingest_structured_pdf(pdf_path: Path, conn, model: SentenceTransformer) -> None:
-    content_hash = hash_file(pdf_path)
-    reader = pypdf.PdfReader(pdf_path)
-
-    with conn.cursor() as cur:
-        document_id = upsert_document(cur, pdf_path.name, len(reader.pages), content_hash)
-        state = _existing_state(cur, document_id)
-    conn.commit()
-
-    if state == (content_hash, extractor_signature()):
-        logger.info("Skipping %s (structured chunks current)", pdf_path.name)
-        return
-
-    leaves = build_leaf_sections(pdf_path, reader)
-    elements = extract_elements(pdf_path, len(reader.pages))
-    clear_figure_images(pdf_path.name)
-
-    def page_text(page_idx: int) -> str:
-        try:
-            return reader.pages[page_idx].extract_text() or ""
-        except Exception:
-            return ""
-
-    chunks = build_structured_chunks(
-        pdf_path, elements, leaves, model.tokenizer, page_text_fn=page_text
-    )
-    raw_embeddings, contextual_embeddings = embed_structured_chunks(model, chunks)
-
-    table_count = sum(1 for chunk in chunks if chunk.content_type == "table")
-    figure_count = len(chunks) - table_count
-    with conn.cursor() as cur:
-        replace_structured_chunks(cur, document_id, chunks, raw_embeddings, contextual_embeddings)
-        upsert_state(cur, document_id, content_hash, table_count, figure_count)
-    conn.commit()
-    logger.info(
-        "Structured ingest %s: %d table chunk(s), %d figure chunk(s) from %d element(s)",
-        pdf_path.name,
-        table_count,
-        figure_count,
-        len(elements),
-    )
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Extract, embed, and store table/figure chunks from WMP PDFs."
-    )
-    parser.add_argument(
-        "pdf_dir",
-        type=Path,
-        nargs="?",
-        default=Path("resources/wmp/pdf"),
-        help="Directory containing PDF files to ingest (default: resources/wmp/pdf).",
-    )
-    parser.add_argument(
-        "--only",
-        type=str,
-        default=None,
-        help="Only ingest PDFs whose filename contains this substring (smoke tests).",
-    )
-    args = parser.parse_args()
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-
-    setup_structured_database()
-    model = get_embedding_model()
-    conn = connect_db()
-    try:
-        pdf_paths = sorted(args.pdf_dir.glob("*.pdf"))
-        if args.only:
-            pdf_paths = [path for path in pdf_paths if args.only.lower() in path.name.lower()]
-        for pdf_path in tqdm(pdf_paths, desc="Structured ingest", unit="file"):
-            try:
-                ingest_structured_pdf(pdf_path, conn, model)
-            except Exception as exc:
-                conn.rollback()
-                log_failure("ingest_structured_pdf", pdf_path.name, exc)
-                logger.warning("Failed structured ingest for %s: %s", pdf_path.name, exc)
-    finally:
-        conn.close()
-
-
-if __name__ == "__main__":
-    main()

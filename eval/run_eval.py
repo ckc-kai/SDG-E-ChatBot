@@ -145,7 +145,10 @@ def gold_signatures(conn, row: dict) -> list[GoldGroup]:
                     """
                     SELECT c.id, c.content
                     FROM chunks c JOIN documents d ON d.id = c.document_id
-                    WHERE d.filename = %s AND c.page_start = %s AND c.chunk_index = %s
+                    WHERE d.filename = %s
+                      AND c.content_type = 'narrative'
+                      AND c.page_start = %s
+                      AND c.chunk_index = %s
                     """,
                     (
                         evidence["source_pdf"],

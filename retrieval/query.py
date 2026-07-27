@@ -1,12 +1,14 @@
-"""Query the WMP knowledge base.
+"""Query narrative, table, and figure chunks through one retrieval path.
 
 1. query_rewrite: rewrite complex/causal questions
 2. search: embeds each (sub-)question with the same model used at ingestion
    time and does a pgvector cosine-distance search against the raw, contextual,
-   or hybrid raw+contextual document embeddings in `chunks`
+   or hybrid raw+contextual document embeddings in ``chunks``, plus a local
+   PostgreSQL lexical lane over captions, breadcrumbs, and content
 3. Candidate pooling: results from every sub-question are merged and
    deduped by chunk id, so a multi-part question doesn't just get scored fragment-by-fragment
-4. rerank: cross-encoder on original questions and pooled candidates
+4. rerank: cross-encoder plus a small caption relevance prior
+5. exact-content deduplication across all content types, with no type quota
 """
 
 import argparse
@@ -17,8 +19,10 @@ from dataclasses import dataclass, replace
 
 from retrieval.contextual_embeddings import CONTEXTUAL_EMBEDDING_RECIPE
 from retrieval.failure_log import get_failure_logger
+from retrieval.object_storage import get_object_storage
 from retrieval.utils import (
     connect_db,
+    embedding_config,
     get_anthropic_client,
     get_embedding_model,
     get_reranker_model,
@@ -28,21 +32,85 @@ from retrieval.utils import (
 logger = logging.getLogger(__name__)
 log_failure = get_failure_logger("query")
 
-_config = load_config()["local"]
-QUERY_REWRITE_MODEL = _config["query_rewrite"]["model"]
-QUERY_REWRITE_MODE = _config["query_rewrite"].get("mode", "auto")
-MAX_REWRITE_SUBQUESTIONS = _config["query_rewrite"].get("max_subquestions", 2)
-RETRIEVAL_TOP_K = _config["retrieval"]["retrieval_top_k"]
-RERANK_TOP_K = _config["retrieval"]["rerank_top_k"]
-RRF_K = _config["retrieval"].get("rrf_k", 60)
-DEFAULT_EMBEDDING_MODE = _config["retrieval"].get("embedding_mode", "raw")
-DEFAULT_HYBRID_POOL_MODE = _config["retrieval"].get("hybrid_pool_mode", "rrf")
-EMBEDDING_MODEL_NAME = _config["embedding"]["model"]
+_config = load_config()
+_rewrite_config = _config.get("query_rewrite", {})
+_retrieval_config = _config.get("retrieval", {})
+_embedding_config = embedding_config()
+QUERY_REWRITE_MODEL = _rewrite_config.get(
+    "model", "claude-haiku-4-5-20251001"
+)
+QUERY_REWRITE_MODE = _rewrite_config.get("mode", "auto")
+MAX_REWRITE_SUBQUESTIONS = _rewrite_config.get("max_subquestions", 2)
+RETRIEVAL_TOP_K = _retrieval_config.get("retrieval_top_k", 30)
+RERANK_TOP_K = _retrieval_config.get("rerank_top_k", 10)
+RRF_K = _retrieval_config.get("rrf_k", 60)
+DEFAULT_EMBEDDING_MODE = _retrieval_config.get("embedding_mode", "hybrid")
+DEFAULT_HYBRID_POOL_MODE = _retrieval_config.get("hybrid_pool_mode", "union")
+EMBEDDING_MODEL_NAME = _embedding_config["name"]
+CAPTION_RERANK_WEIGHT = float(
+    _retrieval_config.get("caption_rerank_weight", 0.25)
+)
+LEXICAL_CAPTION_WEIGHT = float(
+    _retrieval_config.get("lexical_caption_weight", 4.0)
+)
+LEXICAL_HINT_WEIGHT = float(
+    _retrieval_config.get("lexical_hint_weight", 0.25)
+)
+DEDUPLICATE_EXACT_CONTENT = bool(
+    _retrieval_config.get("deduplicate_exact_content", True)
+)
+_figure_description_config = (
+    _config.get("extraction", {})
+    .get("structured", {})
+    .get("figure_description", {})
+)
+HINT_IN_LEXICAL_RETRIEVAL = bool(
+    _figure_description_config.get("candidate_retrieval", True)
+)
+HINT_IN_RERANKING = bool(_figure_description_config.get("reranking", False))
 EMBEDDING_MODES = ("raw", "contextual", "hybrid")
 HYBRID_POOL_MODES = ("rrf", "union")
 _EMBEDDING_COLUMNS = {
     "raw": "embedding",
     "contextual": "contextual_embedding",
+}
+
+_LEXICAL_STOPWORDS = {
+    "about",
+    "after",
+    "also",
+    "among",
+    "and",
+    "are",
+    "before",
+    "between",
+    "did",
+    "does",
+    "for",
+    "from",
+    "have",
+    "how",
+    "into",
+    "many",
+    "much",
+    "not",
+    "over",
+    "that",
+    "the",
+    "their",
+    "them",
+    "then",
+    "these",
+    "this",
+    "through",
+    "under",
+    "what",
+    "when",
+    "where",
+    "which",
+    "who",
+    "with",
+    "would",
 }
 
 _REWRITE_MODES = {"auto", "off", "always"}
@@ -115,6 +183,12 @@ class QueryObject:
     chunk_index: int
     content_type: str
     content: str
+    retrieval_hint: str | None
+    caption: str | None
+    structured_data: dict | None
+    object_key: str | None
+    media_type: str | None
+    content_hash: str
     token_count: int
     distance: float
     retrieval_score: float | None = None
@@ -261,7 +335,7 @@ def _validate_embedding_mode(conn, embedding_mode: str) -> str:
         if incomplete:
             raise RuntimeError(
                 f"Contextual embeddings are missing or stale for {incomplete} chunk(s). "
-                "Run `uv run python -m retrieval.ingest` to refresh them in place."
+                "Run `uv run python -m retrieval.ingest` to re-ingest them."
             )
     return _EMBEDDING_COLUMNS[embedding_mode]
 
@@ -279,7 +353,9 @@ def _search_by_vector(
             f"""
             SELECT c.id, d.filename, c.sub_document, c.breadcrumb, c.section_number,
                    c.page_start, c.page_end, c.chunk_index, c.content_type,
-                   c.content, c.token_count, c.{embedding_column} <=> %s AS distance
+                   c.content, c.retrieval_hint, c.caption, c.structured_data,
+                   c.object_key, c.media_type, c.content_hash, c.token_count,
+                   c.{embedding_column} <=> %s AS distance
             FROM chunks c
             JOIN documents d ON d.id = c.document_id
             ORDER BY distance
@@ -301,8 +377,14 @@ def _search_by_vector(
             chunk_index=row[7],
             content_type=row[8],
             content=row[9],
-            token_count=row[10],
-            distance=row[11],
+            retrieval_hint=row[10],
+            caption=row[11],
+            structured_data=row[12],
+            object_key=row[13],
+            media_type=row[14],
+            content_hash=row[15],
+            token_count=row[16],
+            distance=row[17],
         )
         for row in rows
     ]
@@ -325,6 +407,121 @@ def search(
         conn,
         embedding_mode=embedding_mode,
     )
+
+
+def _lexical_query(question: str) -> str:
+    """Build an OR query from meaningful terms, including likely acronyms."""
+    tokens: list[str] = []
+    seen: set[str] = set()
+    for token in re.findall(r"[A-Za-z0-9]+", question.lower()):
+        if len(token) < 3 or token in _LEXICAL_STOPWORDS or token in seen:
+            continue
+        seen.add(token)
+        tokens.append(token)
+    for phrase in re.findall(
+        r"\b[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){2,}\b", question
+    ):
+        acronym = "".join(word[0] for word in phrase.split()).lower()
+        if len(acronym) >= 3 and acronym not in seen:
+            seen.add(acronym)
+            tokens.append(acronym)
+    return " OR ".join(tokens)
+
+
+def _search_lexical(question: str, top_k: int, conn) -> list[QueryObject]:
+    expression = _lexical_query(question)
+    if not expression:
+        return []
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            WITH query AS (
+                SELECT websearch_to_tsquery('english', %s) AS value
+            ),
+            corpus AS (
+                SELECT c.*,
+                       setweight(
+                           to_tsvector(
+                               'english', coalesce(c.caption, '')
+                           ),
+                           'A'
+                       ) ||
+                       setweight(
+                           to_tsvector(
+                               'english', coalesce(c.breadcrumb, '')
+                           ),
+                           'B'
+                       ) ||
+                       setweight(
+                           to_tsvector('english', c.content),
+                           'C'
+                       ) AS authoritative_document,
+                       to_tsvector(
+                           'english', coalesce(c.retrieval_hint, '')
+                       ) AS hint_document
+                FROM chunks c
+            )
+            SELECT corpus.id, d.filename, corpus.sub_document,
+                   corpus.breadcrumb, corpus.section_number,
+                   corpus.page_start, corpus.page_end, corpus.chunk_index,
+                   corpus.content_type, corpus.content, corpus.retrieval_hint,
+                   corpus.caption, corpus.structured_data, corpus.object_key,
+                   corpus.media_type, corpus.content_hash, corpus.token_count,
+                   ts_rank_cd(corpus.authoritative_document, query.value)
+                     + %s * ts_rank_cd(
+                         to_tsvector(
+                             'english', coalesce(corpus.caption, '')
+                         ),
+                         query.value
+                     )
+                     + CASE WHEN %s
+                         THEN %s * ts_rank_cd(
+                             corpus.hint_document, query.value
+                         )
+                         ELSE 0
+                       END AS lexical_score
+            FROM corpus
+            JOIN documents d ON d.id = corpus.document_id
+            CROSS JOIN query
+            WHERE corpus.authoritative_document @@ query.value
+               OR (%s AND corpus.hint_document @@ query.value)
+            ORDER BY lexical_score DESC, corpus.id
+            LIMIT %s
+            """,
+            (
+                expression,
+                LEXICAL_CAPTION_WEIGHT,
+                HINT_IN_LEXICAL_RETRIEVAL,
+                LEXICAL_HINT_WEIGHT,
+                HINT_IN_LEXICAL_RETRIEVAL,
+                top_k,
+            ),
+        )
+        rows = cur.fetchall()
+    return [
+        QueryObject(
+            chunk_id=row[0],
+            source_pdf=row[1],
+            sub_document=row[2],
+            breadcrumb=row[3],
+            section_number=row[4],
+            page_start=row[5],
+            page_end=row[6],
+            chunk_index=row[7],
+            content_type=row[8],
+            content=row[9],
+            retrieval_hint=row[10],
+            caption=row[11],
+            structured_data=row[12],
+            object_key=row[13],
+            media_type=row[14],
+            content_hash=row[15],
+            token_count=row[16],
+            distance=-float(row[17]),
+            retrieval_score=float(row[17]),
+        )
+        for row in rows
+    ]
 
 
 def reciprocal_rank_fusion(
@@ -406,8 +603,56 @@ def _candidate_text(candidate: QueryObject) -> str:
         context.append(f"Section: {candidate.breadcrumb}")
     if candidate.section_number:
         context.append(f"Section number: {candidate.section_number}")
+    if candidate.content_type != "narrative":
+        context.append(f"Element: {candidate.content_type}")
+    if candidate.caption:
+        context.append(f"Caption: {candidate.caption}")
     context.append(candidate.content)
+    if HINT_IN_RERANKING and candidate.retrieval_hint:
+        context.append(f"Unverified visual retrieval hint: {candidate.retrieval_hint}")
     return "\n".join(context)
+
+
+def _lexical_terms(text: str) -> set[str]:
+    terms = {
+        token[:-1] if token.endswith("s") and len(token) > 4 else token
+        for token in re.findall(r"[a-z0-9]+", text.lower())
+        if len(token) >= 3 and token not in _LEXICAL_STOPWORDS
+    }
+    for phrase in re.findall(
+        r"\b[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){2,}\b", text
+    ):
+        terms.add("".join(word[0] for word in phrase.split()).lower())
+    return terms
+
+
+def _caption_relevance(question: str, candidate: QueryObject) -> float:
+    """Normalized caption overlap; narrative chunks never receive this prior."""
+    if candidate.content_type == "narrative" or not candidate.caption:
+        return 0.0
+    question_terms = _lexical_terms(question)
+    caption_terms = _lexical_terms(candidate.caption)
+    if not question_terms or not caption_terms:
+        return 0.0
+    overlap = len(question_terms & caption_terms)
+    return overlap / (len(question_terms) * len(caption_terms)) ** 0.5
+
+
+def deduplicate_ranked(
+    ranked: list[RankedResult],
+) -> list[RankedResult]:
+    """Suppress byte-equivalent evidence without reserving content-type slots."""
+    if not DEDUPLICATE_EXACT_CONTENT:
+        return ranked
+    deduplicated: list[RankedResult] = []
+    seen_hashes: set[str] = set()
+    for result in ranked:
+        signature = result.query_object.content_hash
+        if signature in seen_hashes:
+            continue
+        seen_hashes.add(signature)
+        deduplicated.append(result)
+    return deduplicated
 
 
 def rerank(
@@ -417,13 +662,24 @@ def rerank(
         return []
     pairs = [(question, _candidate_text(candidate)) for candidate in candidates]
     scores = get_reranker_model().predict(pairs)
-    ranked = sorted(zip(candidates, scores), key=lambda pair: pair[1], reverse=True)
-    if top_k is not None:
-        ranked = ranked[:top_k]
-    return [
-        RankedResult(query_object=candidate, rerank_score=float(score))
+    ranked = sorted(
+        (
+            (
+                candidate,
+                float(score)
+                + CAPTION_RERANK_WEIGHT * _caption_relevance(question, candidate),
+            )
+            for candidate, score in zip(candidates, scores, strict=True)
+        ),
+        key=lambda pair: pair[1],
+        reverse=True,
+    )
+    results = [
+        RankedResult(query_object=candidate, rerank_score=score)
         for candidate, score in ranked
     ]
+    results = deduplicate_ranked(results)
+    return results[:top_k] if top_k is not None else results
 
 
 def retrieve_with_diagnostics(
@@ -493,6 +749,21 @@ def retrieve_with_diagnostics(
                 embedding_mode=embedding_mode,
             )
             channels = {embedding_mode: candidates}
+        lexical_candidates = _search_lexical(
+            search_query,
+            retrieval_top_k,
+            conn,
+        )
+        channels["lexical"] = lexical_candidates
+        seen_ids = {candidate.chunk_id for candidate in candidates}
+        candidates = [
+            *candidates,
+            *(
+                candidate
+                for candidate in lexical_candidates
+                if candidate.chunk_id not in seen_ids
+            ),
+        ]
         candidate_sets.append(candidates)
         channel_candidate_sets.append(channels)
 
@@ -578,6 +849,7 @@ def main() -> None:
         print("No results found.")
         return
 
+    storage = get_object_storage()
     for rank, result in enumerate(results, start=1):
         qo = result.query_object
         retrieval_detail = (
@@ -585,9 +857,14 @@ def main() -> None:
             if qo.retrieval_score is not None
             else f"distance={qo.distance:.4f}"
         )
-        print(f"\n[{rank}] rerank_score={result.rerank_score:.4f} {retrieval_detail}")
+        print(
+            f"\n[{rank}] [{qo.content_type}] "
+            f"rerank_score={result.rerank_score:.4f} {retrieval_detail}"
+        )
         print(f"    {qo.source_pdf} (p.{qo.page_start}-{qo.page_end})")
         print(f"    {qo.breadcrumb}")
+        if qo.object_key:
+            print(f"    object: {storage.uri(qo.object_key)}")
         print(f"    {qo.content[:300]}")
 
 

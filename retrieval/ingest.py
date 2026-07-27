@@ -1,4 +1,4 @@
-"""Ingest SDG&E Wildfire Mitigation Plan PDFs into Postgres/pgvector.
+"""Unified PDF ingest for narrative text, tables, and figures.
 
 Chunking strategy: Hierachy
 ------------------
@@ -44,26 +44,28 @@ Chunking strategy: Hierachy
      and trims everything before it. If the title can't be confidently located
      (too short/generic, or not found), the page is left untouched.
 
-6. TODO: Tables and figures are intentionally out of scope for now: their content
-   is extracted as flattened plain text through the same leaf-section path,
-   which will scramble tabular structure. Every chunk carries a
-   `content_type` field (currently always "narrative") so a future
-   table/figure-aware extractor can feed the same `chunks` table with
-   `content_type="table"` / `"figure"` rows without a schema change.
+6. Structured extraction: the same command invokes the local Docling extractor
+   for tables and figures. All content types are persisted atomically into one
+   ``chunks`` table and receive raw plus contextual embeddings.
+
+Generated figure descriptions are isolated in ``retrieval_hint``. They can
+expand candidate recall when enabled in YAML, but are excluded from reranking
+and answer evidence by default.
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import logging
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pypdf
-from psycopg2.extras import execute_values
+from psycopg2.extras import Json, execute_values
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
 
@@ -72,18 +74,34 @@ from retrieval.contextual_embeddings import (
     contextual_embedding_text_for_model,
 )
 from retrieval.failure_log import get_failure_logger
+from retrieval.object_storage import get_object_storage
 from retrieval.setup_db import setup_database
-from retrieval.utils import connect_db, get_embedding_model, load_config
+from retrieval.utils import (
+    connect_db,
+    embedding_config,
+    get_embedding_model,
+    load_config,
+)
 
 logger = logging.getLogger(__name__)
 log_failure = get_failure_logger("ingest")
 
-_embedding_config = load_config()["local"]["embedding"]
-EMBEDDING_MODEL_NAME = _embedding_config["model"]
+_config = load_config()
+_embedding_config = embedding_config()
+EMBEDDING_PROVIDER = _embedding_config.get("provider", "sentence_transformers")
+EMBEDDING_MODEL_NAME = _embedding_config["name"]
 MAX_TOKENS_PER_CHUNK = _embedding_config["max_tokens_per_chunk"]
 TOKEN_OVERLAP = _embedding_config["token_overlap"]
 MIN_CHUNK_CHARS = _embedding_config["minimum_chunk_chars"]
 DEFAULT_CONTENT_TYPE = "narrative"
+_figure_description_config = (
+    _config.get("extraction", {})
+    .get("structured", {})
+    .get("figure_description", {})
+)
+HINT_IN_CANDIDATE_RETRIEVAL = bool(
+    _figure_description_config.get("candidate_retrieval", True)
+)
 
 _SECTION_NUMBER_RE = re.compile(r"^(\d+(?:\.\d+)*)\.?\s")
 
@@ -121,6 +139,12 @@ class Chunk:
     content_type: str
     content: str
     token_count: int
+    retrieval_hint: str | None = None
+    caption: str | None = None
+    structured_data: dict | None = None
+    object_key: str | None = None
+    media_type: str | None = None
+    extractor: str = "pypdf-outline-v1"
 
 
 def _extract_section_number(title: str) -> str | None:
@@ -366,47 +390,61 @@ def hash_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _existing_document(cur, filename: str) -> tuple[int, str] | None:
-    cur.execute("SELECT id, content_hash FROM documents WHERE filename = %s", (filename,))
-    row = cur.fetchone()
-    return (row[0], row[1]) if row else None
+def ingest_signature() -> str:
+    """Hash every setting that changes stored chunks or vectors."""
+    from retrieval.structured_extraction import extractor_signature
+
+    payload = {
+        "recipe": "unified-ingest-v1",
+        "embedding_provider": EMBEDDING_PROVIDER,
+        "embedding_model": EMBEDDING_MODEL_NAME,
+        "embedding_dimensions": _embedding_config["dimensions"],
+        "max_tokens_per_chunk": MAX_TOKENS_PER_CHUNK,
+        "token_overlap": TOKEN_OVERLAP,
+        "minimum_chunk_chars": MIN_CHUNK_CHARS,
+        "contextual_recipe": CONTEXTUAL_EMBEDDING_RECIPE,
+        "hint_in_candidate_retrieval": HINT_IN_CANDIDATE_RETRIEVAL,
+        "extraction": _config.get("extraction", {}),
+        "structured_extractor": extractor_signature(),
+        "object_storage": _config.get("object_storage", {}),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
 
 
-def _contextual_embeddings_need_refresh(cur, document_id: int) -> bool:
+def _existing_document(cur, filename: str) -> tuple[int, str, str] | None:
     cur.execute(
-        """
-        SELECT EXISTS (
-            SELECT 1
-            FROM chunks
-            WHERE document_id = %s
-              AND (
-                  contextual_embedding IS NULL
-                  OR contextual_embedding_model IS DISTINCT FROM %s
-                  OR contextual_embedding_recipe IS DISTINCT FROM %s
-              )
-        )
-        """,
-        (
-            document_id,
-            EMBEDDING_MODEL_NAME,
-            CONTEXTUAL_EMBEDDING_RECIPE,
-        ),
+        "SELECT id, content_hash, ingest_signature "
+        "FROM documents WHERE filename = %s",
+        (filename,),
     )
-    return bool(cur.fetchone()[0])
+    row = cur.fetchone()
+    return (row[0], row[1], row[2]) if row else None
 
 
-def upsert_document(cur, filename: str, page_count: int, content_hash: str) -> int:
+def upsert_document(
+    cur,
+    filename: str,
+    page_count: int,
+    content_hash: str,
+    signature: str,
+    chunk_counts: dict[str, int],
+) -> int:
     cur.execute(
         """
-        INSERT INTO documents (filename, page_count, content_hash)
-        VALUES (%s, %s, %s)
+        INSERT INTO documents (
+            filename, page_count, content_hash, ingest_signature, chunk_counts
+        )
+        VALUES (%s, %s, %s, %s, %s)
         ON CONFLICT (filename)
         DO UPDATE SET page_count = EXCLUDED.page_count,
                       content_hash = EXCLUDED.content_hash,
+                      ingest_signature = EXCLUDED.ingest_signature,
+                      chunk_counts = EXCLUDED.chunk_counts,
                       ingested_at = now()
         RETURNING id
         """,
-        (filename, page_count, content_hash),
+        (filename, page_count, content_hash, signature, Json(chunk_counts)),
     )
     return cur.fetchone()[0]
 
@@ -433,12 +471,22 @@ def replace_chunks(
             chunk.chunk_index,
             chunk.content_type,
             chunk.content,
+            chunk.retrieval_hint,
+            chunk.caption,
+            Json(chunk.structured_data)
+            if chunk.structured_data is not None
+            else None,
+            chunk.object_key,
+            chunk.media_type,
             chunk.token_count,
+            hashlib.sha256(chunk.content.encode()).hexdigest(),
+            EMBEDDING_PROVIDER,
             EMBEDDING_MODEL_NAME,
             list(raw_embedding),
             EMBEDDING_MODEL_NAME,
             CONTEXTUAL_EMBEDDING_RECIPE,
             list(contextual_embedding),
+            chunk.extractor,
         )
         for chunk, raw_embedding, contextual_embedding in zip(
             chunks, raw_embeddings, contextual_embeddings, strict=True
@@ -450,9 +498,11 @@ def replace_chunks(
         INSERT INTO chunks (
             document_id, sub_document, breadcrumb, section_number,
             page_start, page_end, chunk_index, content_type,
-            content, token_count, embedding_model, embedding,
+            content, retrieval_hint, caption, structured_data,
+            object_key, media_type, token_count, content_hash,
+            embedding_provider, embedding_model, embedding,
             contextual_embedding_model, contextual_embedding_recipe,
-            contextual_embedding
+            contextual_embedding, extractor
         ) VALUES %s
         """,
         rows,
@@ -475,129 +525,144 @@ def embed_contextual_chunks(
 ) -> list[list[float]]:
     if not chunks:
         return []
-    embeddings = model.encode(
-        [
-            contextual_embedding_text_for_model(
+
+    def contextual_input(chunk: Chunk) -> str:
+        authoritative = chunk.content
+        with_hint = (
+            authoritative
+            + (
+                f"\nRetrieval hint: {chunk.retrieval_hint}"
+                if HINT_IN_CANDIDATE_RETRIEVAL and chunk.retrieval_hint
+                else ""
+            )
+        )
+        try:
+            return contextual_embedding_text_for_model(
                 chunk.source_pdf,
                 chunk.breadcrumb,
-                chunk.content,
+                with_hint,
                 model.tokenizer,
                 model.max_seq_length,
             )
-            for chunk in chunks
-        ],
+        except ValueError:
+            if with_hint == authoritative:
+                raise
+            logger.debug(
+                "Dropping oversized retrieval hint from contextual embedding "
+                "for %s page %d",
+                chunk.source_pdf,
+                chunk.page_start,
+            )
+            return contextual_embedding_text_for_model(
+                chunk.source_pdf,
+                chunk.breadcrumb,
+                authoritative,
+                model.tokenizer,
+                model.max_seq_length,
+            )
+
+    embeddings = model.encode(
+        [contextual_input(chunk) for chunk in chunks],
         normalize_embeddings=True,
         show_progress_bar=True,
     )
     return [embedding.tolist() for embedding in embeddings]
 
 
-def refresh_contextual_embeddings(
+def ingest_pdf(
+    pdf_path: Path,
     conn,
-    document_id: int,
-    source_pdf: str,
     model: SentenceTransformer,
-) -> int:
-    """Populate missing or stale contextual vectors without rebuilding chunks."""
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT id, breadcrumb, content
-            FROM chunks
-            WHERE document_id = %s
-              AND (
-                  contextual_embedding IS NULL
-                  OR contextual_embedding_model IS DISTINCT FROM %s
-                  OR contextual_embedding_recipe IS DISTINCT FROM %s
-              )
-            ORDER BY id
-            """,
-            (
-                document_id,
-                EMBEDDING_MODEL_NAME,
-                CONTEXTUAL_EMBEDDING_RECIPE,
-            ),
-        )
-        rows = cur.fetchall()
-
-    if not rows:
-        return 0
-
-    contextual_texts = [
-        contextual_embedding_text_for_model(
-            source_pdf,
-            breadcrumb,
-            content,
-            model.tokenizer,
-            model.max_seq_length,
-        )
-        for _, breadcrumb, content in rows
-    ]
-    embeddings = model.encode(
-        contextual_texts,
-        normalize_embeddings=True,
-        show_progress_bar=True,
+    *,
+    storage=None,
+) -> None:
+    """Extract and replace all content types for one PDF atomically."""
+    from retrieval.structured_extraction import (
+        build_structured_chunks,
+        extract_elements,
+        safe_document_slug,
     )
-    values = [
-        (
-            chunk_id,
-            EMBEDDING_MODEL_NAME,
-            CONTEXTUAL_EMBEDDING_RECIPE,
-            embedding.tolist(),
-        )
-        for (chunk_id, *_), embedding in zip(rows, embeddings, strict=True)
-    ]
-    with conn.cursor() as cur:
-        execute_values(
-            cur,
-            """
-            UPDATE chunks AS c
-            SET contextual_embedding_model = data.embedding_model,
-                contextual_embedding_recipe = data.embedding_recipe,
-                contextual_embedding = data.embedding
-            FROM (VALUES %s) AS data(id, embedding_model, embedding_recipe, embedding)
-            WHERE c.id = data.id
-            """,
-            values,
-            template="(%s, %s, %s, %s::vector)",
-        )
-    return len(values)
 
-
-def ingest_pdf(pdf_path: Path, conn, model: SentenceTransformer) -> None:
     content_hash = hash_file(pdf_path)
+    signature = ingest_signature()
     with conn.cursor() as cur:
         existing = _existing_document(cur, pdf_path.name)
-        contextual_refresh_needed = (
-            bool(existing)
-            and existing[1] == content_hash
-            and _contextual_embeddings_need_refresh(cur, existing[0])
-        )
-    if existing and existing[1] == content_hash:
-        if not contextual_refresh_needed:
-            logger.info("Skipping %s (unchanged and embeddings current)", pdf_path.name)
-            return
-        updated = refresh_contextual_embeddings(
-            conn,
-            existing[0],
-            pdf_path.name,
-            model,
-        )
-        conn.commit()
-        logger.info(
-            "Updated %d contextual embedding(s) for unchanged %s",
-            updated,
-            pdf_path.name,
-        )
+    if existing and existing[1:] == (content_hash, signature):
+        logger.info("Skipping %s (content and ingest configuration unchanged)", pdf_path.name)
         return
 
+    storage = storage or get_object_storage()
+    old_object_prefixes: set[str] = set()
+    if existing:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT object_key
+                FROM chunks
+                WHERE document_id = %s AND object_key IS NOT NULL
+                """,
+                (existing[0],),
+            )
+            old_object_prefixes = {
+                str(PurePosixPath(row[0]).parent) for row in cur.fetchall()
+            }
     reader = pypdf.PdfReader(pdf_path)
-    chunks = build_chunks(pdf_path, reader, model.tokenizer)
+    narrative_chunks = build_chunks(pdf_path, reader, model.tokenizer)
+    leaves = build_leaf_sections(pdf_path, reader)
+    structured_enabled = bool(
+        _config.get("extraction", {})
+        .get("structured", {})
+        .get("enabled", True)
+    )
+    structured_chunks: list[Chunk] = []
+    object_prefix: str | None = None
+    if structured_enabled:
+        elements = extract_elements(pdf_path, len(reader.pages))
+        object_prefix = (
+            f"{safe_document_slug(pdf_path.name)}/"
+            f"{content_hash[:12]}-{signature[:12]}"
+        )
+
+        def page_text(page_idx: int) -> str:
+            try:
+                return reader.pages[page_idx].extract_text() or ""
+            except Exception:
+                logger.debug(
+                    "Could not extract page context from %s page %d",
+                    pdf_path.name,
+                    page_idx,
+                    exc_info=True,
+                )
+                return ""
+
+        structured_chunks = build_structured_chunks(
+            pdf_path,
+            elements,
+            leaves,
+            model.tokenizer,
+            page_text_fn=page_text,
+            storage=storage,
+            object_prefix=object_prefix,
+        )
+    chunks = [*narrative_chunks, *structured_chunks]
     raw_embeddings = embed_chunks(model, chunks)
     contextual_embeddings = embed_contextual_chunks(model, chunks)
+    chunk_counts = {
+        content_type: sum(
+            1 for chunk in chunks if chunk.content_type == content_type
+        )
+        for content_type in ("narrative", "table", "figure")
+    }
 
     with conn.cursor() as cur:
-        document_id = upsert_document(cur, pdf_path.name, len(reader.pages), content_hash)
+        document_id = upsert_document(
+            cur,
+            pdf_path.name,
+            len(reader.pages),
+            content_hash,
+            signature,
+            chunk_counts,
+        )
         replace_chunks(
             cur,
             document_id,
@@ -606,11 +671,28 @@ def ingest_pdf(pdf_path: Path, conn, model: SentenceTransformer) -> None:
             contextual_embeddings,
         )
     conn.commit()
-    logger.info("Ingested %s: %d chunks", pdf_path.name, len(chunks))
+    for old_prefix in old_object_prefixes - ({object_prefix} if object_prefix else set()):
+        try:
+            storage.clear_prefix(old_prefix)
+        except Exception:
+            logger.warning(
+                "Ingest succeeded but stale figure prefix could not be cleared: %s",
+                old_prefix,
+                exc_info=True,
+            )
+    logger.info(
+        "Ingested %s: %d narrative, %d table, %d figure chunks",
+        pdf_path.name,
+        chunk_counts["narrative"],
+        chunk_counts["table"],
+        chunk_counts["figure"],
+    )
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Chunk and embed WMP PDFs into Postgres/pgvector.")
+    parser = argparse.ArgumentParser(
+        description="Extract, embed, and store all PDF content types."
+    )
     parser.add_argument(
         "pdf_dir",
         type=Path,
@@ -618,17 +700,30 @@ def main() -> None:
         default=Path("resources/wmp/pdf"),
         help="Directory containing PDF files to ingest (default: resources/wmp/pdf).",
     )
+    parser.add_argument(
+        "--only",
+        type=str,
+        default=None,
+        help="Only ingest PDFs whose filename contains this substring.",
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
     setup_database()
     model = get_embedding_model()
+    storage = get_object_storage()
     conn = connect_db()
     try:
         pdf_paths = sorted(args.pdf_dir.glob("*.pdf"))
+        if args.only:
+            pdf_paths = [
+                path
+                for path in pdf_paths
+                if args.only.lower() in path.name.lower()
+            ]
         for pdf_path in tqdm(pdf_paths, desc="Ingesting PDFs", unit="file"):
             try:
-                ingest_pdf(pdf_path, conn, model)
+                ingest_pdf(pdf_path, conn, model, storage=storage)
             except Exception as exc:
                 conn.rollback()
                 log_failure("ingest_pdf", pdf_path.name, exc)

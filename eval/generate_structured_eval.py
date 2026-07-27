@@ -1,6 +1,6 @@
 """Generate a table/figure retrieval evaluation dataset from ingested chunks.
 
-Samples structured chunks straight from `structured_chunks` (so every gold
+Samples table/figure chunks straight from the unified ``chunks`` table (so every gold
 reference is guaranteed to resolve), then asks Claude Haiku -- the same model
 and API key the query-rewrite path already uses -- to draft one natural
 question per chunk that is answerable from that chunk alone. Evidence is
@@ -34,7 +34,9 @@ from retrieval.utils import connect_db, get_anthropic_client, load_config
 logger = logging.getLogger(__name__)
 log_failure = get_failure_logger("generate_structured_eval")
 
-GENERATION_MODEL = load_config()["local"]["query_rewrite"]["model"]
+GENERATION_MODEL = load_config().get("query_rewrite", {}).get(
+    "model", "claude-haiku-4-5-20251001"
+)
 
 MIN_TABLE_ROWS_FOR_EVAL = 3
 MIN_TABLE_TOKENS_FOR_EVAL = 40
@@ -58,23 +60,23 @@ _SYSTEM_PROMPT = (
 def _fetch_candidates(conn, content_type: str) -> list[dict]:
     if content_type == "table":
         condition = (
-            "s.content_type = 'table' "
-            f"AND (s.structured_data->>'num_rows')::int >= {MIN_TABLE_ROWS_FOR_EVAL} "
-            f"AND s.token_count >= {MIN_TABLE_TOKENS_FOR_EVAL}"
+            "c.content_type = 'table' "
+            f"AND (c.structured_data->>'num_rows')::int >= {MIN_TABLE_ROWS_FOR_EVAL} "
+            f"AND c.token_count >= {MIN_TABLE_TOKENS_FOR_EVAL}"
         )
     else:
         condition = (
-            "s.content_type = 'figure' "
-            f"AND length(coalesce(s.caption, '')) >= {MIN_FIGURE_CAPTION_CHARS}"
+            "c.content_type = 'figure' "
+            f"AND length(coalesce(c.caption, '')) >= {MIN_FIGURE_CAPTION_CHARS}"
         )
     with conn.cursor() as cur:
         cur.execute(
             f"""
-            SELECT s.id, d.filename, s.content_type, s.page_start, s.chunk_index,
-                   s.breadcrumb, s.content, s.caption
-            FROM structured_chunks s JOIN documents d ON d.id = s.document_id
+            SELECT c.id, d.filename, c.content_type, c.page_start, c.chunk_index,
+                   c.breadcrumb, c.content, c.caption
+            FROM chunks c JOIN documents d ON d.id = c.document_id
             WHERE {condition}
-            ORDER BY s.id
+            ORDER BY c.id
             """
         )
         rows = cur.fetchall()

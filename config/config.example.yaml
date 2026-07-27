@@ -1,41 +1,72 @@
-local:
-  db:
-    host: localhost
-    port: 5433
-    dbname: postgres
-    user: postgres
-    password: change-me
+# Non-secret application configuration.
+# Copy to config/config.yaml. Keep passwords/API keys in .env or your AWS
+# secret/IAM configuration; config/config.yaml and .env are gitignored.
+
+database:
+  provider: postgresql
+  # local | rds | aurora. All three use the same PostgreSQL code path.
+  deployment: local
+  host: localhost
+  port: 5433
+  name: postgres
+  user: postgres
+  password_env: POSTGRES_PASSWORD
+  sslmode: prefer
+  connect_timeout_seconds: 10
+
+models:
   embedding:
-    model: BAAI/bge-base-en-v1.5
+    # Provider interface is ready for extension; this is the implemented provider.
+    provider: sentence_transformers
+    name: BAAI/bge-base-en-v1.5
     dimensions: 768
     max_tokens_per_chunk: 400
     minimum_chunk_chars: 20
     token_overlap: 50
-  rerank:
-    model: BAAI/bge-reranker-base
-  query_rewrite:
-    model: claude-haiku-4-5-20251001
-    mode: auto
-    max_subquestions: 2
-  retrieval:
-    embedding_mode: hybrid
-    hybrid_pool_mode: union
-    retrieval_top_k: 30
-    rerank_top_k: 10
-    rrf_k: 60
+  reranker:
+    provider: sentence_transformers
+    name: BAAI/bge-reranker-base
+
+query_rewrite:
+  model: claude-haiku-4-5-20251001
+  mode: auto
+  max_subquestions: 2
+
+retrieval:
+  embedding_mode: hybrid
+  hybrid_pool_mode: union
+  retrieval_top_k: 30
+  rerank_top_k: 10
+  rrf_k: 60
+  # Soft metadata evidence, not a reserved table/figure result quota.
+  caption_rerank_weight: 0.25
+  lexical_caption_weight: 4.0
+  lexical_hint_weight: 0.25
+  deduplicate_exact_content: true
+
+extraction:
   structured:
-    # Local-only table/figure extraction (docling). No cloud calls at ingest.
+    enabled: true
     extractor_version: docling-v1
-    # Tables smaller than this are treated as layout noise and skipped.
     min_table_rows: 2
     min_table_cols: 2
-    # Figures smaller than this (rendered pixels) are logos/decorations.
     min_figure_area_px: 10000
-    # Cropped figure PNGs are written here, relative to the project root.
-    figure_images_dir: resources/wmp/figures
     images_scale: 2.0
-    # Local SmolVLM-256M figure descriptions (first run downloads the model).
-    picture_description: true
-    # 0 = convert each PDF in one pass; N>0 = convert in N-page batches
-    # (bounds memory on very large PDFs).
+    # 0 converts a PDF in one pass; N>0 bounds memory with N-page batches.
     page_batch_size: 0
+    figure_description:
+      # Docling's local SmolVLM description is an unverified retrieval hint.
+      generate: true
+      candidate_retrieval: true
+      reranking: false
+      answer_context: false
+
+object_storage:
+  # filesystem for local development; s3 for AWS.
+  provider: filesystem
+  filesystem:
+    root: resources/wmp/figures
+  s3:
+    bucket: replace-me
+    prefix: sdge-chatbot/figures
+    region: us-west-2

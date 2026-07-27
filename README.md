@@ -1,215 +1,279 @@
-# SDG&E WMP Text Retrieval
+# SDG&E WMP Retrieval
 
-This project retrieves supporting text from SDG&E Wildfire Mitigation Plan
-(WMP) PDFs. It uses PostgreSQL with pgvector, BGE embeddings, and a cross-encoder
-reranker.
+This project ingests SDG&E Wildfire Mitigation Plan PDFs and retrieves
+supporting narrative text, tables, and figures through one PostgreSQL/pgvector
+index.
 
-The accepted retrieval pipeline is the raw-preserving hybrid union:
+The supported workflow has:
+
+- one ingest command for narrative text, tables, and figures;
+- one `chunks` table for every content type;
+- raw and contextual embeddings generated automatically for every chunk;
+- one query command that searches all content types together;
+- no query-type classifier and no structured/narrative result quota.
+
+## Retrieval architecture
 
 ```text
+PDF
+ ├─ bookmark-aware narrative extraction ─┐
+ └─ Docling table/figure extraction ─────┤
+                                         ├─ unified chunks table
+                                         ├─ raw + contextual embeddings
+                                         └─ exact table JSON / figure object key
+
 question
-   ├─ raw embedding search ───────── top 30 ──┐
-   └─ contextual embedding search ─ top 30 ──┤
-                                              ├─ deduplicated union
-                                              └─ BGE reranker ── top 10
+ ├─ raw vector search ───────────────┐
+ ├─ contextual vector search ────────┤
+ └─ PostgreSQL lexical search ───────┤
+                                     ├─ deduplicated candidate pool
+                                     ├─ cross-encoder + caption prior
+                                     └─ exact-content dedupe → global top results
 ```
 
-All raw candidates are retained. Candidates found only by contextual retrieval
-are appended before the combined pool is reranked. This prevents the contextual
-channel from evicting strong raw candidates while preserving its complementary
-recall.
+Tables retain their exact grid in `structured_data`. Figure crops are stored
+through a filesystem/S3 abstraction and referenced by `object_key`.
 
-## Current models
+Generated figure descriptions are deliberately separated from authoritative
+content:
 
-- Embedding: `BAAI/bge-base-en-v1.5`
-- Reranker: `BAAI/bge-reranker-base`
-- Vector dimensions: 768
-- Raw candidates per query: 30
-- Contextual candidates per query: 30
-- Final reranked results: 10
+- `content` contains caption and deterministic PDF page context;
+- `retrieval_hint` may contain the local vision-model description;
+- the hint can improve candidate recall;
+- by default, it is excluded from reranking and answer evidence.
 
-Each stored chunk has two embeddings:
-
-1. **Raw embedding** — the stored chunk content.
-2. **Contextual embedding** — an embedding-only representation:
-
-   ```text
-   Document: <source PDF filename>
-   Section: <full breadcrumb>
-   Chunk: <stored chunk content>
-   ```
-
-The stored/displayed content is not modified. If the complete contextual input
-exceeds the embedding model limit, only the supplementary `Document:` line is
-removed; the full breadcrumb and chunk content are preserved.
-
-## Evaluation result
-
-The accepted system was evaluated on the 150-question natural dataset:
-
-`eval/pdf/results/2026-07-23-a3b-hybrid-union-natural.json`
-
-| Metric | Score |
-|---|---:|
-| Hit@1 | 0.8533 |
-| Recall@5 | 0.9400 |
-| MRR@5 | 0.8919 |
-| nDCG@5 | 0.9006 |
-| Recall@10 | 0.9633 |
-| MRR@10 | 0.8945 |
-| nDCG@10 | 0.9084 |
-
-The deduplicated reranker pool contained 32–53 chunks per question, with a mean
-of 41.83. Candidate generation missed gold evidence for 3 questions, and the
-reranker missed gold evidence in its top 10 for 2 additional questions.
-
-Historical ablation outputs remain under `eval/pdf/results/` for reproducibility,
-but they are not part of the supported retrieval workflow.
-
-## Setup
-
-Requirements:
+## Requirements
 
 - Python 3.12+
 - [`uv`](https://docs.astral.sh/uv/)
 - PostgreSQL with the pgvector extension
+- source PDFs under `resources/wmp/pdf/`
 
-Install the Python dependencies:
+Install the project:
 
 ```bash
 uv sync
+cp config/config.example.yaml config/config.yaml
+cp .env.example .env
 ```
 
-Create a local configuration:
+Set the local database password in `.env`:
+
+```dotenv
+POSTGRES_PASSWORD=change-me
+```
+
+`config/config.yaml`, `.env`, source PDFs, and extracted figure files are
+ignored by Git.
+
+## Run locally
+
+The refactor uses a new unified schema. The following reset command permanently
+deletes the previously ingested `documents`, `chunks`, `structured_chunks`, and
+structured ingest state. It does not delete the source PDFs.
 
 ```bash
-cp config/config.example.yaml config/config.yaml
+uv run python -m retrieval.setup_db --reset --yes
 ```
 
-Update the database credentials in `config/config.yaml`. If automatic query
-decomposition is enabled, also copy `.env.example` to `.env` and provide an
-Anthropic API key.
-
-Place the source PDFs in:
-
-```text
-resources/wmp/pdf/
-```
-
-The `resources/` directory and local configuration are intentionally ignored by
-Git.
-
-## Ingest PDFs
-
-Run:
+Ingest every PDF, including narrative text, tables, and figures:
 
 ```bash
 uv run python -m retrieval.ingest
 ```
 
-Ingestion now performs the complete database preparation and embedding workflow:
-
-1. Creates or updates the PostgreSQL/pgvector schema.
-2. Extracts bookmark-based leaf sections from each PDF.
-3. Builds stable, overlapping token chunks.
-4. Generates both raw and contextual embeddings.
-5. Stores both vectors with the chunk in one transaction.
-
-No separate contextual-embedding backfill command is required:
-
-- New or changed PDFs are chunked and receive both embeddings.
-- Unchanged PDFs with current embeddings are skipped.
-- Unchanged PDFs with missing or stale contextual embeddings are updated in
-  place without deleting chunks or changing chunk IDs.
-
-## Structured ingest (tables, charts, figures)
-
-An additive second pass extracts tables and figures with
-[docling](https://github.com/docling-project/docling) (local layout +
-TableFormer models, no cloud calls) into a separate `structured_chunks` table.
-The narrative `chunks` table, its ingest, and the accepted text pipeline are
-untouched.
+Ingest only filenames containing a substring:
 
 ```bash
-uv run python -m retrieval.structured_ingest
+uv run python -m retrieval.ingest --only "2023_Base-WMP"
 ```
 
-What it stores per element:
-
-- **Tables** — a Markdown flattening in `content` (embedded and reranked like
-  any chunk, split row-aware with the header repeated in every piece) plus the
-  exact cell grid as JSONB in `structured_data` for precise cell quoting.
-- **Figures/charts** — caption + a local SmolVLM-256M retrieval hint + the
-  figure's own page text as `content`, and the cropped PNG under
-  `resources/wmp/figures/` (`image_path`). The generated hint is not a factual
-  answer source; downstream answering should inspect the stored crop on demand.
-
-Both carry the same breadcrumb / sub-document metadata as narrative chunks
-(mapped by page through the same bookmark leaf-section tree) and both raw and
-contextual embeddings. Noise filters drop table-of-contents "tables"
-(dot-leader density) and captionless branding artwork.
-
-Re-runs skip unchanged PDFs; changing `structured.*` config or the extractor
-version re-extracts automatically (`structured_ingest_state`).
-
-## Query across narrative + structured chunks
+Query all content types:
 
 ```bash
-uv run python -m retrieval.structured_query \
+uv run python -m retrieval.query \
   "What is the 2024 updated target for the Strategic Pole Replacement program?"
 ```
 
-The structured path combines raw and contextual dense retrieval with a local
-PostgreSQL full-text lane over captions, breadcrumbs, and content. A
-cross-encoder plus deterministic caption prior ranks the union, then a 4:1
-structured/narrative lane fusion keeps exact grids and figure crops visible
-without losing narrative corroboration. Structured results are printed with a
-`[table]`/`[figure]` marker and the figure image path when present.
+The output labels every result as `narrative`, `table`, or `figure`. Figure
+results also print the resolved local path or S3 URI.
 
-On the manually audited 60-question structured set, this raises recall@5 from
-0.7167 to 0.9500 and hit@1 from 0.2000 to 0.7500. The reproduced output is
-`eval/pdf/results/2026-07-25-structured-caption-lane-fusion.json`.
+Automatic query decomposition is controlled by `query_rewrite.mode`. Set it to
+`off` to guarantee no Anthropic request:
 
-## Structured evaluation
-
-Generate a table/figure question set from ingested structured chunks (drafted
-with the same Claude Haiku model the query-rewrite path uses), then score it:
-
-```bash
-uv run python -m eval.generate_structured_eval --tables 30 --figures 15
-uv run python -m eval.run_structured_eval --misses \
-  --out eval/pdf/results/structured-eval.json
+```yaml
+query_rewrite:
+  mode: off
 ```
 
-Gold references use the stable key
-(source_pdf, content_type, page_start, chunk_index) against
-`structured_chunks`, so results survive re-extraction.
+## Configuration
 
-## Query
+The checked-in [configuration example](config/config.example.yaml) contains
+all non-secret choices:
 
-The example configuration selects the accepted hybrid-union pipeline by
-default:
+- PostgreSQL deployment and connection behavior;
+- embedding/reranker provider, model, and dimensions;
+- chunk sizes;
+- hybrid retrieval and reranking controls;
+- Docling table/figure extraction;
+- generated figure-hint policy;
+- filesystem or S3 object storage.
+
+Set `SDGE_CONFIG_PATH` to use a YAML file at another path:
 
 ```bash
-uv run python -m retrieval.query \
-  "What is the purpose of the WiNGS-Planning model?"
+export SDGE_CONFIG_PATH=/path/to/config.yaml
 ```
 
-The equivalent explicit command is:
+### Switch models
+
+The currently implemented model provider is `sentence_transformers`. Change
+the embedding or reranker model in YAML:
+
+```yaml
+models:
+  embedding:
+    provider: sentence_transformers
+    name: BAAI/bge-base-en-v1.5
+    dimensions: 768
+  reranker:
+    provider: sentence_transformers
+    name: BAAI/bge-reranker-base
+```
+
+Changing the embedding model triggers a clean vector refresh on the next
+ingest. If the new embedding model has a different dimension, update
+`dimensions`, reset the schema, and re-ingest:
 
 ```bash
-uv run python -m retrieval.query \
-  --embedding-mode hybrid \
-  --hybrid-pool-mode union \
-  "What is the purpose of the WiNGS-Planning model?"
+uv run python -m retrieval.setup_db --reset --yes
+uv run python -m retrieval.ingest
 ```
 
-Automatic query decomposition is controlled by `query_rewrite.mode` in
-`config/config.yaml`. Use `off` when reproducing the accepted evaluation.
+A pgvector column has a fixed dimension, so a dimension change cannot be
+applied safely to existing vectors through configuration alone. Changing only
+the reranker does not require re-ingestion.
 
-## Reproduce the accepted evaluation
+The provider factory rejects unsupported values clearly. It is ready for a
+future Bedrock or SageMaker adapter, but this refactor intentionally implements
+only local SentenceTransformers models.
 
-The full evaluation is intentionally run manually:
+### Configure generated figure hints
+
+```yaml
+extraction:
+  structured:
+    figure_description:
+      generate: true
+      candidate_retrieval: true
+      reranking: false
+      answer_context: false
+```
+
+The recommended defaults generate a local SmolVLM hint and use it only to
+expand candidate recall. A hallucinated hint therefore cannot directly decide
+the reranker order or become factual answer context.
+
+To remove the vision model from ingest entirely:
+
+```yaml
+extraction:
+  structured:
+    figure_description:
+      generate: false
+      candidate_retrieval: false
+      reranking: false
+      answer_context: false
+```
+
+Retrieval then relies on captions, section breadcrumbs, page context, and the
+stored figure crop.
+
+## Migrate to AWS
+
+The production target is Amazon RDS for PostgreSQL with pgvector. Aurora
+PostgreSQL remains a compatible later option; both use the same application
+code and `psycopg2` connection path.
+
+Before selecting an engine version, check AWS's current
+[RDS PostgreSQL extension matrix](https://docs.aws.amazon.com/AmazonRDS/latest/PostgreSQLReleaseNotes/postgresql-extensions.html).
+AWS also documents
+[pgvector setup for Aurora PostgreSQL](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraPostgreSQL.VectorDB.html).
+
+### RDS PostgreSQL
+
+Create an RDS PostgreSQL instance whose engine version supports pgvector, make
+it reachable from the application VPC/security group, and change only the
+database and storage settings:
+
+```yaml
+database:
+  provider: postgresql
+  deployment: rds
+  host: your-instance.region.rds.amazonaws.com
+  port: 5432
+  name: postgres
+  user: app_user
+  password_env: POSTGRES_PASSWORD
+  sslmode: require
+  connect_timeout_seconds: 10
+
+object_storage:
+  provider: s3
+  s3:
+    bucket: your-private-bucket
+    prefix: sdge-chatbot/figures
+    region: us-west-2
+```
+
+Do not place the password or AWS access keys in YAML. In AWS, inject the
+database password from Secrets Manager into `POSTGRES_PASSWORD` and use an IAM
+role for S3 access. The role needs object list, write, and delete permissions
+scoped to the configured bucket prefix.
+
+The S3 adapter loads `boto3` only when `provider: s3` is selected. Add `boto3`
+to the AWS runtime image or deployment dependencies; local filesystem runs do
+not require it.
+
+Run the same commands from the AWS ingest worker:
+
+```bash
+uv run python -m retrieval.setup_db
+uv run python -m retrieval.ingest /path/to/downloaded/pdfs
+```
+
+The setup command creates the `vector` extension, unified schema, HNSW vector
+indexes, and PostgreSQL full-text index. For production, give the schema-setup
+identity permission to create extensions/tables; the steady-state ingest/query
+identity can use narrower privileges.
+
+### Switch RDS to Aurora later
+
+No retrieval or ingest code changes are required:
+
+```yaml
+database:
+  provider: postgresql
+  deployment: aurora
+  host: your-cluster.cluster-region.rds.amazonaws.com
+  port: 5432
+  name: postgres
+  user: app_user
+  password_env: POSTGRES_PASSWORD
+  sslmode: require
+```
+
+Point the host at the Aurora writer endpoint for ingestion. Query-only workers
+may use an appropriate reader endpoint after confirming read-after-write and
+index availability requirements.
+
+## Evaluation after the clean re-ingest
+
+This code refactor does not migrate or re-ingest the existing local database.
+After the clean ingest, run both evaluation sets through the same unified query
+implementation.
+
+Narrative evaluation:
 
 ```bash
 uv run python -m eval.run_eval \
@@ -220,47 +284,44 @@ uv run python -m eval.run_eval \
   --retrieval-top-k 30 \
   --rerank-top-k 10 \
   --metric-k 10 \
-  --out eval/pdf/results/a3b-hybrid-union-natural-recheck.json \
-  --misses
+  --misses \
+  --out eval/pdf/results/unified-narrative.json
 ```
+
+Table/figure evaluation:
+
+```bash
+uv run python -m eval.run_structured_eval \
+  --eval eval/pdf/evaluation_structured.jsonl \
+  --rewrite-mode off \
+  --retrieval-top-k 30 \
+  --rerank-top-k 10 \
+  --metric-k 5 \
+  --misses \
+  --out eval/pdf/results/unified-structured.json
+```
+
+The historical pre-unification results remain under `eval/pdf/results/`, but
+they should not be treated as measurements of the new unified schema.
 
 ## Tests
 
+The unit tests do not connect to AWS or call external model APIs:
+
 ```bash
-uv run python -m unittest discover -s tests
+HF_HUB_OFFLINE=1 uv run --frozen python -m unittest discover -s tests
 ```
 
 ## Project layout
 
 ```text
-config/
-  config.example.yaml       Reproducible non-secret configuration template
-eval/
-  pdf/evaluation_natural.jsonl
-  pdf/results/              Evaluation artifacts
-  run_eval.py               Retrieval evaluation harness
-retrieval/
-  contextual_embeddings.py Contextual embedding input recipe
-  ingest.py                 Schema setup, chunking, and both embeddings
-  query.py                  Hybrid retrieval, union pooling, and reranking
-  setup_db.py               PostgreSQL/pgvector schema
-  structured_ingest.py      Docling table/figure extraction and embedding
-  structured_query.py       Retrieval across narrative + structured chunks
-  structured_schema.py      structured_chunks / structured_ingest_state schema
-  utils.py                  Configuration, database, and model loaders
-eval/
-  generate_structured_eval.py  Table/figure eval dataset generator
-  run_structured_eval.py       Structured retrieval scoring harness
-tests/
-  test_ingest_contextual_embeddings.py
-  test_query_fusion.py
-  test_structured_ingest.py
+config/config.example.yaml       YAML configuration reference
+retrieval/setup_db.py            Unified PostgreSQL/pgvector schema
+retrieval/ingest.py              One ingest workflow and persistence path
+retrieval/structured_extraction.py
+                                 Specialized Docling extraction helpers
+retrieval/object_storage.py      Filesystem and S3 figure storage adapters
+retrieval/query.py               One global retrieval/reranking path
+eval/run_eval.py                 Narrative retrieval evaluation
+eval/run_structured_eval.py      Table/figure evaluation on the same query path
 ```
-
-## Current scope
-
-The accepted text-retrieval evaluation covers narrative chunks only. Tables,
-charts, and figures are additionally ingested by the structured pass above and
-evaluated separately (`eval/run_structured_eval.py`); flattened element text
-may still appear inside narrative chunks, which mildly aids recall and is
-accepted.

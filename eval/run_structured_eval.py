@@ -1,15 +1,12 @@
 """Retrieval evaluation for structured (table/figure) chunks.
 
-Additive companion to `eval.run_eval` (which scores the narrative-only accepted
-pipeline and is left untouched). This harness runs every question in a
-structured evaluation JSONL through `retrieval.structured_query`
-(hybrid raw+contextual union over `chunks` UNION `structured_chunks`, then the
-cross-encoder rerank) and scores the reranked top-k against gold STRUCTURED
-chunks.
+This harness runs table/figure questions through the same unified
+``retrieval.query`` path used for narrative questions and scores the reranked
+top-k against gold table/figure chunks in ``chunks``.
 
 Gold chunks are resolved by the stable key
-(source_pdf, content_type, page_start, chunk_index) against
-`structured_chunks`, so the eval survives re-extraction that renumbers serial
+(source_pdf, content_type, page_start, chunk_index) against ``chunks``, so the
+eval survives re-extraction that renumbers serial
 ids. Duplicate-aware matching mirrors run_eval: the corpus contains
 byte-identical duplicate documents, so a retrieved candidate counts as gold if
 its key matches OR its stored content is identical to a gold chunk's content.
@@ -36,21 +33,21 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from eval.run_eval import normalize
-from retrieval.structured_query import (
-    RankedStructuredResult,
-    StructuredQueryObject,
-    retrieve_structured_with_diagnostics,
+from retrieval.query import (
+    QueryObject,
+    RankedResult,
+    retrieve_with_diagnostics,
 )
 from retrieval.utils import connect_db
 
 DEFAULT_EVAL_PATH = "eval/pdf/evaluation_structured.jsonl"
 DEFAULT_K = 5
 
-GoldGroup = tuple[set[str], set[str]]  # (candidate keys, normalized contents)
+GoldGroup = tuple[set[int], set[str]]  # (chunk ids, normalized contents)
 
 
 class GoldNotFoundError(Exception):
-    """A row's stable-key gold reference does not resolve in structured_chunks."""
+    """A row's stable-key gold reference does not resolve in unified chunks."""
 
 
 @dataclass(frozen=True)
@@ -81,10 +78,10 @@ def gold_signatures(conn, row: dict) -> list[GoldGroup]:
         for evidence in row["evidence"]:
             cur.execute(
                 """
-                SELECT s.id, s.content
-                FROM structured_chunks s JOIN documents d ON d.id = s.document_id
-                WHERE d.filename = %s AND s.content_type = %s
-                  AND s.page_start = %s AND s.chunk_index = %s
+                SELECT c.id, c.content
+                FROM chunks c JOIN documents d ON d.id = c.document_id
+                WHERE d.filename = %s AND c.content_type = %s
+                  AND c.page_start = %s AND c.chunk_index = %s
                 """,
                 (
                     evidence["source_pdf"],
@@ -102,24 +99,24 @@ def gold_signatures(conn, row: dict) -> list[GoldGroup]:
                     f"page_start={evidence['page_start_db']}, "
                     f"chunk_index={evidence['chunk_index']})"
                 )
-            groups.append(({f"structured:{resolved[0]}"}, {normalize(resolved[1])}))
+            groups.append(({resolved[0]}, {normalize(resolved[1])}))
     return groups
 
 
 def _query_object(
-    candidate: StructuredQueryObject | RankedStructuredResult,
-) -> StructuredQueryObject:
-    if isinstance(candidate, RankedStructuredResult):
+    candidate: QueryObject | RankedResult,
+) -> QueryObject:
+    if isinstance(candidate, RankedResult):
         return candidate.query_object
     return candidate
 
 
 def _matches_group(
-    candidate: StructuredQueryObject | RankedStructuredResult, group: GoldGroup
+    candidate: QueryObject | RankedResult, group: GoldGroup
 ) -> bool:
     qo = _query_object(candidate)
-    keys, contents = group
-    return qo.key in keys or normalize(qo.content) in contents
+    ids, contents = group
+    return qo.chunk_id in ids or normalize(qo.content) in contents
 
 
 def _distinct_gold_hits(ranked, gold_groups: list[GoldGroup]) -> list[bool]:
@@ -184,7 +181,7 @@ def score_row(
         kwargs["retrieval_top_k"] = retrieval_top_k
     if rerank_top_k is not None:
         kwargs["rerank_top_k"] = rerank_top_k
-    ranked, diagnostics = retrieve_structured_with_diagnostics(
+    ranked, diagnostics = retrieve_with_diagnostics(
         row["question"], conn, **kwargs
     )
 
@@ -214,10 +211,12 @@ def score_row(
         num_gold=num_gold,
         hit_at_1=1.0 if flags and flags[0] else 0.0,
         first_gold_rank=first_rank,
-        retrieved_keys=[result.query_object.key for result in ranked[:k]],
+        retrieved_keys=[str(result.query_object.chunk_id) for result in ranked[:k]],
         pooled_gold_rank=pooled_gold_rank,
         structured_in_top_k=sum(
-            1 for result in ranked[:k] if result.query_object.origin == "structured"
+            1
+            for result in ranked[:k]
+            if result.query_object.content_type in ("table", "figure")
         ),
         cutoff_metrics=cutoff_metrics,
     )
