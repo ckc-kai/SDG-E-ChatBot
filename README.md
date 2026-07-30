@@ -4,9 +4,11 @@ UCLA MEng Capstone project for grounded question answering over SDG&E
 regulatory filings.
 
 Task 2 retrieval code is in `retrieval/`. Task 3's framework-neutral generation
-core is in `generation/`; it currently uses deterministic local mocks and does
-not call AWS or any external answer-generation model. See
-`docs/task3-contract.md` for the Task 2 adapter and Task 4 handoff contract.
+core is in `generation/`; it supports deterministic local mocks and an Amazon
+Bedrock Converse provider with an injectable client. Live Bedrock calls remain
+disabled until account access and credentials are available. See
+`docs/task3-contract.md` for the Task 2/Task 4 contract and
+`docs/task3-bedrock.md` for the provider and gold-evidence evaluation workflow.
 
 ## A2: contextual embedding ablation
 
