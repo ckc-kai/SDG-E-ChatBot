@@ -1,7 +1,8 @@
 """Retrieval evaluation for structured (table/figure) chunks.
 
 This harness runs table/figure questions through the same unified
-``retrieval.query`` path used for narrative questions and scores the reranked
+``retrieval.query.pdf.query`` path used for narrative questions and scores the
+reranked
 top-k against gold table/figure chunks in ``chunks``.
 
 Gold chunks are resolved by the stable key
@@ -33,7 +34,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from eval.run_eval import normalize
-from retrieval.query import (
+from retrieval.query.lanes import ALL_LANES
+from retrieval.query.pdf.query import (
     QueryObject,
     RankedResult,
     retrieve_with_diagnostics,
@@ -62,6 +64,9 @@ class StructuredQueryScore:
     pooled_gold_rank: int | None  # rank of first gold in the pre-rerank pool
     structured_in_top_k: int  # structured candidates among reranked top-k
     cutoff_metrics: dict[int, dict[str, float]] = field(default_factory=dict)
+    # Full reranked list with gold flags, so score calibration can be fitted
+    # from stored runs without re-retrieving.
+    reranked_candidates: list[dict] = field(default_factory=list)
 
 
 def load_eval(path: str) -> list[dict]:
@@ -172,11 +177,14 @@ def score_row(
     rewrite_mode: str = "off",
     retrieval_top_k: int | None = None,
     rerank_top_k: int | None = None,
+    lanes: tuple[str, ...] | None = None,
 ) -> StructuredQueryScore:
     gold_groups = gold_signatures(conn, row)
     num_gold = len(gold_groups)
 
     kwargs: dict = {"rewrite_mode": rewrite_mode}
+    if lanes:
+        kwargs["lanes"] = tuple(lanes)
     if retrieval_top_k is not None:
         kwargs["retrieval_top_k"] = retrieval_top_k
     if rerank_top_k is not None:
@@ -212,6 +220,20 @@ def score_row(
         hit_at_1=1.0 if flags and flags[0] else 0.0,
         first_gold_rank=first_rank,
         retrieved_keys=[str(result.query_object.chunk_id) for result in ranked[:k]],
+        reranked_candidates=[
+            {
+                "position": position,
+                "chunk_id": result.query_object.chunk_id,
+                "content_type": result.query_object.content_type,
+                "rerank_score": result.rerank_score,
+                "is_gold": any(
+                    _matches_group(result, group) for group in gold_groups
+                ),
+            }
+            for position, result in enumerate(
+                diagnostics.reranked_candidates, start=1
+            )
+        ],
         pooled_gold_rank=pooled_gold_rank,
         structured_in_top_k=sum(
             1
@@ -320,6 +342,10 @@ def main() -> None:
     parser.add_argument(
         "--rewrite-mode", choices=("auto", "off", "always"), default="off"
     )
+    parser.add_argument(
+        "--lanes", nargs="*", choices=list(ALL_LANES), default=None,
+        help="Retrieve and rerank within these lanes before merging.",
+    )
     parser.add_argument("--retrieval-top-k", type=int, default=None)
     parser.add_argument("--rerank-top-k", type=int, default=None)
     args = parser.parse_args()
@@ -345,6 +371,7 @@ def main() -> None:
                         rerank_top_k=args.rerank_top_k
                         if args.rerank_top_k is not None
                         else max(metric_cutoffs),
+                        lanes=tuple(args.lanes) if args.lanes else None,
                     )
                 )
             except GoldNotFoundError as exc:
@@ -380,6 +407,7 @@ def main() -> None:
                     "pooled_gold_rank": s.pooled_gold_rank,
                     "structured_in_top_k": s.structured_in_top_k,
                     "retrieved_keys": s.retrieved_keys,
+                    "reranked_candidates": s.reranked_candidates,
                 }
                 for s in scores
             ],

@@ -20,10 +20,11 @@ index.
 
 The supported workflow has:
 
-- one ingest command for narrative text, tables, and figures;
+- separate PDF and Excel ingest commands;
 - one `chunks` table for every content type;
 - raw and contextual embeddings generated automatically for every chunk;
-- one query command that searches all content types together;
+- separate PDF and execution-verified Excel query paths;
+- optional independent narrative, structured-PDF, and Excel retrieval lanes;
 - no query-type classifier and no structured/narrative result quota.
 
 ## Retrieval architecture
@@ -31,18 +32,20 @@ The supported workflow has:
 ```text
 PDF
  ├─ bookmark-aware narrative extraction ─┐
- └─ Docling table/figure extraction ─────┤
-                                         ├─ unified chunks table
-                                         ├─ raw + contextual embeddings
-                                         └─ exact table JSON / figure object key
+└─ Docling table/figure extraction ─────┤
+                                         ├─ unified chunks table ─┐
+Excel ── contract-driven facts/cards ────┘                        │
+                                                                  │
+lane-enabled question                                             │
+ ├─ narrative lane ────────────────────────────────────────────────┤
+ ├─ structured PDF lane ───────────────────────────────────────────┤
+ └─ Excel-card lane ───────────────────────────────────────────────┘
 
-question
- ├─ raw vector search ───────────────┐
- ├─ contextual vector search ────────┤
- └─ PostgreSQL lexical search ───────┤
-                                     ├─ deduplicated candidate pool
-                                     ├─ cross-encoder + caption prior
-                                     └─ exact-content dedupe → global top results
+Each lane
+ ├─ raw vector search
+ ├─ contextual vector search
+ ├─ PostgreSQL lexical search
+ └─ candidate merge → rerank within lane → cross-lane merge
 ```
 
 Tables retain their exact grid in `structured_data`. Figure crops are stored
@@ -93,24 +96,30 @@ uv run python -m retrieval.setup_db --reset --yes
 Ingest every PDF, including narrative text, tables, and figures:
 
 ```bash
-uv run python -m retrieval.ingest
+uv run python -m retrieval.ingest.pdf
 ```
 
 Ingest only filenames containing a substring:
 
 ```bash
-uv run python -m retrieval.ingest --only "2023_Base-WMP"
+uv run python -m retrieval.ingest.pdf --only "2023_Base-WMP"
+```
+
+Ingest the cleaned Excel CSVs:
+
+```bash
+uv run python -m retrieval.ingest.excel
 ```
 
 Query all content types:
 
 ```bash
-uv run python -m retrieval.query \
+uv run python -m retrieval.query.pdf \
   "What is the 2024 updated target for the Strategic Pole Replacement program?"
 ```
 
-The output labels every result as `narrative`, `table`, or `figure`. Figure
-results also print the resolved local path or S3 URI.
+The output labels every result as `narrative`, `table`, `figure`, or
+`excel_card`. Figure results also print the resolved local path or S3 URI.
 
 Automatic query decomposition is controlled by `query_rewrite.mode`. Set it to
 `off` to guarantee no Anthropic request:
@@ -161,7 +170,7 @@ ingest. If the new embedding model has a different dimension, update
 
 ```bash
 uv run python -m retrieval.setup_db --reset --yes
-uv run python -m retrieval.ingest
+uv run python -m retrieval.ingest.pdf
 ```
 
 A pgvector column has a fixed dimension, so a dimension change cannot be
@@ -253,7 +262,7 @@ Run the same commands from the AWS ingest worker:
 
 ```bash
 uv run python -m retrieval.setup_db
-uv run python -m retrieval.ingest /path/to/downloaded/pdfs
+uv run python -m retrieval.ingest.pdf /path/to/downloaded/pdfs
 ```
 
 The setup command creates the `vector` extension, unified schema, HNSW vector
@@ -329,13 +338,21 @@ HF_HUB_OFFLINE=1 uv run --frozen python -m unittest discover -s tests
 ## Project layout
 
 ```text
-config/config.example.yaml       YAML configuration reference
-retrieval/setup_db.py            Unified PostgreSQL/pgvector schema
-retrieval/ingest.py              One ingest workflow and persistence path
-retrieval/structured_extraction.py
-                                 Specialized Docling extraction helpers
-retrieval/object_storage.py      Filesystem and S3 figure storage adapters
-retrieval/query.py               One global retrieval/reranking path
-eval/run_eval.py                 Narrative retrieval evaluation
-eval/run_structured_eval.py      Table/figure evaluation on the same query path
+config/                         Runtime settings and reviewed Excel contracts
+retrieval/
+├── ingest/
+│   ├── pdf/                    PDF narrative/table/figure ingestion
+│   └── excel/                  Excel contracts, transforms, cards, and ingest
+├── query/
+│   ├── pdf/                    Narrative and structured-PDF retrieval
+│   ├── excel/                  Excel planning and execution-verified answers
+│   ├── lanes.py                Lane definitions and confidence signals
+│   └── calibration.py          Optional diagnostic score calibration
+├── contextual_embeddings.py   Shared embedding recipe
+├── object_storage.py          Filesystem and S3 figure storage
+├── setup_db.py                Base PostgreSQL/pgvector schema
+└── utils.py                   Shared configuration, clients, and DB connection
+eval/
+├── pdf/                       PDF evaluation data and historical results
+└── excel/                     Excel evaluation data
 ```

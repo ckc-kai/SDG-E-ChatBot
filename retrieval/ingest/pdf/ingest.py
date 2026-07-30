@@ -392,7 +392,7 @@ def hash_file(path: Path) -> str:
 
 def ingest_signature() -> str:
     """Hash every setting that changes stored chunks or vectors."""
-    from retrieval.structured_extraction import extractor_signature
+    from retrieval.ingest.pdf.structured_extraction import extractor_signature
 
     payload = {
         "recipe": "unified-ingest-v1",
@@ -577,7 +577,7 @@ def ingest_pdf(
     storage=None,
 ) -> None:
     """Extract and replace all content types for one PDF atomically."""
-    from retrieval.structured_extraction import (
+    from retrieval.ingest.pdf.structured_extraction import (
         build_structured_chunks,
         extract_elements,
         safe_document_slug,

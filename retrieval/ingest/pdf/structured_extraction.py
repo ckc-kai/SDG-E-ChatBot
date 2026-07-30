@@ -8,7 +8,8 @@
 
 2. Section mapping: every extracted element is mapped back into the SAME
    bookmark leaf-section tree the narrative ingest builds (reusing
-   `retrieval.ingest.build_leaf_sections`), by page containment. Structured
+   `retrieval.ingest.pdf.ingest.build_leaf_sections`), by page containment.
+   Structured
    chunks therefore carry the same breadcrumb / sub_document / section_number
    metadata as their narrative siblings, and the contextual-embedding recipe
    applies unchanged.
@@ -40,7 +41,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from retrieval.ingest import (
+from retrieval.ingest.pdf.ingest import (
     Chunk,
     LeafSection,
     chunk_text,

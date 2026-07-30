@@ -24,7 +24,7 @@ from retrieval.contextual_embeddings import (
     CONTEXTUAL_EMBEDDING_RECIPE,
     contextual_embedding_text_for_model,
 )
-from retrieval.excel_cards import (
+from retrieval.ingest.excel.cards import (
     CARD_BUILDER_VERSION,
     CARD_COUNT_HARD_CAP,
     CARD_COUNT_TARGET,
@@ -32,7 +32,7 @@ from retrieval.excel_cards import (
     build_cards,
     fit_cards_to_model,
 )
-from retrieval.excel_contracts import (
+from retrieval.ingest.excel.contracts import (
     ContractError,
     ContractSet,
     TableContract,
@@ -40,8 +40,8 @@ from retrieval.excel_contracts import (
     load_contracts,
     table_number_from_filename,
 )
-from retrieval.excel_schema import migrate
-from retrieval.excel_transform import (
+from retrieval.ingest.excel.schema import migrate
+from retrieval.ingest.excel.transform import (
     Fact,
     Record,
     read_rows,

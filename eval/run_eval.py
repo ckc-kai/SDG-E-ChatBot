@@ -1,7 +1,8 @@
 """Retrieval evaluation harness for the WMP knowledge base.
 
 Runs every question in an evaluation JSONL through the real retrieval pipeline
-(`retrieval.query.retrieve`: rewrite -> embed -> pgvector search -> rerank) and
+(`retrieval.query.pdf.query.retrieve`: rewrite -> embed -> pgvector search ->
+rerank) and
 scores the reranked top-k against each question's gold chunks.
 
 Metrics (averaged over all questions, and broken down by difficulty / type):
@@ -37,7 +38,8 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from retrieval.query import (
+from retrieval.query.lanes import ALL_LANES
+from retrieval.query.pdf.query import (
     DEFAULT_EMBEDDING_MODE,
     DEFAULT_HYBRID_POOL_MODE,
     EMBEDDING_MODES,
@@ -335,6 +337,7 @@ def score_row(
     embedding_mode: str = DEFAULT_EMBEDDING_MODE,
     rrf_k: int = RRF_K,
     hybrid_pool_mode: str = DEFAULT_HYBRID_POOL_MODE,
+    lanes: tuple[str, ...] | None = None,
 ) -> QueryScore:
     gold_groups = gold_signatures(conn, row)
     gold_ids = set().union(*(ids for ids, _ in gold_groups))
@@ -351,6 +354,7 @@ def score_row(
         embedding_mode=embedding_mode,
         rrf_k=rrf_k,
         hybrid_pool_mode=hybrid_pool_mode,
+        lanes=lanes,
     )
     cutoffs = sorted(set(metric_cutoffs or []) | {k})
     ranked = ranked[:max(cutoffs)]
@@ -536,6 +540,16 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=None, help="Optional JSON results output path.")
     parser.add_argument("--misses", action="store_true", help="List questions with no gold in top-k.")
     parser.add_argument(
+        "--lanes",
+        nargs="*",
+        choices=list(ALL_LANES),
+        default=None,
+        help=(
+            "Retrieve and rerank within these lanes, merging only afterwards. "
+            "Omit for the legacy single-pool path."
+        ),
+    )
+    parser.add_argument(
         "--rewrite-mode",
         choices=("auto", "off", "always"),
         default=QUERY_REWRITE_MODE,
@@ -628,6 +642,7 @@ def main() -> None:
                         embedding_mode=args.embedding_mode,
                         rrf_k=args.rrf_k,
                         hybrid_pool_mode=args.hybrid_pool_mode,
+                        lanes=tuple(args.lanes) if args.lanes else None,
                     )
                 )
             except GoldNotFoundError as exc:

@@ -1,4 +1,4 @@
-"""Reviewed column contracts for the cleaned SDG&E QDR CSVs.
+"""Reviewed ingest and query contracts for the cleaned SDG&E QDR CSVs.
 
 The contract is the single place that decides what a cleaned column means.
 Loading is deliberately strict: a column that no bucket claims is reported as

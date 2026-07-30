@@ -15,8 +15,8 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Iterable, Sequence
 
-from retrieval.excel_contracts import ContractSet, TableContract
-from retrieval.excel_transform import Fact, Record
+from retrieval.ingest.excel.contracts import ContractSet, TableContract
+from retrieval.ingest.excel.transform import Fact, Record
 
 logger = logging.getLogger(__name__)
 

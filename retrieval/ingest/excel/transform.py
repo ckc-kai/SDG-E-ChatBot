@@ -18,7 +18,11 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Iterator
 
-from retrieval.excel_contracts import ContractSet, TableContract, semantic_key
+from retrieval.ingest.excel.contracts import (
+    ContractSet,
+    TableContract,
+    semantic_key,
+)
 
 logger = logging.getLogger(__name__)
 

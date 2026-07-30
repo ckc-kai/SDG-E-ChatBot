@@ -1,24 +1,35 @@
-"""Query narrative, table, and figure chunks through one retrieval path.
+"""Retrieve PDF narrative, table, and figure chunks.
 
 1. query_rewrite: rewrite complex/causal questions
 2. search: embeds each (sub-)question with the same model used at ingestion
    time and does a pgvector cosine-distance search against the raw, contextual,
    or hybrid raw+contextual document embeddings in ``chunks``, plus a local
    PostgreSQL lexical lane over captions, breadcrumbs, and content
-3. Candidate pooling: results from every sub-question are merged and
-   deduped by chunk id, so a multi-part question doesn't just get scored fragment-by-fragment
-4. rerank: cross-encoder plus a small caption relevance prior
-5. exact-content deduplication across all content types, with no type quota
+3. Candidate pooling: results from every sub-question are merged and deduped
+   by chunk id.
+4. When lanes are enabled, candidate generation and reranking happen
+   independently for narrative, structured PDF, and Excel-card content.
+5. Lane results are merged and exact-content deduplicated with no type quota.
+
+Excel cards can participate in the candidate merge, but validated Excel answer
+execution lives in ``retrieval.query.excel``.
 """
 
 import argparse
 import json
 import logging
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
+from retrieval.query.calibration import Calibrator
 from retrieval.contextual_embeddings import CONTEXTUAL_EMBEDDING_RECIPE
 from retrieval.failure_log import get_failure_logger
+from retrieval.query.lanes import (
+    ALL_LANES,
+    LaneOutcome,
+    content_types_for,
+    lane_confidence,
+)
 from retrieval.object_storage import get_object_storage
 from retrieval.utils import (
     connect_db,
@@ -68,6 +79,18 @@ HINT_IN_LEXICAL_RETRIEVAL = bool(
     _figure_description_config.get("candidate_retrieval", True)
 )
 HINT_IN_RERANKING = bool(_figure_description_config.get("reranking", False))
+LANE_MODE = _retrieval_config.get("lane_mode", "off")
+CONFIDENCE_FLOOR = float(_retrieval_config.get("lane_confidence_floor", 0.0))
+# Cross-lane score calibration is OFF by default and measured as harmful; see
+# docs/retrieval_ranking_fix_plan.md. A per-content-type curve cannot be made
+# comparable across lanes because the relevance base rate is a property of the
+# question, not of the content type, and estimating it per type leaks the
+# training suite's question mix into ranking. Enable only for diagnostics.
+SCORE_CALIBRATION = str(_retrieval_config.get("score_calibration", "off")).lower()
+_calibrator = (
+    Calibrator.load() if SCORE_CALIBRATION not in {"off", "false", "0"}
+    else Calibrator({})
+)
 EMBEDDING_MODES = ("raw", "contextual", "hybrid")
 HYBRID_POOL_MODES = ("rrf", "union")
 _EMBEDDING_COLUMNS = {
@@ -207,6 +230,7 @@ class RetrievalDiagnostics:
     channel_candidate_sets: list[dict[str, list[QueryObject]]]
     pooled_candidates: list[QueryObject]
     reranked_candidates: list[RankedResult]
+    lane_outcomes: list[LaneOutcome] = field(default_factory=list)
 
 
 def _decomposition_reason(question: str) -> str | None:
@@ -335,7 +359,8 @@ def _validate_embedding_mode(conn, embedding_mode: str) -> str:
         if incomplete:
             raise RuntimeError(
                 f"Contextual embeddings are missing or stale for {incomplete} chunk(s). "
-                "Run `uv run python -m retrieval.ingest` to re-ingest them."
+                "Run `uv run python -m retrieval.ingest.pdf.ingest` to "
+                "re-ingest them."
             )
     return _EMBEDDING_COLUMNS[embedding_mode]
 
@@ -346,8 +371,14 @@ def _search_by_vector(
     conn,
     *,
     embedding_mode: str,
+    content_types: tuple[str, ...] | None = None,
 ) -> list[QueryObject]:
     embedding_column = _validate_embedding_mode(conn, embedding_mode)
+    type_filter = "AND c.content_type = ANY(%s)" if content_types else ""
+    params: list = [query_vector]
+    if content_types:
+        params.append(list(content_types))
+    params.append(top_k)
     with conn.cursor() as cur:
         cur.execute(
             f"""
@@ -358,10 +389,11 @@ def _search_by_vector(
                    c.{embedding_column} <=> %s AS distance
             FROM chunks c
             JOIN documents d ON d.id = c.document_id
+            WHERE true {type_filter}
             ORDER BY distance
             LIMIT %s
             """,
-            (query_vector, top_k),
+            params,
         )
         rows = cur.fetchall()
 
@@ -428,7 +460,13 @@ def _lexical_query(question: str) -> str:
     return " OR ".join(tokens)
 
 
-def _search_lexical(question: str, top_k: int, conn) -> list[QueryObject]:
+def _search_lexical(
+    question: str,
+    top_k: int,
+    conn,
+    *,
+    content_types: tuple[str, ...] | None = None,
+) -> list[QueryObject]:
     expression = _lexical_query(question)
     if not expression:
         return []
@@ -460,6 +498,8 @@ def _search_lexical(question: str, top_k: int, conn) -> list[QueryObject]:
                            'english', coalesce(c.retrieval_hint, '')
                        ) AS hint_document
                 FROM chunks c
+                WHERE %s::text[] IS NULL
+                   OR c.content_type = ANY(%s::text[])
             )
             SELECT corpus.id, d.filename, corpus.sub_document,
                    corpus.breadcrumb, corpus.section_number,
@@ -490,6 +530,8 @@ def _search_lexical(question: str, top_k: int, conn) -> list[QueryObject]:
             """,
             (
                 expression,
+                list(content_types) if content_types else None,
+                list(content_types) if content_types else None,
                 LEXICAL_CAPTION_WEIGHT,
                 HINT_IN_LEXICAL_RETRIEVAL,
                 LEXICAL_HINT_WEIGHT,
@@ -692,10 +734,13 @@ def retrieve_with_diagnostics(
     embedding_mode: str = DEFAULT_EMBEDDING_MODE,
     rrf_k: int = RRF_K,
     hybrid_pool_mode: str = DEFAULT_HYBRID_POOL_MODE,
+    lanes: tuple[str, ...] | None = None,
 ) -> tuple[list[RankedResult], RetrievalDiagnostics]:
     """
     rewrite -> search -> merge -> rerank
     """
+    if lanes is None and LANE_MODE not in {"off", "", None}:
+        lanes = ALL_LANES
     search_queries = query_rewrite(question, mode=rewrite_mode)
     model = get_embedding_model()
     if embedding_mode not in EMBEDDING_MODES:
@@ -708,6 +753,131 @@ def retrieve_with_diagnostics(
             f"expected one of {HYBRID_POOL_MODES}"
         )
 
+    # Each lane retrieves its OWN top-k. Filtering a single global top-k to a
+    # lane would starve the smaller lanes at the candidate stage, which is a
+    # recall bug rather than a ranking one.
+    per_lane_sets: dict[str | None, list[list[QueryObject]]] = {}
+    per_lane_channels: dict[str | None, list[dict[str, list[QueryObject]]]] = {}
+    for lane in lanes or (None,):
+        lane_sets, lane_channels = _generate_candidates(
+            search_queries,
+            conn,
+            model,
+            retrieval_top_k=retrieval_top_k,
+            embedding_mode=embedding_mode,
+            rrf_k=rrf_k,
+            hybrid_pool_mode=hybrid_pool_mode,
+            content_types=content_types_for([lane]) if lane else None,
+        )
+        per_lane_sets[lane] = lane_sets
+        per_lane_channels[lane] = lane_channels
+
+    # Diagnostics index candidate_sets by search-query position, so the lanes
+    # are folded back together per query rather than concatenated.
+    candidate_sets = [
+        _merge_candidates([per_lane_sets[lane][index] for lane in per_lane_sets])
+        for index in range(len(search_queries))
+    ]
+    channel_candidate_sets = [
+        {
+            f"{lane}:{channel}" if lane else channel: candidates
+            for lane in per_lane_channels
+            for channel, candidates in per_lane_channels[lane][index].items()
+        }
+        for index in range(len(search_queries))
+    ]
+    lane_pools = {
+        lane: _merge_candidates(sets)
+        for lane, sets in per_lane_sets.items()
+        if lane is not None
+    }
+
+    pooled = _merge_candidates(candidate_sets)
+    if lanes:
+        ranked, lane_outcomes = _rank_by_lane(question, lane_pools, lanes)
+    else:
+        ranked, lane_outcomes = rerank(question, pooled, top_k=None), []
+    diagnostics = RetrievalDiagnostics(
+        search_queries=search_queries,
+        candidate_sets=candidate_sets,
+        channel_candidate_sets=channel_candidate_sets,
+        pooled_candidates=pooled,
+        reranked_candidates=ranked,
+        lane_outcomes=lane_outcomes,
+    )
+    return ranked[:rerank_top_k], diagnostics
+
+
+def _rank_by_lane(
+    question: str,
+    lane_pools: dict[str, list[QueryObject]],
+    lanes: tuple[str, ...],
+) -> tuple[list[RankedResult], list[LaneOutcome]]:
+    """Rerank inside each lane, then merge on calibrated scores.
+
+    Cross-encoder logits are not comparable across content types whose text
+    length differs by ~4x, so each lane is ranked on its own and only then
+    mapped onto a shared scale. Without a fitted calibration the raw score is
+    used, which keeps the lane split working before Phase 2 lands.
+    """
+    by_lane = {lane: lane_pools.get(lane, []) for lane in lanes}
+
+    # Calibrate only when every content type in the merge has a curve; see
+    # Calibrator.covers for why partial calibration is worse than none.
+    present_types = {
+        candidate.content_type
+        for candidates in by_lane.values()
+        for candidate in candidates
+    }
+    use_calibration = _calibrator.covers(present_types)
+    if present_types and not use_calibration:
+        logger.debug(
+            "Falling back to raw scores; uncalibrated content types: %s",
+            sorted(present_types - set(_calibrator.curves)),
+        )
+
+    outcomes: list[LaneOutcome] = []
+    merged: list[tuple[float, RankedResult]] = []
+    for lane, candidates in by_lane.items():
+        if not candidates:
+            outcomes.append(LaneOutcome(lane=lane, results=[], confidence=None))
+            continue
+        lane_ranked = rerank(question, candidates, top_k=None)
+        lane_size = len(lane_ranked)
+        calibrated = [
+            _calibrator.score(
+                result.query_object.content_type, result.rerank_score, lane_size
+            )
+            if use_calibration
+            else result.rerank_score
+            for result in lane_ranked
+        ]
+        confidence = lane_confidence(lane, calibrated)
+        outcomes.append(
+            LaneOutcome(lane=lane, results=lane_ranked, confidence=confidence)
+        )
+        demoted = confidence.confidence < CONFIDENCE_FLOOR
+        for rank, (result, score) in enumerate(zip(lane_ranked, calibrated)):
+            # A demoted lane cannot occupy rank 1, but keeps every candidate.
+            key = score - (1.0 if demoted and rank == 0 else 0.0)
+            merged.append((key, result))
+
+    merged.sort(key=lambda pair: pair[0], reverse=True)
+    ranked = deduplicate_ranked([result for _, result in merged])
+    return ranked, outcomes
+
+
+def _generate_candidates(
+    search_queries: list[str],
+    conn,
+    model,
+    *,
+    retrieval_top_k: int,
+    embedding_mode: str,
+    rrf_k: int,
+    hybrid_pool_mode: str,
+    content_types: tuple[str, ...] | None,
+) -> tuple[list[list[QueryObject]], list[dict[str, list[QueryObject]]]]:
     candidate_sets: list[list[QueryObject]] = []
     channel_candidate_sets: list[dict[str, list[QueryObject]]] = []
     for search_query in search_queries:
@@ -718,12 +888,14 @@ def retrieve_with_diagnostics(
                 retrieval_top_k,
                 conn,
                 embedding_mode="raw",
+                content_types=content_types,
             )
             contextual_candidates = _search_by_vector(
                 query_vector,
                 retrieval_top_k,
                 conn,
                 embedding_mode="contextual",
+                content_types=content_types,
             )
             channels = {
                 "raw": raw_candidates,
@@ -741,18 +913,22 @@ def retrieve_with_diagnostics(
                     rrf_k=rrf_k,
                 )
         else:
-            candidates = search(
-                search_query,
+            query_vector = model.encode(
+                search_query.strip(), normalize_embeddings=True
+            )
+            candidates = _search_by_vector(
+                query_vector,
                 retrieval_top_k,
                 conn,
-                model,
                 embedding_mode=embedding_mode,
+                content_types=content_types,
             )
             channels = {embedding_mode: candidates}
         lexical_candidates = _search_lexical(
             search_query,
             retrieval_top_k,
             conn,
+            content_types=content_types,
         )
         channels["lexical"] = lexical_candidates
         seen_ids = {candidate.chunk_id for candidate in candidates}
@@ -766,17 +942,7 @@ def retrieve_with_diagnostics(
         ]
         candidate_sets.append(candidates)
         channel_candidate_sets.append(channels)
-
-    pooled = _merge_candidates(candidate_sets)
-    all_ranked = rerank(question, pooled, top_k=None)
-    diagnostics = RetrievalDiagnostics(
-        search_queries=search_queries,
-        candidate_sets=candidate_sets,
-        channel_candidate_sets=channel_candidate_sets,
-        pooled_candidates=pooled,
-        reranked_candidates=all_ranked,
-    )
-    return all_ranked[:rerank_top_k], diagnostics
+    return candidate_sets, channel_candidate_sets
 
 
 def retrieve(
@@ -789,6 +955,7 @@ def retrieve(
     embedding_mode: str = DEFAULT_EMBEDDING_MODE,
     rrf_k: int = RRF_K,
     hybrid_pool_mode: str = DEFAULT_HYBRID_POOL_MODE,
+    lanes: tuple[str, ...] | None = None,
 ) -> list[RankedResult]:
     ranked, _ = retrieve_with_diagnostics(
         question,
@@ -799,6 +966,7 @@ def retrieve(
         embedding_mode=embedding_mode,
         rrf_k=rrf_k,
         hybrid_pool_mode=hybrid_pool_mode,
+        lanes=lanes,
     )
     return ranked
 

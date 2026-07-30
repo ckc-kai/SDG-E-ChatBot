@@ -43,6 +43,13 @@ retrieval:
   lexical_caption_weight: 4.0
   lexical_hint_weight: 0.25
   deduplicate_exact_content: true
+  # "off" keeps legacy global ranking. Set to "all" to retrieve/rerank each
+  # narrative, structured-PDF, and Excel lane independently before merging.
+  lane_mode: off
+  lane_confidence_floor: 0.0
+  # The fitted curves are retained for diagnostics but are disabled because
+  # calibration regressed narrative ranking in the combined evaluation.
+  score_calibration: off
 
 extraction:
   structured:
