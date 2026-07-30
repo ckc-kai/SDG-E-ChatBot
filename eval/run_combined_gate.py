@@ -19,7 +19,10 @@ import argparse
 import json
 import subprocess
 import sys
+from datetime import date
 from pathlib import Path
+
+from eval.run_eval.cli import output_path
 
 NARRATIVE_EVAL = "eval/pdf/evaluation_natural.jsonl"
 STRUCTURED_EVAL = "eval/pdf/evaluation_structured.jsonl"
@@ -49,14 +52,16 @@ def _run(argv: list[str], out: Path) -> dict:
 
 
 def narrative(out_dir: Path, lanes: list[str]) -> dict:
-    out = out_dir / f"narrative-{'_'.join(lanes)}.json"
+    feature = f"combined-gate-{'_'.join(lanes)}"
+    out = output_path("narrative", date.today().isoformat(), feature)
     payload = _run(
         [
             sys.executable, "-m", "eval.run_eval",
             "--eval", NARRATIVE_EVAL,
+            "--pdf", "narrative",
             "--embedding-mode", "hybrid", "--hybrid-pool-mode", "union",
             "--metric-k", "10", *COMMON,
-            "--lanes", *lanes, "--out", str(out),
+            "--lanes", *lanes, "--output", feature, "--overwrite",
         ],
         out,
     )
@@ -64,13 +69,15 @@ def narrative(out_dir: Path, lanes: list[str]) -> dict:
 
 
 def structured(out_dir: Path, lanes: list[str]) -> dict:
-    out = out_dir / f"structured-{'_'.join(lanes)}.json"
+    feature = f"combined-gate-{'_'.join(lanes)}"
+    out = output_path("structured", date.today().isoformat(), feature)
     payload = _run(
         [
-            sys.executable, "-m", "eval.run_structured_eval",
+            sys.executable, "-m", "eval.run_eval",
             "--eval", STRUCTURED_EVAL,
+            "--pdf", "structured",
             "--metric-k", "5", *COMMON,
-            "--lanes", *lanes, "--out", str(out),
+            "--lanes", *lanes, "--output", feature, "--overwrite",
         ],
         out,
     )
@@ -78,25 +85,36 @@ def structured(out_dir: Path, lanes: list[str]) -> dict:
 
 
 def excel(out_dir: Path, lanes: list[str]) -> dict:
-    out = out_dir / f"excel-{'_'.join(lanes)}.json"
+    feature = f"combined-gate-{'_'.join(lanes)}"
+    out = output_path("excel", date.today().isoformat(), feature)
     payload = _run(
         [
-            sys.executable, "-m", "eval.run_excel_eval",
+            sys.executable, "-m", "eval.run_eval",
             "--eval", EXCEL_EVAL, "--metric-k", "5",
-            "--lanes", *lanes, "--out", str(out),
+            "--excel",
+            "--lanes", *lanes, "--output", feature, "--overwrite",
         ],
         out,
     )
     rows = payload["per_query"]
     answered = [r for r in rows if r["answer_correct"] is not None]
+    live_answered = [r for r in rows if r.get("live_channel_correct") is not None]
+    gold_accuracy = (
+        sum(1 for r in answered if r["answer_correct"]) / len(answered)
+        if answered else 0.0
+    )
     return {
         "count": len(rows),
         "card_hit@1": sum(r["card_hit@1"] for r in rows) / len(rows),
         "card_recall@5": sum(r["card_recall@5"] for r in rows) / len(rows),
         "excel_at_rank_1": sum(r["excel_at_rank_1"] for r in rows) / len(rows),
-        "answer_accuracy": (
-            sum(1 for r in answered if r["answer_correct"]) / len(answered)
-            if answered else 0.0
+        # Backward-compatible gate key; now explicitly the gold-plan metric.
+        "answer_accuracy": gold_accuracy,
+        "gold_plan_accuracy": gold_accuracy,
+        "live_channel_accuracy": (
+            sum(1 for r in live_answered if r["live_channel_correct"])
+            / len(live_answered)
+            if live_answered else 0.0
         ),
     }
 
@@ -144,7 +162,8 @@ def main() -> None:
         ("narrative", "recall@10", "recall@10"),
         ("structured", "hit@1", "hit@1"),
         ("structured", "recall@5", "recall@5"),
-        ("excel", "answer_accuracy", "answer_accuracy"),
+        ("excel", "gold_plan_accuracy", "gold_plan_accuracy"),
+        ("excel", "live_channel_accuracy", "live_channel_accuracy"),
         ("excel", "card_hit@1", "card_hit@1"),
     ]
     for suite, label, key in comparisons:

@@ -1,0 +1,73 @@
+{
+  "narrative": {
+    "questions": 150,
+    "expected": "decline",
+    "answered": 3,
+    "declined": 147,
+    "answer_rate": 0.02,
+    "decline_reasons": {
+      "best card scored below the credibility floor": 65,
+      "entity-table card but the question does not ask for ": 52,
+      "question names no reporting period": 13,
+      "card names no metric concept, so a sum would span th": 13,
+      "no matching records, so the card does not fit the qu": 2,
+      "plan refused": 2
+    },
+    "false_positives": [
+      {
+        "id": "wmp_eval_0029",
+        "question": "What three specific factors must SDG&E account for when establishing maintenance frequency for equipment in it",
+        "table": 11,
+        "value": "[(Decimal('159972.291003477374'),)]"
+      },
+      {
+        "id": "wmp_eval_0033",
+        "question": "What must SDG&E include in its 2025 update to the Joint IOU Covered Conductor Working Group Report?",
+        "table": 5,
+        "value": "[(Decimal('16'),)]"
+      },
+      {
+        "id": "wmp_eval_0085",
+        "question": "What is the projected percentage of Wildfire/PSPS events to be followed by an After-Action Review or feedback ",
+        "table": 3,
+        "value": "[(Decimal('100'),)]"
+      }
+    ]
+  },
+  "structured": {
+    "questions": 60,
+    "expected": "decline",
+    "answered": 1,
+    "declined": 59,
+    "answer_rate": 0.016666666666666666,
+    "decline_reasons": {
+      "best card scored below the credibility floor": 32,
+      "question names no reporting period": 15,
+      "entity-table card but the question does not ask for ": 6,
+      "card names no metric concept, so a sum would span th": 3,
+      "plan returned no usable value": 1,
+      "no matching records, so the card does not fit the qu": 1
+    },
+    "false_positives": [
+      {
+        "id": "structured_eval_0051",
+        "question": "What are the 2023 average grid-operations and protocols maturity scores for PG&E, SCE, and SDG&E?",
+        "table": 11,
+        "value": "[(Decimal('13.166967572'),)]"
+      }
+    ]
+  },
+  "excel": {
+    "questions": 80,
+    "expected": "answer",
+    "answered": 66,
+    "declined": 14,
+    "answer_rate": 0.825,
+    "decline_reasons": {
+      "entity-table card but the question does not ask for ": 9,
+      "plan returned no usable value": 3,
+      "card names no metric concept, so a sum would span th": 2
+    },
+    "false_positives": []
+  }
+}

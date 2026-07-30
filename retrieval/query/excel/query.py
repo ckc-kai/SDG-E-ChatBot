@@ -88,6 +88,9 @@ class ExcelQueryPlan:
     aggregate: str = "sum"
     filters: tuple[Filter, ...] = ()
     group_by: tuple[str, ...] = ()
+    # Reviewed JSON attributes to return for entity-record lookups. Keys remain
+    # SQL parameters; generated aliases are fixed and never user controlled.
+    select_json_keys: tuple[str, ...] = ()
     order_by: str | None = None
     descending: bool = True
     limit: int = DEFAULT_LIMIT
@@ -141,6 +144,10 @@ def _validate(plan: ExcelQueryPlan, contract: TableContract) -> None:
     for column in (*plan.group_by, *( (plan.order_by,) if plan.order_by else () )):
         if column not in allowed and column not in {"value", "aggregate"}:
             raise PlanError(f"{column!r} is not groupable/orderable")
+    if plan.select_json_keys and plan.operation != "select":
+        raise PlanError("select_json_keys requires operation='select'")
+    if plan.select_json_keys and plan.source != RECORDS:
+        raise PlanError("select_json_keys is supported only for entity records")
 
     # Tables 14/15: refuse a bare reporting-year filter, because the same year
     # means two different things depending on year_basis.
@@ -193,13 +200,16 @@ def compile_plan(plan: ExcelQueryPlan, contract: TableContract) -> tuple[str, li
         select_columns = list(plan.group_by) or ["record_id"]
         cols = ", ".join(f"t.{c}" for c in select_columns)
         tail = f", t.{value_column}" if value_column else ""
+        json_select = "".join(
+            f", t.{json_column} ->> %s AS selected_{index}"
+            for index, _ in enumerate(plan.select_json_keys)
+        )
         sql = (
-            f"SELECT {cols}{tail} FROM {source} t "
+            f"SELECT {cols}{tail}{json_select} FROM {source} t "
             f"JOIN excel_revisions r ON r.id = t.revision_id "
             f"WHERE {where_sql} ORDER BY {cols} LIMIT %s"
         )
-        params.append(plan.limit)
-        return sql, params
+        return sql, [*plan.select_json_keys, *params, plan.limit]
 
     target = value_column if value_column else "*"
     agg_sql = AGGREGATES[plan.aggregate].format(col=f"t.{target}")
@@ -281,6 +291,29 @@ def execute_plan(
             provenance = [
                 {**(row[0] or {}), "value_raw": row[1]} for row in cur.fetchall()
             ]
+        else:
+            meta_where, meta_params = _record_scope(plan, contract)
+            cur.execute(
+                f"""
+                SELECT count(*), min(rec.revision_id)
+                FROM excel_records rec
+                JOIN excel_revisions r ON r.id = rec.revision_id
+                WHERE {meta_where}
+                """,
+                meta_params,
+            )
+            contributing, revision_id = cur.fetchone()
+            cur.execute(
+                f"""
+                SELECT rec.provenance
+                FROM excel_records rec
+                JOIN excel_revisions r ON r.id = rec.revision_id
+                WHERE {meta_where}
+                LIMIT 5
+                """,
+                meta_params,
+            )
+            provenance = [row[0] or {} for row in cur.fetchall()]
 
     warnings: list[str] = []
     if plan.table_number in DUAL_YEAR_AXIS_TABLES:
@@ -319,6 +352,27 @@ def _fact_scope(plan: ExcelQueryPlan, contract: TableContract) -> tuple[str, lis
         else:
             where.append(f"f.{flt.field} {OPERATORS[flt.operator]} %s")
             params.append(flt.value)
+    return " AND ".join(where), params
+
+
+def _record_scope(
+    plan: ExcelQueryPlan,
+    contract: TableContract,
+) -> tuple[str, list[Any]]:
+    """The record equivalent of ``_fact_scope`` for counts and provenance."""
+    where = ["r.state = 'active'", "rec.table_number = %s"]
+    params: list[Any] = [plan.table_number]
+    for flt in plan.filters:
+        if flt.json_key:
+            where.append(f"rec.attributes ->> %s {OPERATORS[flt.operator]} %s")
+            params.extend([flt.field, str(flt.value)])
+        else:
+            where.append(f"rec.{flt.field} {OPERATORS[flt.operator]} %s")
+            params.append(flt.value)
+    dedupe = contract.dedupe.get("default_filter") if contract.dedupe else None
+    if dedupe:
+        where.append("rec.attributes ->> %s = %s")
+        params.extend([dedupe["field"], str(dedupe["value"])])
     return " AND ".join(where), params
 
 

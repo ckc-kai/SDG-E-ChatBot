@@ -296,36 +296,44 @@ This code refactor does not migrate or re-ingest the existing local database.
 After the clean ingest, run both evaluation sets through the same unified query
 implementation.
 
+The unified evaluator auto-detects the suite from the input JSONL, runs the
+current three-lane route by default, and writes a dated result file. Use
+`--pdf` or `--excel` to make the adapter explicit.
+
 Narrative evaluation:
 
 ```bash
 uv run python -m eval.run_eval \
-  --eval eval/pdf/evaluation_natural.jsonl \
-  --embedding-mode hybrid \
-  --hybrid-pool-mode union \
-  --rewrite-mode off \
-  --retrieval-top-k 30 \
-  --rerank-top-k 10 \
-  --metric-k 10 \
-  --misses \
-  --out eval/pdf/results/unified-narrative.json
+  --input eval/pdf/evaluation_natural.jsonl \
+  --pdf narrative \
+  --output current-route-gate \
+  --misses
 ```
 
 Table/figure evaluation:
 
 ```bash
-uv run python -m eval.run_structured_eval \
-  --eval eval/pdf/evaluation_structured.jsonl \
-  --rewrite-mode off \
-  --retrieval-top-k 30 \
-  --rerank-top-k 10 \
-  --metric-k 5 \
-  --misses \
-  --out eval/pdf/results/unified-structured.json
+uv run python -m eval.run_eval \
+  --input eval/pdf/evaluation_structured.jsonl \
+  --pdf structured \
+  --output current-route-gate \
+  --misses
 ```
 
-The historical pre-unification results remain under `eval/pdf/results/`, but
-they should not be treated as measurements of the new unified schema.
+Excel evaluation:
+
+```bash
+uv run python -m eval.run_eval \
+  --input eval/excel/evaluation_excel.jsonl \
+  --excel \
+  --output current-route-gate
+```
+
+Results are written to `eval/pdf/results/narrative/`,
+`eval/pdf/results/structured/`, or `eval/excel/results/` as
+`YYYY-MM-DD-FEATURE.json`. Add `--oracle` to evaluate only the suite's own lane.
+Historical pre-unification results remain in the PDF result subfolders, but
+should not be treated as measurements of the new unified schema.
 
 ## Tests
 
