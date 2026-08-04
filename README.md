@@ -20,30 +20,38 @@ index.
 
 The supported workflow has:
 
-- one ingest command for narrative text, tables, and figures;
+- separate PDF and Excel ingest commands;
 - one `chunks` table for every content type;
 - raw and contextual embeddings generated automatically for every chunk;
-- one query command that searches all content types together;
-- no query-type classifier and no structured/narrative result quota.
+- separate PDF and execution-verified Excel query paths;
+- independently ranked narrative, PDF-table, PDF-figure, and Excel evidence;
+- no query-type classifier and no cross-content score calibration.
 
 ## Retrieval architecture
 
 ```text
 PDF
  ├─ bookmark-aware narrative extraction ─┐
- └─ Docling table/figure extraction ─────┤
-                                         ├─ unified chunks table
-                                         ├─ raw + contextual embeddings
-                                         └─ exact table JSON / figure object key
+└─ Docling table/figure extraction ─────┤
+                                         ├─ unified chunks table ─┐
+Excel ── contract-driven facts/cards ────┘                        │
+                                                                  │
+question ── retrieve every requested evidence group
+ ├─ narrative group
+ ├─ PDF-table group
+ ├─ PDF-figure group
+ └─ Excel-card group
 
-question
- ├─ raw vector search ───────────────┐
- ├─ contextual vector search ────────┤
- └─ PostgreSQL lexical search ───────┤
-                                     ├─ deduplicated candidate pool
-                                     ├─ cross-encoder + caption prior
-                                     └─ exact-content dedupe → global top results
+Each group
+ ├─ raw vector search
+ ├─ contextual vector search
+ ├─ PostgreSQL lexical search
+ └─ candidate merge → rerank inside the group → return with provenance
 ```
+
+Reranker scores are comparable only inside a group. Grouped retrieval prevents
+an Excel card from displacing narrative evidence, or a figure from displacing
+a table. 
 
 Tables retain their exact grid in `structured_data`. Figure crops are stored
 through a filesystem/S3 abstraction and referenced by `object_key`.
@@ -93,24 +101,43 @@ uv run python -m retrieval.setup_db --reset --yes
 Ingest every PDF, including narrative text, tables, and figures:
 
 ```bash
-uv run python -m retrieval.ingest
+uv run python -m retrieval.ingest.pdf
 ```
 
 Ingest only filenames containing a substring:
 
 ```bash
-uv run python -m retrieval.ingest --only "2023_Base-WMP"
+uv run python -m retrieval.ingest.pdf --only "2023_Base-WMP"
 ```
 
-Query all content types:
+Ingest the cleaned Excel CSVs:
 
 ```bash
-uv run python -m retrieval.query \
+uv run python -m retrieval.ingest.excel
+```
+
+Query all content types as independently ranked evidence groups:
+
+```bash
+uv run python -m retrieval.query.pdf \
   "What is the 2024 updated target for the Strategic Pole Replacement program?"
 ```
 
-The output labels every result as `narrative`, `table`, or `figure`. Figure
-results also print the resolved local path or S3 URI.
+The output labels every result as `narrative`, `table`, `figure`, or
+`excel_card`. Figure results also print the resolved local path or S3 URI.
+Pass `--legacy-flat` only when comparing with the previous global mixed ranking.
+
+Application code should honor the configured output contract through the
+dispatcher (or call `retrieve_evidence` explicitly):
+
+```python
+from retrieval.query.pdf import retrieve_configured
+
+evidence = retrieve_configured(question, connection)
+```
+
+The low-level `retrieve()` function intentionally keeps its historical flat
+list return type for source compatibility.
 
 Automatic query decomposition is controlled by `query_rewrite.mode`. Set it to
 `off` to guarantee no Anthropic request:
@@ -156,17 +183,20 @@ models:
 ```
 
 Changing the embedding model triggers a clean vector refresh on the next
-ingest. If the new embedding model has a different dimension, update
-`dimensions`, reset the schema, and re-ingest:
+ingest. For a model with different dimensions, build a second database, ingest
+and evaluate it, then switch the application connection:
 
 ```bash
-uv run python -m retrieval.setup_db --reset --yes
-uv run python -m retrieval.ingest
+createdb sdge_next_embedding
+uv run python -m retrieval.setup_db
+uv run python -m retrieval.ingest.pdf
+uv run python -m retrieval.ingest.excel
 ```
 
 A pgvector column has a fixed dimension, so a dimension change cannot be
-applied safely to existing vectors through configuration alone. Changing only
-the reranker does not require re-ingestion.
+applied safely to the active index through configuration alone. A parallel
+database keeps the current collection available for immediate rollback locally
+and on RDS/Aurora. Changing only the reranker does not require re-ingestion.
 
 The provider factory rejects unsupported values clearly. It is ready for a
 future Bedrock or SageMaker adapter, but this refactor intentionally implements
@@ -178,15 +208,15 @@ only local SentenceTransformers models.
 extraction:
   structured:
     figure_description:
-      generate: true
-      candidate_retrieval: true
+      generate: false
+      candidate_retrieval: false
       reranking: false
       answer_context: false
 ```
 
-The recommended defaults generate a local SmolVLM hint and use it only to
-expand candidate recall. A hallucinated hint therefore cannot directly decide
-the reranker order or become factual answer context.
+The lightweight default avoids a multi-GB vision-model dependency and relies
+on captions, page context, and the stored crop. Vision hints can be enabled as
+an optional recall experiment; they never become reranking or answer evidence.
 
 To remove the vision model from ingest entirely:
 
@@ -245,15 +275,19 @@ database password from Secrets Manager into `POSTGRES_PASSWORD` and use an IAM
 role for S3 access. The role needs object list, write, and delete permissions
 scoped to the configured bucket prefix.
 
-The S3 adapter loads `boto3` only when `provider: s3` is selected. Add `boto3`
-to the AWS runtime image or deployment dependencies; local filesystem runs do
-not require it.
+The S3 adapter loads `boto3` only when `provider: s3` is selected. Install the
+locked AWS extra in the ingest-worker image; local filesystem runs do not need
+these packages:
+
+```bash
+uv sync --extra aws
+```
 
 Run the same commands from the AWS ingest worker:
 
 ```bash
 uv run python -m retrieval.setup_db
-uv run python -m retrieval.ingest /path/to/downloaded/pdfs
+uv run python -m retrieval.ingest.pdf /path/to/downloaded/pdfs
 ```
 
 The setup command creates the `vector` extension, unified schema, HNSW vector
@@ -287,55 +321,66 @@ This code refactor does not migrate or re-ingest the existing local database.
 After the clean ingest, run both evaluation sets through the same unified query
 implementation.
 
+The unified evaluator auto-detects the suite and writes a dated result file.
+Use `--grouped` for the production evidence-group design. Omit it only to
+measure the current cross-content merged route.
+
 Narrative evaluation:
 
 ```bash
 uv run python -m eval.run_eval \
-  --eval eval/pdf/evaluation_natural.jsonl \
-  --embedding-mode hybrid \
-  --hybrid-pool-mode union \
-  --rewrite-mode off \
-  --retrieval-top-k 30 \
-  --rerank-top-k 10 \
-  --metric-k 10 \
-  --misses \
-  --out eval/pdf/results/unified-narrative.json
+  --input eval/pdf/evaluation_natural.jsonl \
+  --pdf narrative \
+  --grouped \
+  --output current-route-gate \
+  --misses
 ```
 
 Table/figure evaluation:
 
 ```bash
-uv run python -m eval.run_structured_eval \
-  --eval eval/pdf/evaluation_structured.jsonl \
-  --rewrite-mode off \
-  --retrieval-top-k 30 \
-  --rerank-top-k 10 \
-  --metric-k 5 \
-  --misses \
-  --out eval/pdf/results/unified-structured.json
+uv run python -m eval.run_eval \
+  --input eval/pdf/evaluation_structured.jsonl \
+  --pdf structured \
+  --grouped \
+  --output current-route-gate \
+  --misses
 ```
 
-The historical pre-unification results remain under `eval/pdf/results/`, but
-they should not be treated as measurements of the new unified schema.
-
-## Tests
-
-The unit tests do not connect to AWS or call external model APIs:
+Excel evaluation:
 
 ```bash
-HF_HUB_OFFLINE=1 uv run --frozen python -m unittest discover -s tests
+uv run python -m eval.run_eval \
+  --input eval/excel/evaluation_excel.jsonl \
+  --excel \
+  --grouped \
+  --output current-route-gate
 ```
+
+Results are written to `eval/pdf/results/narrative/`,
+`eval/pdf/results/structured/`, or `eval/excel/results/` as
+`YYYY-MM-DD-FEATURE.json`. Add `--oracle` to evaluate only the suite's own lane.
+Historical pre-unification results remain in the PDF result subfolders, but
+should not be treated as measurements of the new unified schema.
 
 ## Project layout
 
 ```text
-config/config.example.yaml       YAML configuration reference
-retrieval/setup_db.py            Unified PostgreSQL/pgvector schema
-retrieval/ingest.py              One ingest workflow and persistence path
-retrieval/structured_extraction.py
-                                 Specialized Docling extraction helpers
-retrieval/object_storage.py      Filesystem and S3 figure storage adapters
-retrieval/query.py               One global retrieval/reranking path
-eval/run_eval.py                 Narrative retrieval evaluation
-eval/run_structured_eval.py      Table/figure evaluation on the same query path
+config/                         Runtime settings and reviewed Excel contracts
+retrieval/
+├── ingest/
+│   ├── pdf/                    PDF narrative/table/figure ingestion
+│   └── excel/                  Excel contracts, transforms, cards, and ingest
+├── query/
+│   ├── pdf/                    Narrative and structured-PDF retrieval
+│   ├── excel/                  Excel planning and execution-verified answers
+│   ├── lanes.py                Lane definitions and confidence signals
+│   └── calibration.py          Optional diagnostic score calibration
+├── contextual_embeddings.py   Shared embedding recipe
+├── object_storage.py          Filesystem and S3 figure storage
+├── setup_db.py                Base PostgreSQL/pgvector schema
+└── utils.py                   Shared configuration, clients, and DB connection
+eval/
+├── pdf/                       PDF evaluation data and historical results
+└── excel/                     Excel evaluation data
 ```

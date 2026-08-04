@@ -1,0 +1,3682 @@
+{
+  "summary": {
+    "k": 5,
+    "overall": {
+      "count": 150,
+      "hit@1": 0.6133,
+      "recall@5": 0.77,
+      "mrr": 0.6732,
+      "ndcg@5": 0.6957
+    },
+    "by_difficulty": {
+      "hard": {
+        "count": 1,
+        "hit@1": 1.0,
+        "recall@5": 1.0,
+        "mrr": 1.0,
+        "ndcg@5": 0.8503
+      },
+      "medium": {
+        "count": 63,
+        "hit@1": 0.619,
+        "recall@5": 0.7698,
+        "mrr": 0.6751,
+        "ndcg@5": 0.6968
+      },
+      "simple": {
+        "count": 86,
+        "hit@1": 0.6047,
+        "recall@5": 0.7674,
+        "mrr": 0.668,
+        "ndcg@5": 0.6931
+      }
+    },
+    "by_question_type": {
+      "mitigation_program": {
+        "count": 90,
+        "hit@1": 0.6667,
+        "recall@5": 0.7833,
+        "mrr": 0.7152,
+        "ndcg@5": 0.7293
+      },
+      "psps_customer_impact": {
+        "count": 16,
+        "hit@1": 0.5,
+        "recall@5": 0.625,
+        "mrr": 0.5469,
+        "ndcg@5": 0.5664
+      },
+      "regulatory_decision": {
+        "count": 30,
+        "hit@1": 0.5,
+        "recall@5": 0.8333,
+        "mrr": 0.6122,
+        "ndcg@5": 0.6673
+      },
+      "risk_assessment": {
+        "count": 11,
+        "hit@1": 0.5455,
+        "recall@5": 0.6364,
+        "mrr": 0.5909,
+        "ndcg@5": 0.6028
+      },
+      "safety_culture": {
+        "count": 2,
+        "hit@1": 1.0,
+        "recall@5": 1.0,
+        "mrr": 1.0,
+        "ndcg@5": 1.0
+      },
+      "scale_targets": {
+        "count": 1,
+        "hit@1": 1.0,
+        "recall@5": 1.0,
+        "mrr": 1.0,
+        "ndcg@5": 1.0
+      }
+    }
+  },
+  "skipped": [],
+  "api_rewrite_usage": {
+    "total_calls": 122,
+    "questions_rewritten": 122,
+    "questions_fallback": 0,
+    "questions_simple": 28,
+    "questions_total": 150
+  },
+  "per_query": [
+    {
+      "id": "wmp_eval_0001",
+      "difficulty": "simple",
+      "question_type": "regulatory_decision",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        1,
+        11,
+        2,
+        145,
+        39
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What percentage change in initiative risk requires SDG&E to submit a change order report under Energy Safety's 2023-2025 WMP guidelines?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0002",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        4,
+        5,
+        11,
+        255,
+        7
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What is the target increase for SDG&E's Strategic Pole Replacement program in 2024?",
+        "What is the reason for the target increase in SDG&E's Strategic Pole Replacement program in 2024?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0003",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        9,
+        560,
+        561,
+        218,
+        112
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "How many weather stations does SDG&E plan to maintain and calibrate in 2024?",
+        "What is the primary purpose of the SDG&E weather network?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0004",
+      "difficulty": "simple",
+      "question_type": "safety_culture",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        16,
+        15,
+        1157,
+        699,
+        34
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What field visit has the SDG&E Board Safety Committee arranged to observe for wildfire safety purposes?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0005",
+      "difficulty": "medium",
+      "question_type": "safety_culture",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        17,
+        482,
+        15,
+        140,
+        34
+      ],
+      "api_rewrite_calls": 0,
+      "rewrite_source": "simple",
+      "sub_questions": [
+        "What are the four key SMS processes that SDG&E incorporates into its Safety Management System?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0006",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        28,
+        270,
+        704,
+        767,
+        34
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What are the three investment areas that SDG&E uses to reduce wildfire risk?",
+        "What are the three investment areas that SDG&E uses to manage PSPS impacts?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0007",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        28,
+        482,
+        212,
+        106,
+        259
+      ],
+      "api_rewrite_calls": 0,
+      "rewrite_source": "simple",
+      "sub_questions": [
+        "What are the key components of SDG&E's infrastructure hardening investments to reduce system risk exposure?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0008",
+      "difficulty": "medium",
+      "question_type": "regulatory_decision",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        140,
+        34,
+        220,
+        114,
+        276
+      ],
+      "api_rewrite_calls": 0,
+      "rewrite_source": "simple",
+      "sub_questions": [
+        "What specific strengths did Energy Safety identify in SDG&E's wildfire mitigation plan?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0009",
+      "difficulty": "simple",
+      "question_type": "regulatory_decision",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 1.0,
+      "mrr": 0.3333333333333333,
+      "ndcg@5": 0.5,
+      "first_gold_rank": 3,
+      "retrieved_ids": [
+        132,
+        238,
+        143,
+        37,
+        66
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What is Energy Safety's Maturity Model for utility wildfire mitigation capabilities?",
+        "What are the different maturity levels defined in Energy Safety's Maturity Model?",
+        "What capabilities or competencies are assessed at each maturity level in Energy Safety's Maturity Model for wildfire mitigation?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0010",
+      "difficulty": "simple",
+      "question_type": "regulatory_decision",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 1.0,
+      "mrr": 0.3333333333333333,
+      "ndcg@5": 0.5,
+      "first_gold_rank": 3,
+      "retrieved_ids": [
+        47,
+        153,
+        152,
+        46,
+        703
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "How many wildfires were attributed to SDG&E facilities or equipment between 2015 and 2022?",
+        "Which of the wildfires attributed to SDG&E between 2015 and 2022 were classified as catastrophic?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0011",
+      "difficulty": "simple",
+      "question_type": "risk_assessment",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        155,
+        49,
+        151,
+        45,
+        350
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What does Technical Guidelines Section 6.2 require SDG&E to provide regarding its risk analysis framework?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0012",
+      "difficulty": "medium",
+      "question_type": "regulatory_decision",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        167,
+        61,
+        276,
+        140,
+        34
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What is the primary concern Energy Safety identified regarding SDG&E's prioritization of undergrounding projects in its mitigation decision-making process?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0013",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        65,
+        171,
+        172,
+        66,
+        184
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What is SDG&E's 2023 maturity level for grid design and resiliency?",
+        "What is SDG&E's projected maturity level for grid design and resiliency in 2024?",
+        "What is SDG&E's projected maturity level for grid design and resiliency in 2025?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0014",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        184,
+        78,
+        185,
+        79,
+        171
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What is SDG&E's 2023 maturity level for grid operations and protocols?",
+        "What specific limitation does Energy Safety identify regarding SDG&E's grid operations and protocols?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0015",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        189,
+        83,
+        109,
+        215,
+        187
+      ],
+      "api_rewrite_calls": 0,
+      "rewrite_source": "simple",
+      "sub_questions": [
+        "What additional vegetation inspection opportunities must SDG&E report on in its next Base WMP?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0016",
+      "difficulty": "simple",
+      "question_type": "regulatory_decision",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        199,
+        93,
+        688,
+        11,
+        711
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What are SDG&E's projected targets for the number of customers impacted by PSPS in 2023?",
+        "What are SDG&E's projected targets for the number of customers impacted by PSPS in 2024?",
+        "What are SDG&E's projected targets for the number of customers impacted by PSPS in 2025?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0017",
+      "difficulty": "medium",
+      "question_type": "regulatory_decision",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        773,
+        259,
+        256,
+        778,
+        561
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What technology improvements is SDG&E implementing to enhance situational awareness?",
+        "What technology improvements is SDG&E implementing to enhance fire detection?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0018",
+      "difficulty": "simple",
+      "question_type": "regulatory_decision",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        778,
+        104,
+        83,
+        189,
+        759
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What specific technologies must SDG&E evaluate in its joint efforts with other IOUs regarding wildfire mitigation pilots?",
+        "What are the requirements for SDG&E to pilot and deploy new wildfire mitigation technologies?",
+        "Which other IOUs is SDG&E required to collaborate with on technology evaluation and deployment?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0019",
+      "difficulty": "simple",
+      "question_type": "regulatory_decision",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 1.0,
+      "mrr": 0.3333333333333333,
+      "ndcg@5": 0.5,
+      "first_gold_rank": 3,
+      "retrieved_ids": [
+        140,
+        34,
+        220,
+        114,
+        1205
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What is the approval status of SDG&E's 2023-2025 Wildfire Mitigation Plan according to Energy Safety?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0020",
+      "difficulty": "medium",
+      "question_type": "regulatory_decision",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 1.0,
+      "mrr": 0.3333333333333333,
+      "ndcg@5": 0.5,
+      "first_gold_rank": 3,
+      "retrieved_ids": [
+        34,
+        140,
+        125,
+        231,
+        220
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "Which organizations submitted comments on SDG&E's 2023-2025 Wildfire Mitigation Plan?",
+        "Which individuals submitted comments on SDG&E's 2023-2025 Wildfire Mitigation Plan?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0021",
+      "difficulty": "simple",
+      "question_type": "regulatory_decision",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 1.0,
+      "mrr": 0.3333333333333333,
+      "ndcg@5": 0.5,
+      "first_gold_rank": 3,
+      "retrieved_ids": [
+        130,
+        236,
+        131,
+        237,
+        127
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What modification did Energy Safety make to the area for continued improvement SDGE-23-06?",
+        "What stakeholder recommendations led to modifications in SDGE-23-06?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0022",
+      "difficulty": "medium",
+      "question_type": "regulatory_decision",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        238,
+        132,
+        37,
+        143,
+        138
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What are the seven mitigation categories in Energy Safety's Maturity Model for assessing wildfire risk mitigation programs?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0023",
+      "difficulty": "medium",
+      "question_type": "regulatory_decision",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        140,
+        34,
+        220,
+        114,
+        101
+      ],
+      "api_rewrite_calls": 0,
+      "rewrite_source": "simple",
+      "sub_questions": [
+        "What are SDG&E's key strengths in its wildfire mitigation plan according to Energy Safety?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0024",
+      "difficulty": "simple",
+      "question_type": "regulatory_decision",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 1.0,
+      "mrr": 0.2,
+      "ndcg@5": 0.38685280723454163,
+      "first_gold_rank": 5,
+      "retrieved_ids": [
+        132,
+        238,
+        133,
+        239,
+        37
+      ],
+      "api_rewrite_calls": 0,
+      "rewrite_source": "simple",
+      "sub_questions": [
+        "How are wildfire mitigation maturity levels scored in Energy Safety's assessment framework?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0025",
+      "difficulty": "simple",
+      "question_type": "regulatory_decision",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        50,
+        156,
+        59,
+        165,
+        85
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What is SDG&E's 2023 maturity level for risk assessment?",
+        "What is SDG&E's 2023 maturity level for mitigation strategy?",
+        "How is the capability average calculated for maturity levels in SDG&E's Wildfire Mitigation Plan?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0026",
+      "difficulty": "simple",
+      "question_type": "risk_assessment",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        155,
+        49,
+        273,
+        258,
+        307
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What are the six components of SDG&E's risk analysis framework?",
+        "How does SDG&E use its risk analysis framework to identify risk events?",
+        "How does SDG&E use its risk analysis framework to evaluate risk events?",
+        "How does SDG&E use its risk analysis framework to prioritize risk events?",
+        "How does SDG&E use its risk analysis framework to respond to risk events?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0027",
+      "difficulty": "medium",
+      "question_type": "regulatory_decision",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 1.0,
+      "mrr": 0.3333333333333333,
+      "ndcg@5": 0.5,
+      "first_gold_rank": 3,
+      "retrieved_ids": [
+        362,
+        750,
+        61,
+        167,
+        259
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What specific issue does Energy Safety identify regarding SDG&E's WiNGS-Planning Model and its treatment of undergrounding projects?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0028",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        69,
+        175,
+        70,
+        176,
+        180
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What maturity level does SDG&E project for asset inspections in 2025 using minimum values?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0029",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        77,
+        183,
+        108,
+        214,
+        181
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What are the three specific factors that SDG&E must account for when establishing maintenance frequency for equipment in its 2025 Update?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0030",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        83,
+        189,
+        109,
+        215,
+        214
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What is SDG&E's plan for identifying proactive HFTD inspection activity opportunities?",
+        "What is the timeline for SDG&E to identify these HFTD inspection opportunities?",
+        "What specific types of inspection activities does SDG&E plan to prioritize in high fire threat districts?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0031",
+      "difficulty": "simple",
+      "question_type": "regulatory_decision",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        199,
+        93,
+        711,
+        11,
+        2
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What are SDG&E's projected targets for customers impacted by PSPS in 2023?",
+        "What are SDG&E's projected targets for customers impacted by PSPS in 2024?",
+        "What are SDG&E's projected targets for customers impacted by PSPS in 2025?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0032",
+      "difficulty": "medium",
+      "question_type": "regulatory_decision",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        773,
+        259,
+        550,
+        140,
+        34
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What technology improvements has SDG&E implemented for situational awareness?",
+        "What fire detection technologies has SDG&E deployed or upgraded?",
+        "What specific equipment or systems has SDG&E added to monitor wildfire risks?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0033",
+      "difficulty": "medium",
+      "question_type": "regulatory_decision",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        104,
+        210,
+        777,
+        775,
+        71
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What are the specific requirements for SDG&E's 2025 update to the Joint IOU Covered Conductor Working Group Report?",
+        "What content or sections must be included in SDG&E's 2025 update to the Joint IOU Covered Conductor Working Group Report?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0034",
+      "difficulty": "simple",
+      "question_type": "regulatory_decision",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        740,
+        37,
+        143,
+        749,
+        276
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "According to the wildfire mitigation glossary, what does EVM stand for?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0035",
+      "difficulty": "simple",
+      "question_type": "regulatory_decision",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        126,
+        232,
+        127,
+        233,
+        231
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What new information did Cal Advocates introduce in their comments regarding SDG&E's QA/QC procedures?",
+        "How did Energy Safety's findings on SDG&E's QA/QC procedures change based on Cal Advocates' comments?",
+        "Which specific Cal Advocates comments were cited by Energy Safety as influencing their QA/QC procedure findings?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0036",
+      "difficulty": "medium",
+      "question_type": "regulatory_decision",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 1.0,
+      "mrr": 0.3333333333333333,
+      "ndcg@5": 0.5,
+      "first_gold_rank": 3,
+      "retrieved_ids": [
+        236,
+        130,
+        131,
+        237,
+        233
+      ],
+      "api_rewrite_calls": 0,
+      "rewrite_source": "simple",
+      "sub_questions": [
+        "What modification did Energy Safety make to SDGE-23-17 based on stakeholder recommendations?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0037",
+      "difficulty": "simple",
+      "question_type": "regulatory_decision",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 1.0,
+      "mrr": 0.3333333333333333,
+      "ndcg@5": 0.5,
+      "first_gold_rank": 3,
+      "retrieved_ids": [
+        143,
+        37,
+        238,
+        132,
+        129
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "How many individual capabilities are included in Energy Safety's Maturity Model?",
+        "Into how many categories are the capabilities in Energy Safety's Maturity Model aggregated?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0038",
+      "difficulty": "medium",
+      "question_type": "regulatory_decision",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        251,
+        23,
+        15,
+        140,
+        34
+      ],
+      "api_rewrite_calls": 0,
+      "rewrite_source": "simple",
+      "sub_questions": [
+        "What performance metrics did SDG&E include in its 2023 STIP to satisfy wildfire-safety requirements?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0039",
+      "difficulty": "simple",
+      "question_type": "regulatory_decision",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        251,
+        34,
+        140,
+        15,
+        11
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What percentage of SDG&E's 2023 target STIP is safety focused?",
+        "How is SDG&E's safety-focused STIP divided between wildfire safety and other safety measures?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0040",
+      "difficulty": "simple",
+      "question_type": "regulatory_decision",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        245,
+        247,
+        249,
+        252,
+        253
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "On what date did SDG&E submit its request for approval of its 2023 Executive Compensation Structure?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0041",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        255,
+        708,
+        701,
+        561,
+        775
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What grid design lessons did SDG&E report from 2022?",
+        "What grid operations lessons did SDG&E report from 2022?",
+        "What grid maintenance lessons did SDG&E report from 2022?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0042",
+      "difficulty": "hard",
+      "question_type": "mitigation_program",
+      "num_gold": 2,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 0.8503449055347546,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        257,
+        140,
+        34,
+        704,
+        256
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What situational-awareness tools did SDG&E use to improve wildfire readiness?",
+        "How did SDG&E update its PSPS (Public Safety Power Shutoff) model to improve wildfire readiness?",
+        "What were the specific improvements or outcomes from SDG&E's use of situational-awareness tools and PSPS model updates?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0043",
+      "difficulty": "simple",
+      "question_type": "regulatory_decision",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        262,
+        140,
+        34,
+        357,
+        114
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "Who is the executive-level owner with overall responsibility for SDG&E's Wildfire Mitigation Plan?",
+        "What is the contact information for the executive-level owner of SDG&E's Wildfire Mitigation Plan?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0044",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 1.0,
+      "mrr": 0.5,
+      "ndcg@5": 0.6309297535714575,
+      "first_gold_rank": 2,
+      "retrieved_ids": [
+        259,
+        275,
+        257,
+        786,
+        167
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What risk models does SDG&E's Vegetation Management Program use?",
+        "How does SDG&E use risk models to prioritize vegetation inspections?",
+        "What are the specific improvements in inspection prioritization achieved through SDG&E's risk modeling approach?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0045",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        270,
+        259,
+        84,
+        190,
+        759
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What processes does SDG&E use to gather new wildfire risk information?",
+        "How frequently does SDG&E review and update its wildfire mitigation strategy?",
+        "What decision-making procedures does SDG&E follow when incorporating new risk data into its mitigation plans?",
+        "How does SDG&E communicate strategy updates to stakeholders and the public?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0046",
+      "difficulty": "simple",
+      "question_type": "psps_customer_impact",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        291,
+        1199,
+        197,
+        91,
+        359
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What classification system did SDG&E use to categorize census tracts as urban, rural, and highly rural?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0047",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        297,
+        298,
+        299,
+        393,
+        263
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What is the incidental take permit number issued by USFWS under section 10 of the Endangered Species Act for SDG&E's service territory?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0048",
+      "difficulty": "medium",
+      "question_type": "risk_assessment",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        31,
+        317,
+        751,
+        750,
+        324
+      ],
+      "api_rewrite_calls": 0,
+      "rewrite_source": "simple",
+      "sub_questions": [
+        "What are the key inputs used in the WiNGS-Planning Wildfire Consequence model?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0049",
+      "difficulty": "simple",
+      "question_type": "risk_assessment",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        750,
+        270,
+        767,
+        317,
+        259
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What is the WiNGS-Planning model?",
+        "What is the primary purpose of the WiNGS-Planning model in SDG&E's wildfire mitigation strategy?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0050",
+      "difficulty": "medium",
+      "question_type": "risk_assessment",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        380,
+        307,
+        767,
+        206,
+        100
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What are the main components of SDG&E's wildfire risk quantification methodology?",
+        "How does SDG&E calculate PSPS (Public Safety Power Shutoff) risk in its risk assessment framework?",
+        "What metrics and data inputs does SDG&E use to quantify overall wildfire utility risk?",
+        "How does SDG&E integrate wildfire probability, consequence, and vulnerability into a single risk calculation?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0051",
+      "difficulty": "simple",
+      "question_type": "risk_assessment",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        336,
+        386,
+        339,
+        338,
+        337
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "Which circuit segment has the highest overall wildfire and PSPS risk score according to the top risk-contributing circuits table?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0052",
+      "difficulty": "medium",
+      "question_type": "risk_assessment",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 1.0,
+      "mrr": 0.5,
+      "ndcg@5": 0.6309297535714575,
+      "first_gold_rank": 2,
+      "retrieved_ids": [
+        339,
+        340,
+        689,
+        421,
+        735
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What changes were made to the PSPS Likelihood of Risk Event assessment for 4 kV circuit segments?",
+        "How did the upgraded PSPS Likelihood of Risk Event assessment affect the identification of high-risk 4 kV circuits?",
+        "What were the operational impacts of upgrading the PSPS Likelihood of Risk Event assessment on 4 kV circuit segments?",
+        "Did the upgraded PSPS Likelihood of Risk Event assessment result in changes to PSPS event frequency or scope for 4 kV circuits?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0053",
+      "difficulty": "simple",
+      "question_type": "risk_assessment",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        348,
+        752,
+        317,
+        354,
+        804
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What industry-recognized standards were referenced during the November 2022 third-party review of WiNGS-Planning?",
+        "What industry-recognized standards were referenced during the November 2022 third-party review of WiNGS-Ops?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0054",
+      "difficulty": "simple",
+      "question_type": "regulatory_decision",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        357,
+        1157,
+        705,
+        140,
+        34
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "How frequently does the SDG&E Wildfire Council meet?",
+        "What is the role of the SDG&E Wildfire Council in providing executive-level review of wildfire mitigation activities?",
+        "What is the role of the SDG&E Wildfire Council in providing direction for wildfire mitigation activities?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0055",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        362,
+        783,
+        420,
+        370,
+        369
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What are the benefits of SDG&E's strategic undergrounding program?",
+        "What is the current cost of SDG&E's strategic undergrounding program?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0056",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        781,
+        863,
+        140,
+        34,
+        167
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What is SDG&E's Environmental Management process for assessing mitigation projects?",
+        "What specific environmental constraints does SDG&E evaluate in its Wildfire Mitigation Plan projects?",
+        "How does SDG&E's Environmental Management ensure compliance with environmental regulations in mitigation projects?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0057",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        703,
+        34,
+        140,
+        276,
+        114
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What are SDG&E's emergency preparedness objectives for wildfire mitigation?",
+        "What specific goals or targets has SDG&E established related to emergency preparedness in their wildfire mitigation plan?",
+        "How does SDG&E measure success in achieving emergency preparedness objectives for wildfire mitigation?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0058",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        1145,
+        711,
+        1146,
+        675,
+        1177
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What backup power solutions does SDG&E provide to customers experiencing frequent PSPS events?",
+        "What is SDG&E's policy on providing backup power or generators to customers affected by PSPS shutoffs?",
+        "Does SDG&E offer rebates or subsidies for backup power systems like batteries or generators for PSPS-affected customers?",
+        "What alternative power options has SDG&E made available to vulnerable populations during PSPS events?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0059",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 1.0,
+      "mrr": 0.5,
+      "ndcg@5": 0.6309297535714575,
+      "first_gold_rank": 2,
+      "retrieved_ids": [
+        420,
+        395,
+        259,
+        255,
+        369
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What is the primary purpose of SDG&E's Strategic Undergrounding Program?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0060",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        402,
+        703,
+        140,
+        34,
+        207
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What avian protection objectives does SDG&E include in its 10-year wildfire mitigation plan?",
+        "What lightning arrester installation objectives does SDG&E include in its 10-year wildfire mitigation plan?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0061",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        420,
+        395,
+        783,
+        704,
+        362
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "Why does SDG&E use strategic undergrounding in the High Fire Threat District (HFTD)?",
+        "What specific wildfire risks does SDG&E's strategic undergrounding program address?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0062",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        162,
+        56,
+        350,
+        704,
+        779
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What modeling approach does SDG&E use for scoping new traditional hardening work?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0063",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        434,
+        797,
+        833,
+        259,
+        270
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What advanced protection technologies are included in SDG&E's Advanced Protection Program?",
+        "How do these technologies reduce wildfire risk?",
+        "What specific equipment or systems does SDG&E use in their Advanced Protection Program?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0064",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        61,
+        167,
+        140,
+        34,
+        276
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What is the DCRI Program in SDG&E's Wildfire Mitigation Plan?",
+        "Does SDG&E provide quantified risk-reduction estimates for the DCRI Program?",
+        "What are SDG&E's stated reasons for not assigning quantified risk-reduction estimates to the DCRI Program?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0065",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        1129,
+        1148,
+        650,
+        8,
+        1145
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "How does SDG&E identify customers for the Standby Power Program?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0066",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        461,
+        459,
+        786,
+        498,
+        214
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What is the purpose of SDG&E's transmission detailed inspection program under GO 165?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0067",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        467,
+        207,
+        101,
+        786,
+        779
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What is SDG&E's process for prioritizing transmission line infrared inspections?",
+        "When does SDG&E conduct infrared inspections relative to wildfire season?",
+        "What criteria does SDG&E use to determine which transmission lines receive infrared inspections first?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0068",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        475,
+        459,
+        786,
+        414,
+        481
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "How frequently does SDG&E perform distribution patrol inspections in the HFTD?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0069",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        477,
+        479,
+        255,
+        463,
+        777
+      ],
+      "api_rewrite_calls": 0,
+      "rewrite_source": "simple",
+      "sub_questions": [
+        "How are transmission visual patrols conducted in SDG&E's service territory?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0070",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        482,
+        483,
+        259,
+        34,
+        140
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What maintenance strategies does SDG&E use to manage equipment and reduce wildfire risk?",
+        "What replacement strategies does SDG&E use to manage equipment and reduce wildfire risk?",
+        "What specific types of equipment does SDG&E prioritize for maintenance and replacement in wildfire mitigation?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0071",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        487,
+        775,
+        393,
+        712,
+        797
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What update did SDG&E provide regarding the Expulsion Fuse Replacement Program?",
+        "What findings or results did SDG&E report from the efficacy study of the Expulsion Fuse Replacement Program?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0072",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        501,
+        414,
+        543,
+        409,
+        411
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What trend has been observed in the number of open distribution work orders since 2019?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0073",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        507,
+        508,
+        255,
+        275,
+        704
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What are the water-dropping capabilities of the Type 1 firefighting helicopters in SDG&E's Aviation Firefighting Program?",
+        "How many Type 1 firefighting helicopters are available in SDG&E's Aviation Firefighting Program?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0074",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        519,
+        543,
+        1084,
+        541,
+        532
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What percentage of inventory trees within the HFTD are trimmed or removed each year on average?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0075",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        522,
+        83,
+        189,
+        109,
+        215
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What accomplishments did SDG&E report for detailed vegetation inspections?",
+        "What roadblocks did SDG&E report for detailed vegetation inspections?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0076",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        1103,
+        30,
+        538,
+        259,
+        537
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What methodology does SDG&E use to identify poles that require vegetation management in high fire threat areas?",
+        "How does SDG&E prioritize or rank poles for vegetation management based on fire risk?",
+        "What data sources and tools does SDG&E use to locate poles in high fire threat zones?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0077",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        532,
+        522,
+        541,
+        189,
+        83
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "How does SDG&E define enhanced vegetation clearances in the HFTD?",
+        "What are SDG&E's specific clearance distance requirements in the HFTD?",
+        "How does SDG&E apply enhanced vegetation clearance standards in the HFTD?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0078",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        537,
+        207,
+        101,
+        544,
+        260
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What vegetation management resources does SDG&E maintain for wildfire emergency response?",
+        "How does SDG&E deploy its vegetation management teams during wildfire events?",
+        "What training and preparation do SDG&E vegetation management crews receive for emergency wildfire response?",
+        "What equipment and tools does SDG&E pre-position for rapid vegetation management during wildfires?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0079",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        544,
+        542,
+        543,
+        537,
+        747
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "How many individuals comprise the Vegetation Management contractor workforce?",
+        "What activities do Vegetation Management contractors perform?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0080",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        1155,
+        140,
+        34,
+        101,
+        207
+      ],
+      "api_rewrite_calls": 0,
+      "rewrite_source": "simple",
+      "sub_questions": [
+        "What partnership did SDG&E establish with UC San Diego to improve fire weather forecasting?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0081",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        565,
+        566,
+        351,
+        556,
+        549
+      ],
+      "api_rewrite_calls": 0,
+      "rewrite_source": "simple",
+      "sub_questions": [
+        "What enhancements to the Air Quality Management Program are planned for the 2023-2025 WMP cycle?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0082",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        579,
+        550,
+        256,
+        575,
+        773
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What AI-based smoke detection technology does SDG&E use to identify wildfires?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0083",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        584,
+        690,
+        585,
+        588,
+        586
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What environmental factors are included in the SAWTI index?",
+        "How does the SAWTI index calculate or measure the potential for large wildfire activity?",
+        "What is the SAWTI index and what is its purpose in wildfire assessment?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0084",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        588,
+        56,
+        162,
+        759,
+        289
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What weather modeling tools does SDG&E use to predict wildfire risk?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0085",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        601,
+        596,
+        668,
+        606,
+        664
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What is the projected percentage of Wildfire/PSPS events to be followed by an After-Action Review or feedback process in 2025?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0086",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        604,
+        615,
+        609,
+        612,
+        616
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What are the five EOC (Emergency Operations Center) activation levels?",
+        "What does each EOC activation level represent?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0087",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        614,
+        616,
+        615,
+        609,
+        612
+      ],
+      "api_rewrite_calls": 0,
+      "rewrite_source": "simple",
+      "sub_questions": [
+        "What are the required qualifications for the Customer Service Section Chief role during EOC activations?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0088",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        34,
+        140,
+        650,
+        773,
+        358
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What emergency management structure does SDG&E have in place for wildfire response?",
+        "How does SDG&E coordinate with local fire departments and emergency services during wildfires?",
+        "What communication protocols does SDG&E use to alert customers during wildfire emergencies?",
+        "How does SDG&E coordinate power shutoffs with emergency management agencies during wildfires?",
+        "What role does SDG&E play in emergency operations centers during wildfire events?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0089",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        634,
+        379,
+        260,
+        628,
+        244
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What is the Wildfire and Climate Resilience Center (WCRC)?",
+        "When was the Wildfire and Climate Resilience Center (WCRC) completed?",
+        "What is the primary purpose of the Wildfire and Climate Resilience Center (WCRC)?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0090",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        641,
+        749,
+        311,
+        138,
+        244
+      ],
+      "api_rewrite_calls": 0,
+      "rewrite_source": "simple",
+      "sub_questions": [
+        "What wildfire risk levels dictate patrol requirements prior to service restoration after a PSPS event?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0091",
+      "difficulty": "simple",
+      "question_type": "psps_customer_impact",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        1195,
+        1199,
+        1204,
+        664,
+        1203
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What specific concerns do non-English speakers have regarding wildfire events according to SDG&E's target community analysis?",
+        "What specific concerns do non-English speakers have regarding PSPS (Public Safety Power Shutoff) events according to SDG&E's target community analysis?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0092",
+      "difficulty": "simple",
+      "question_type": "psps_customer_impact",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        668,
+        257,
+        261,
+        635,
+        1191
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What is SDG&E's Resiliency Audit and what does it assess?",
+        "How does SDG&E use the Resiliency Audit to improve PSPS communications?",
+        "How does SDG&E use the Resiliency Audit to improve PSPS preparedness?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0093",
+      "difficulty": "medium",
+      "question_type": "psps_customer_impact",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        1203,
+        1201,
+        254,
+        351,
+        668
+      ],
+      "api_rewrite_calls": 0,
+      "rewrite_source": "simple",
+      "sub_questions": [
+        "What study did SDG&E perform after the 2020 fire season to improve PSPS decision-making?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0094",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        675,
+        803,
+        228,
+        122,
+        140
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "Which mitigation programs does SDG&E identify as most effective for frequently de-energized circuits?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0095",
+      "difficulty": "simple",
+      "question_type": "psps_customer_impact",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        693,
+        689,
+        685,
+        560,
+        100
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What meteorological data does SDG&E collect and monitor for PSPS decision-making?",
+        "How does SDG&E use percentile wind calculations in determining PSPS activation?",
+        "What are the specific wind speed thresholds and percentile levels that trigger SDG&E's PSPS decisions?",
+        "How are other meteorological factors (temperature, humidity, fuel moisture) integrated with wind data in SDG&E's PSPS protocols?",
+        "What role do weather forecasts and historical meteorological data play in SDG&E's PSPS planning?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0096",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        259,
+        395,
+        369,
+        783,
+        420
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What was SDG&E's Strategic Undergrounding Program?",
+        "What materials were needed for SDG&E's Strategic Undergrounding Program?",
+        "What challenges did SDG&E face in obtaining materials for the Strategic Undergrounding Program?",
+        "What actions did SDG&E take to ensure material availability for the Strategic Undergrounding Program?",
+        "What was the outcome of SDG&E's efforts to ensure material availability for the Strategic Undergrounding Program?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0097",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        711,
+        257,
+        710,
+        244,
+        138
+      ],
+      "api_rewrite_calls": 0,
+      "rewrite_source": "simple",
+      "sub_questions": [
+        "What lesson was learned regarding customer participation in PSPS resiliency programs?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0098",
+      "difficulty": "simple",
+      "question_type": "regulatory_decision",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 1.0,
+      "mrr": 0.5,
+      "ndcg@5": 0.6309297535714575,
+      "first_gold_rank": 2,
+      "retrieved_ids": [
+        295,
+        720,
+        697,
+        696,
+        721
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What types of healthcare facilities are included in the definition of critical facilities and infrastructure?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0099",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        622,
+        1170,
+        647,
+        628,
+        1135
+      ],
+      "api_rewrite_calls": 0,
+      "rewrite_source": "simple",
+      "sub_questions": [
+        "Who are considered public safety partners according to the WMP definitions?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0100",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 1.0,
+      "mrr": 0.5,
+      "ndcg@5": 0.6309297535714575,
+      "first_gold_rank": 2,
+      "retrieved_ids": [
+        745,
+        746,
+        506,
+        244,
+        138
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What are the key components of the Personnel Work Procedures and Training in Conditions of Elevated Fire Risk initiative?",
+        "What training requirements does the Personnel Work Procedures and Training in Conditions of Elevated Fire Risk initiative establish?",
+        "What work procedures does the Personnel Work Procedures and Training in Conditions of Elevated Fire Risk initiative implement?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0101",
+      "difficulty": "medium",
+      "question_type": "risk_assessment",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        750,
+        752,
+        317,
+        365,
+        751
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What is the primary purpose of the WiNGS-Planning model?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0102",
+      "difficulty": "simple",
+      "question_type": "regulatory_decision",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        763,
+        293,
+        773,
+        759,
+        56
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What does SDG&E say about how it is addressing the inclusion of community vulnerability in consequence modeling?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0103",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        359,
+        206,
+        100,
+        161,
+        55
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What approach does SDG&E use to evaluate and select mitigation measures?",
+        "How does SDG&E show or visualize wildfire risk distribution?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0104",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        775,
+        173,
+        67,
+        777,
+        71
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What are the planned dates for SDG&E to complete its covered conductor effectiveness testing?",
+        "What are the planned dates for SDG&E to complete its covered conductor analysis?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0105",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        783,
+        362,
+        167,
+        61,
+        255
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What are SDG&E's cost estimates for strategic undergrounding projects in their Wildfire Mitigation Plan?",
+        "What are SDG&E's cost estimates for covered conductor installation in their Wildfire Mitigation Plan?",
+        "How does SDG&E compare the per-mile costs of undergrounding versus covered conductors?",
+        "What metrics does SDG&E use to evaluate cost-effectiveness between undergrounding and covered conductor installation?",
+        "What does SDG&E cite as the timeline differences for implementing undergrounding versus covered conductor installation?",
+        "How does SDG&E account for maintenance and long-term costs when comparing undergrounding to covered conductors?",
+        "Does SDG&E provide wildfire risk reduction data for undergrounding versus covered conductors in their mitigation plan?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0106",
+      "difficulty": "medium",
+      "question_type": "risk_assessment",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        804,
+        257,
+        254,
+        752,
+        259
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What is the WiNGS-Ops model and what is its purpose in PSPS decision-making?",
+        "What progress did SDG&E make in incorporating the WiNGS-Ops model into their PSPS decision-making process before September 1, 2022?",
+        "What were the specific milestones or implementation steps SDG&E completed regarding WiNGS-Ops integration prior to September 1, 2022?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0107",
+      "difficulty": "simple",
+      "question_type": "risk_assessment",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        783,
+        689,
+        380,
+        779,
+        276
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What methods does SDG&E use to track risk reduction from covered conductor installations?",
+        "What methods does SDG&E use to track risk reduction from undergrounding projects?",
+        "How does SDG&E measure the impact of covered conductor and undergrounding projects on PSPS (Public Safety Power Shutoff) events?",
+        "What metrics or data does SDG&E collect to assess PSPS risk reduction from these mitigation projects?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0108",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        820,
+        173,
+        67,
+        811,
+        213
+      ],
+      "api_rewrite_calls": 0,
+      "rewrite_source": "simple",
+      "sub_questions": [
+        "What next steps did the utilities plan for evaluating covered-conductor test results?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0109",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        829,
+        828,
+        832,
+        830,
+        831
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What are the three prongs of SCE's preliminary framework for calculating the effectiveness of a combination of mitigations?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0110",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        839,
+        777,
+        177,
+        71,
+        742
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What training programs do utility inspectors receive on covered conductor construction standards?",
+        "What are the maintenance requirements for covered conductors that inspectors need to understand?",
+        "How do inspectors verify compliance with covered conductor construction standards?",
+        "What certification or qualification requirements exist for utility inspectors evaluating covered conductor installations?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0111",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        418,
+        363,
+        877,
+        842,
+        844
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What range of effectiveness do utilities continue to estimate for covered conductor at reducing outages and ignitions?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0112",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        846,
+        777,
+        177,
+        71,
+        35
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What did SDG&E initially examine regarding covered conductor from a personnel safety standpoint?",
+        "What did SDG&E initially examine regarding covered conductor from a reliability standpoint?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0113",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        853,
+        874,
+        820,
+        810,
+        832
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What will utilities do in 2023 regarding benchmarking with other utilities?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0114",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 2,
+      "hit@1": 0.0,
+      "recall@5": 0.5,
+      "mrr": 0.5,
+      "ndcg@5": 0.38685280723454163,
+      "first_gold_rank": 2,
+      "retrieved_ids": [
+        783,
+        860,
+        213,
+        107,
+        775
+      ],
+      "api_rewrite_calls": 0,
+      "rewrite_source": "simple",
+      "sub_questions": [
+        "What are the major components of SDG&E's covered-conductor per-mile capital costs?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0115",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        870,
+        871,
+        827,
+        371,
+        775
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What is the typical project life cycle range for Liberty's covered conductor installations?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0116",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        873,
+        796,
+        775,
+        255,
+        71
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What testing did SDG&E and other utilities conduct on covered-conductor effectiveness?",
+        "What were the original covered-conductor effectiveness values used by SDG&E and other utilities?",
+        "What new covered-conductor effectiveness values did SDG&E and other utilities establish after testing?",
+        "What changes did SDG&E and other utilities make to their covered-conductor effectiveness assumptions based on test results?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0117",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        888,
+        881,
+        885,
+        907,
+        896
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What foreign objects were used in covered-conductor phase-to-phase contact testing?",
+        "What vegetation was used in covered-conductor phase-to-phase contact testing?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0118",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        896,
+        907,
+        881,
+        885,
+        815
+      ],
+      "api_rewrite_calls": 0,
+      "rewrite_source": "simple",
+      "sub_questions": [
+        "What time-dependent effects did extended phase-to-phase contact testing investigate for covered conductors?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0119",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        900,
+        901,
+        893,
+        907,
+        908
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What observations were made when a covered conductor with a full-thickness insulation flaw was exposed to extreme voltage?",
+        "What observations were made when a eucalyptus branch bridged a covered conductor with a full-thickness insulation flaw?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0120",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        909,
+        886,
+        881,
+        954,
+        913
+      ],
+      "api_rewrite_calls": 0,
+      "rewrite_source": "simple",
+      "sub_questions": [
+        "What was the experimental setup used for simulated wire-down testing of covered conductors?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0121",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        914,
+        877,
+        912,
+        909,
+        881
+      ],
+      "api_rewrite_calls": 0,
+      "rewrite_source": "simple",
+      "sub_questions": [
+        "What are the possible outcomes observed in simulated wire-down tests of covered conductors?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0122",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        926,
+        927,
+        932,
+        929,
+        947
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What does salt spray testing reveal about corrosion depth beneath the polymer sheath of 17-kV ACSR covered conductors?",
+        "In salt spray testing of 17-kV ACSR covered conductors, how far beneath the polymer sheath can corrosion penetrate into unexposed metal areas?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0123",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 1.0,
+      "mrr": 0.25,
+      "ndcg@5": 0.43067655807339306,
+      "first_gold_rank": 4,
+      "retrieved_ids": [
+        916,
+        948,
+        945,
+        943,
+        947
+      ],
+      "api_rewrite_calls": 0,
+      "rewrite_source": "simple",
+      "sub_questions": [
+        "What electrochemical testing method was used to evaluate localized corrosion susceptibility in covered conductors?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0124",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        952,
+        877,
+        955,
+        916,
+        814
+      ],
+      "api_rewrite_calls": 0,
+      "rewrite_source": "simple",
+      "sub_questions": [
+        "What testing methodology was used to assess the autoignition properties of covered conductor polymer sheaths?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0125",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        959,
+        960,
+        985,
+        819,
+        964
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What test equipment was used to perform the splice maximum load tests on covered conductors?",
+        "What procedures were used to perform the splice maximum load tests on covered conductors?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0126",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 1.0,
+      "mrr": 0.3333333333333333,
+      "ndcg@5": 0.5,
+      "first_gold_rank": 3,
+      "retrieved_ids": [
+        976,
+        971,
+        972,
+        963,
+        1016
+      ],
+      "api_rewrite_calls": 0,
+      "rewrite_source": "simple",
+      "sub_questions": [
+        "What were the results of tree-fall tests performed with clamp-top insulators on covered conductor assemblies?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0127",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 1.0,
+      "mrr": 0.5,
+      "ndcg@5": 0.6309297535714575,
+      "first_gold_rank": 2,
+      "retrieved_ids": [
+        994,
+        985,
+        964,
+        992,
+        993
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What was the completion date for the maximum load test on the 17 kV 1/0 AWG ACSR splice identified as sample 1.1.1?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0128",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 1.0,
+      "mrr": 0.5,
+      "ndcg@5": 0.6309297535714575,
+      "first_gold_rank": 2,
+      "retrieved_ids": [
+        1012,
+        1013,
+        969,
+        966,
+        965
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What percentage of slippage was observed in the 15 kV 1/0 AWG ACSR suspension clamp slip test for sample 2.4.1?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0129",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        1012,
+        1035,
+        1013,
+        993,
+        966
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "On what date was the slip load test completed for the 15 kV 1/0 AWG ACSR sample 2.4.1?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0130",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        1016,
+        967,
+        976,
+        968,
+        1032
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What was the primary difference in slip mechanism between the Vise Top and Clamp top insulators when tested?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0131",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 1.0,
+      "mrr": 0.2,
+      "ndcg@5": 0.38685280723454163,
+      "first_gold_rank": 5,
+      "retrieved_ids": [
+        976,
+        1016,
+        963,
+        962,
+        1032
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What were the key findings from testing clamp-top insulators in the covered conductor full mock-up test program?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0132",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        1057,
+        916,
+        881,
+        976,
+        963
+      ],
+      "api_rewrite_calls": 0,
+      "rewrite_source": "simple",
+      "sub_questions": [
+        "What was the typical failure mode for smaller size conductors in the full mock-up tests?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0133",
+      "difficulty": "medium",
+      "question_type": "scale_targets",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        1086,
+        1087,
+        822,
+        1080,
+        1085
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What was SCE's reduction in tree-caused circuit interruptions between the pre-enhanced clearance and post-enhanced clearance periods?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0134",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        1099,
+        746,
+        529,
+        513,
+        530
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What does Public Resources Code Section 4292 require regarding clearance around utility poles?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0135",
+      "difficulty": "medium",
+      "question_type": "psps_customer_impact",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        1109,
+        1108,
+        1105,
+        629,
+        627
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "Which water service providers are listed as public safety partners in the communication protocols table?",
+        "What are the designated contact titles for water service providers in the communication protocols table?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0136",
+      "difficulty": "medium",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        1111,
+        670,
+        669,
+        1112,
+        671
+      ],
+      "api_rewrite_calls": 0,
+      "rewrite_source": "simple",
+      "sub_questions": [
+        "What organizations participated in the Wildfire Preparedness collaboration in June 2022?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0137",
+      "difficulty": "simple",
+      "question_type": "psps_customer_impact",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 1.0,
+      "mrr": 0.5,
+      "ndcg@5": 0.6309297535714575,
+      "first_gold_rank": 2,
+      "retrieved_ids": [
+        1129,
+        1123,
+        1172,
+        1124,
+        1127
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "How many people across California have been identified as having Access and Functional Needs through IOU programs?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0138",
+      "difficulty": "medium",
+      "question_type": "psps_customer_impact",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        326,
+        1186,
+        804,
+        351,
+        257
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What planning assumptions does SDG&E use for PSPS (Public Safety Power Shutoff) preparedness?",
+        "What planning assumptions do other Joint IOUs use for PSPS preparedness?",
+        "How do SDG&E's PSPS planning assumptions compare to those of other Joint IOUs?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0139",
+      "difficulty": "medium",
+      "question_type": "psps_customer_impact",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 1.0,
+      "mrr": 0.25,
+      "ndcg@5": 0.43067655807339306,
+      "first_gold_rank": 4,
+      "retrieved_ids": [
+        1140,
+        1138,
+        1175,
+        1142,
+        1176
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What food support partnerships does SDG&E have in place for individuals with Access and Functional Needs (AFN) during Public Safety Power Shutoffs (PSPS)?",
+        "How does SDG&E coordinate with food assistance organizations during PSPS events?",
+        "What specific resources or programs does SDG&E provide to ensure food security for vulnerable populations during power shutoffs?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0140",
+      "difficulty": "simple",
+      "question_type": "psps_customer_impact",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        1150,
+        639,
+        664,
+        1161,
+        1160
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "In what languages are SDG&E's public education materials about wildfire safety made available?",
+        "In what languages are SDG&E's wildfire safety notifications made available?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0141",
+      "difficulty": "medium",
+      "question_type": "psps_customer_impact",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        1158,
+        1122,
+        1182,
+        244,
+        138
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What challenges have tribal communities identified regarding Public Safety Power Shutoff (PSPS) impacts?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0142",
+      "difficulty": "medium",
+      "question_type": "psps_customer_impact",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        257,
+        716,
+        1162,
+        1163,
+        94
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "Who participates in SDG&E's PSPS Working Group?",
+        "What topics did SDG&E's PSPS Working Group address in 2022?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0143",
+      "difficulty": "medium",
+      "question_type": "psps_customer_impact",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        1135,
+        1187,
+        257,
+        1138,
+        1176
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What preparation exercises did SDG&E conduct to prepare for PSPS events?",
+        "What training did SDG&E conduct to prepare for PSPS events?",
+        "How did SDG&E support individuals with access and functional needs during PSPS events?",
+        "What specific programs or resources did SDG&E develop for individuals with access and functional needs in relation to PSPS?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0144",
+      "difficulty": "medium",
+      "question_type": "psps_customer_impact",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        1182,
+        1186,
+        228,
+        122,
+        1187
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What specific improvements did SDG&E suggest for the Prepareforpowerdown website to better serve customers with Access and Functional Needs?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0145",
+      "difficulty": "simple",
+      "question_type": "psps_customer_impact",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        1181,
+        1187,
+        1173,
+        91,
+        197
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What metrics does SDG&E report for its outreach efforts to customers with access and functional needs?",
+        "How does SDG&E define and track 'access and functional needs' customer populations?",
+        "What outreach methods does SDG&E use to communicate with customers with access and functional needs?",
+        "What outcomes or participation rates does SDG&E measure for its access and functional needs outreach programs?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0146",
+      "difficulty": "simple",
+      "question_type": "psps_customer_impact",
+      "num_gold": 1,
+      "hit@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "ndcg@5": 1.0,
+      "first_gold_rank": 1,
+      "retrieved_ids": [
+        1201,
+        1204,
+        1203,
+        1199,
+        257
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What is the most commonly used PSPS resource among SDG&E customers according to the 2022 study?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0147",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 1.0,
+      "mrr": 0.3333333333333333,
+      "ndcg@5": 0.5,
+      "first_gold_rank": 3,
+      "retrieved_ids": [
+        140,
+        34,
+        1205,
+        1208,
+        139
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "When did SDG&E submit its 2023-2025 Wildfire Mitigation Plan to the Office of Energy Infrastructure Safety?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0148",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 1.0,
+      "mrr": 0.25,
+      "ndcg@5": 0.43067655807339306,
+      "first_gold_rank": 4,
+      "retrieved_ids": [
+        63,
+        169,
+        1208,
+        1206,
+        1209
+      ],
+      "api_rewrite_calls": 0,
+      "rewrite_source": "simple",
+      "sub_questions": [
+        "What correction was made to the SCADA program section number in SDG&E's non-substantive errata?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0149",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        1206,
+        1209,
+        64,
+        170,
+        127
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What issue did SDG&E identify with Table 9.2 in Appendix F?",
+        "What corrections did SDG&E make to Table 9.2 in Appendix F through its non-substantive errata?"
+      ]
+    },
+    {
+      "id": "wmp_eval_0150",
+      "difficulty": "simple",
+      "question_type": "mitigation_program",
+      "num_gold": 1,
+      "hit@1": 0.0,
+      "recall@5": 0.0,
+      "mrr": 0.0,
+      "ndcg@5": 0.0,
+      "first_gold_rank": null,
+      "retrieved_ids": [
+        140,
+        34,
+        703,
+        1206,
+        1205
+      ],
+      "api_rewrite_calls": 1,
+      "rewrite_source": "api",
+      "sub_questions": [
+        "What wildfire mitigation program tracking IDs did SDG&E correct in its errata?",
+        "Which wildfire mitigation programs were affected by the corrections in SDG&E's errata?"
+      ]
+    }
+  ]
+}

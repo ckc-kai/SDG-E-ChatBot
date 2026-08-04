@@ -29,20 +29,32 @@ models:
 
 query_rewrite:
   model: claude-haiku-4-5-20251001
-  mode: auto
+  # Retrieval remains fully local unless an application opts into rewriting.
+  mode: "off"
   max_subquestions: 2
 
 retrieval:
+  # Keep incomparable content shapes in independently ranked result groups.
+  # The old flat merge remains available through the compatibility API.
+  output_mode: grouped
   embedding_mode: hybrid
   hybrid_pool_mode: union
   retrieval_top_k: 30
   rerank_top_k: 10
   rrf_k: 60
-  # Soft metadata evidence, not a reserved table/figure result quota.
+  # Safe with grouped output: it cannot displace narrative evidence.
+  # Set to 0.0 when reproducing the former merged-route baseline.
   caption_rerank_weight: 0.25
   lexical_caption_weight: 4.0
   lexical_hint_weight: 0.25
   deduplicate_exact_content: true
+  # "off" keeps legacy global ranking. Set to "all" to retrieve/rerank each
+  # narrative, structured-PDF, and Excel lane independently before merging.
+  lane_mode: off
+  lane_confidence_floor: 0.0
+  # The fitted curves are retained for diagnostics but are disabled because
+  # calibration regressed narrative ranking in the combined evaluation.
+  score_calibration: off
 
 extraction:
   structured:
@@ -56,8 +68,10 @@ extraction:
     page_batch_size: 0
     figure_description:
       # Docling's local SmolVLM description is an unverified retrieval hint.
-      generate: true
-      candidate_retrieval: true
+      # Keep the base ingest independent from a multi-GB vision-model download.
+      # These can be enabled later and refreshed without re-ingesting facts.
+      generate: false
+      candidate_retrieval: false
       reranking: false
       answer_context: false
 

@@ -1,0 +1,147 @@
+{
+  "active_revisions": [
+    {
+      "contract_version": "excel-contracts-v1",
+      "ingest_signature": "f9d66a2d030db9a92668edfb2d04b5a62edc9cef92e8932feebb7b9753279915",
+      "revision_id": 1,
+      "source_file": "sdge_table01_rag_ready.csv",
+      "source_hash": "be48c0e74fd040f691c179d5c55bf023815b4d1c30bbf94d4a212222c63232b2",
+      "source_key": "sdge_table01",
+      "table_number": 1
+    },
+    {
+      "contract_version": "excel-contracts-v1",
+      "ingest_signature": "f9d66a2d030db9a92668edfb2d04b5a62edc9cef92e8932feebb7b9753279915",
+      "revision_id": 2,
+      "source_file": "sdge_table02_rag_ready.csv",
+      "source_hash": "c1a77ac6b373e1b23dea8f484bf3318b09736112afd46e3dac434e296882adac",
+      "source_key": "sdge_table02",
+      "table_number": 2
+    },
+    {
+      "contract_version": "excel-contracts-v1",
+      "ingest_signature": "f9d66a2d030db9a92668edfb2d04b5a62edc9cef92e8932feebb7b9753279915",
+      "revision_id": 3,
+      "source_file": "sdge_table03_rag_ready.csv",
+      "source_hash": "1de2d9ff825d7a4b0ff4708a8670080ad0d918e7490646bc5aa3442b851b80bb",
+      "source_key": "sdge_table03",
+      "table_number": 3
+    },
+    {
+      "contract_version": "excel-contracts-v1",
+      "ingest_signature": "f9d66a2d030db9a92668edfb2d04b5a62edc9cef92e8932feebb7b9753279915",
+      "revision_id": 17,
+      "source_file": "sdge_table04_rag_ready.csv",
+      "source_hash": "6580780c7e6d5960dada6139a8ee23a522d0981693c2ddbf139459643ae0c389",
+      "source_key": "sdge_table04",
+      "table_number": 4
+    },
+    {
+      "contract_version": "excel-contracts-v1",
+      "ingest_signature": "f9d66a2d030db9a92668edfb2d04b5a62edc9cef92e8932feebb7b9753279915",
+      "revision_id": 5,
+      "source_file": "sdge_table05_rag_ready.csv",
+      "source_hash": "db00965f13d1c47b42f242a233779bded0d56cb4b989053b5bf40c0fc5cfc5ec",
+      "source_key": "sdge_table05",
+      "table_number": 5
+    },
+    {
+      "contract_version": "excel-contracts-v1",
+      "ingest_signature": "f9d66a2d030db9a92668edfb2d04b5a62edc9cef92e8932feebb7b9753279915",
+      "revision_id": 6,
+      "source_file": "sdge_table06_rag_ready.csv",
+      "source_hash": "ae5db7b8867755d4ebd99fd4ea3636e2e91b2e2a0c7a7a40383e43005b3a7e46",
+      "source_key": "sdge_table06",
+      "table_number": 6
+    },
+    {
+      "contract_version": "excel-contracts-v1",
+      "ingest_signature": "f9d66a2d030db9a92668edfb2d04b5a62edc9cef92e8932feebb7b9753279915",
+      "revision_id": 7,
+      "source_file": "sdge_table07_rag_ready.csv",
+      "source_hash": "0b21b5eb22c1bd38f5ac70a7dd92dac8ee3ac02665c38928677835bb52a66855",
+      "source_key": "sdge_table07",
+      "table_number": 7
+    },
+    {
+      "contract_version": "excel-contracts-v1",
+      "ingest_signature": "f9d66a2d030db9a92668edfb2d04b5a62edc9cef92e8932feebb7b9753279915",
+      "revision_id": 8,
+      "source_file": "sdge_table08_rag_ready.csv",
+      "source_hash": "a2937cc68ba0f2f49984a4ede5016c4fb7f0b4dcf7bade36896916773a01c511",
+      "source_key": "sdge_table08",
+      "table_number": 8
+    },
+    {
+      "contract_version": "excel-contracts-v1",
+      "ingest_signature": "f9d66a2d030db9a92668edfb2d04b5a62edc9cef92e8932feebb7b9753279915",
+      "revision_id": 9,
+      "source_file": "sdge_table09_rag_ready.csv",
+      "source_hash": "614b7b6d0fb98cf163752728a80641b5b4fe9c5b9fd790c862eadbe3f477a3db",
+      "source_key": "sdge_table09",
+      "table_number": 9
+    },
+    {
+      "contract_version": "excel-contracts-v1",
+      "ingest_signature": "f9d66a2d030db9a92668edfb2d04b5a62edc9cef92e8932feebb7b9753279915",
+      "revision_id": 10,
+      "source_file": "sdge_table10_rag_ready.csv",
+      "source_hash": "bfcaf271c3e269463f0761d6b2ea2c2785a97b0f3f6ae958fbfe9e158b99f1f8",
+      "source_key": "sdge_table10",
+      "table_number": 10
+    },
+    {
+      "contract_version": "excel-contracts-v1",
+      "ingest_signature": "f9d66a2d030db9a92668edfb2d04b5a62edc9cef92e8932feebb7b9753279915",
+      "revision_id": 11,
+      "source_file": "sdge_table11_rag_ready.csv",
+      "source_hash": "0ea5a7554bb6f2cb72df23aee96eca608a4eb49e83807b87de1b6dd00d28b0f3",
+      "source_key": "sdge_table11",
+      "table_number": 11
+    },
+    {
+      "contract_version": "excel-contracts-v1",
+      "ingest_signature": "f9d66a2d030db9a92668edfb2d04b5a62edc9cef92e8932feebb7b9753279915",
+      "revision_id": 12,
+      "source_file": "sdge_table13_rag_ready.csv",
+      "source_hash": "2de21160d37b40f8c989e3a9d8418c17823f4ee4033e38c64d215c8fafb8e703",
+      "source_key": "sdge_table13",
+      "table_number": 13
+    },
+    {
+      "contract_version": "excel-contracts-v1",
+      "ingest_signature": "f9d66a2d030db9a92668edfb2d04b5a62edc9cef92e8932feebb7b9753279915",
+      "revision_id": 13,
+      "source_file": "sdge_table14_rag_ready.csv",
+      "source_hash": "22f9b714db800cb27a8752fee144e4dcfb57e130460d1512e7068e4534c4c1a3",
+      "source_key": "sdge_table14",
+      "table_number": 14
+    },
+    {
+      "contract_version": "excel-contracts-v1",
+      "ingest_signature": "f9d66a2d030db9a92668edfb2d04b5a62edc9cef92e8932feebb7b9753279915",
+      "revision_id": 14,
+      "source_file": "sdge_table15_rag_ready.csv",
+      "source_hash": "ea715926db8dfda3996e247c122221c01a54472a1bfbfcca5b1492da5e53f0cc",
+      "source_key": "sdge_table15",
+      "table_number": 15
+    }
+  ],
+  "corpus_signature": "212c37dd8042e5cd95397b312909a76e171ca172ef1d718734b5e23e4eb5f87b",
+  "dataset_version": "2026-07-30",
+  "schema_version": "excel-eval-v2",
+  "suites": {
+    "evaluation_excel.jsonl": {
+      "rows": 80,
+      "sha256": "4e0e38e9837a859d44789834aae9e05ef92085b89e76513ed1a6eeda90213f85"
+    },
+    "evaluation_excel_challenge.jsonl": {
+      "rows": 24,
+      "sha256": "15310e802f7cb1432dadb0b447e49d9d9ca5060e20a105e0b38797a4ddbe709e"
+    },
+    "evaluation_excel_cross_corpus.jsonl": {
+      "rows": 20,
+      "sha256": "f8a163b5b989a06a2dc89bfa0a0a6b1c6b8fc3e9342af7d6d9f536d01c11e051"
+    }
+  }
+}

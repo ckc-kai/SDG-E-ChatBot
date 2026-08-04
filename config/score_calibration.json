@@ -1,0 +1,42 @@
+{
+  "recipe": "platt-per-content-type-v1",
+  "metadata": {
+    "runs": [
+      "/private/tmp/claude-501/-Users-kaichengchu-Desktop-AI-Projects-SDG-E-ChatBot/825e47cd-488b-4cf4-9142-15e181e833ac/scratchpad/p2-nat-raw.json",
+      "/private/tmp/claude-501/-Users-kaichengchu-Desktop-AI-Projects-SDG-E-ChatBot/825e47cd-488b-4cf4-9142-15e181e833ac/scratchpad/g-str-lane.json",
+      "/private/tmp/claude-501/-Users-kaichengchu-Desktop-AI-Projects-SDG-E-ChatBot/825e47cd-488b-4cf4-9142-15e181e833ac/scratchpad/p2-excel-raw.json"
+    ],
+    "folds": 5,
+    "note": "AUC is out-of-fold, grouped by question. Fitted on raw cross-encoder scores (caption_rerank_weight 0.0)."
+  },
+  "curves": {
+    "excel_card": {
+      "a": 1.4808026127782872,
+      "b": -0.8979155301833578,
+      "n_positive": 850,
+      "n_negative": 2411,
+      "holdout_auc": 0.7947306039897877
+    },
+    "figure": {
+      "a": 2.475771725297633,
+      "b": -0.9456280180630706,
+      "n_positive": 30,
+      "n_negative": 1907,
+      "holdout_auc": 0.954844042732965
+    },
+    "narrative": {
+      "a": 2.128715496514936,
+      "b": -1.235915367933133,
+      "n_positive": 170,
+      "n_negative": 10503,
+      "holdout_auc": 0.9647729229617884
+    },
+    "table": {
+      "a": 2.6200191144904084,
+      "b": -1.0864560254668971,
+      "n_positive": 30,
+      "n_negative": 4077,
+      "holdout_auc": 0.9709442961746779
+    }
+  }
+}

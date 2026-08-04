@@ -28,7 +28,7 @@ import re
 from pathlib import Path
 
 from retrieval.failure_log import get_failure_logger
-from retrieval.query import _strip_json_fence
+from retrieval.query.pdf.query import _strip_json_fence
 from retrieval.utils import connect_db, get_anthropic_client, load_config
 
 logger = logging.getLogger(__name__)
