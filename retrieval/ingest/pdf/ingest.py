@@ -4,7 +4,7 @@ Chunking strategy: Hierachy
 ------------------
 1. Hierarchy source: each PDF's native bookmark outline (pypdf `.outline`) is
    used as the section tree instead of inferring headings from text/font
-   heuristics. 
+   heuristics.
    Regulatory WMP filings already carry accurate, deeply nested bookmarks (e.g. "8.1.7.6 Aging report").
 
 2. Multi-document detection: WMP filings are frequently merged PDFs (a main
@@ -95,9 +95,7 @@ TOKEN_OVERLAP = _embedding_config["token_overlap"]
 MIN_CHUNK_CHARS = _embedding_config["minimum_chunk_chars"]
 DEFAULT_CONTENT_TYPE = "narrative"
 _figure_description_config = (
-    _config.get("extraction", {})
-    .get("structured", {})
-    .get("figure_description", {})
+    _config.get("extraction", {}).get("structured", {}).get("figure_description", {})
 )
 HINT_IN_CANDIDATE_RETRIEVAL = bool(
     _figure_description_config.get("candidate_retrieval", True)
@@ -160,7 +158,10 @@ def _resolve_page_number(reader: pypdf.PdfReader, destination: object) -> int | 
     try:
         return reader.get_destination_page_number(destination)
     except Exception:
-        logger.debug("Could not resolve page number for bookmark %r", getattr(destination, "title", destination))
+        logger.debug(
+            "Could not resolve page number for bookmark %r",
+            getattr(destination, "title", destination),
+        )
         return None
 
 
@@ -177,7 +178,11 @@ def _parse_outline(
     while index < len(items):
         item = items[index]
         if isinstance(item, list):
-            nodes.extend(_parse_outline(item, reader, depth, parent_breadcrumb, parent_sub_document))
+            nodes.extend(
+                _parse_outline(
+                    item, reader, depth, parent_breadcrumb, parent_sub_document
+                )
+            )
             index += 1
             continue
 
@@ -185,11 +190,17 @@ def _parse_outline(
         page = _resolve_page_number(reader, item)
         is_boundary = _is_document_boundary(title)
         sub_document = title if is_boundary else parent_sub_document
-        breadcrumb = title if is_boundary or not parent_breadcrumb else f"{parent_breadcrumb} > {title}"
+        breadcrumb = (
+            title
+            if is_boundary or not parent_breadcrumb
+            else f"{parent_breadcrumb} > {title}"
+        )
 
         children: list[SectionNode] = []
         if index + 1 < len(items) and isinstance(items[index + 1], list):
-            children = _parse_outline(items[index + 1], reader, depth + 1, breadcrumb, sub_document)
+            children = _parse_outline(
+                items[index + 1], reader, depth + 1, breadcrumb, sub_document
+            )
             index += 2
         else:
             index += 1
@@ -208,7 +219,9 @@ def _parse_outline(
     return nodes
 
 
-def _fill_missing_pages(nodes: tuple[SectionNode, ...], carry: int) -> tuple[tuple[SectionNode, ...], int]:
+def _fill_missing_pages(
+    nodes: tuple[SectionNode, ...], carry: int
+) -> tuple[tuple[SectionNode, ...], int]:
     """Replace unresolvable page numbers with the previous bookmark's page."""
     resolved: list[SectionNode] = []
     for node in nodes:
@@ -268,17 +281,33 @@ def build_leaf_sections(pdf_path: Path, reader: pypdf.PdfReader) -> list[LeafSec
             )
         ]
 
-    tree = tuple(_parse_outline(reader.outline, reader, depth=0, parent_breadcrumb="", parent_sub_document=None))
+    tree = tuple(
+        _parse_outline(
+            reader.outline,
+            reader,
+            depth=0,
+            parent_breadcrumb="",
+            parent_sub_document=None,
+        )
+    )
     tree, _ = _fill_missing_pages(tree, carry=0)
     return _leaf_sections(_flatten(tree), len(reader.pages))
 
 
-MIN_HEADING_MATCH_CHARS = 8  # titles shorter/more generic than this are too risky to anchor on
+MIN_HEADING_MATCH_CHARS = (
+    8  # titles shorter/more generic than this are too risky to anchor on
+)
 
-_PUNCT_NORMALIZE = str.maketrans({
-    "‘": "'", "’": "'", "“": '"', "”": '"',
-    "–": "-", "—": "-",
-})
+_PUNCT_NORMALIZE = str.maketrans(
+    {
+        "‘": "'",
+        "’": "'",
+        "“": '"',
+        "”": '"',
+        "–": "-",
+        "—": "-",
+    }
+)
 
 
 def _normalize_punct(text: str) -> str:
@@ -305,13 +334,18 @@ def _trim_to_heading(page_text: str, title: str) -> str:
     words = normalized_title.split()
     # single generic words ("Overview", "Summary") are too likely to recur in body
     # prose unrelated to the real heading; require >=2 words AND a length floor.
-    if len(words) < 2 or len(normalized_title.replace(" ", "")) < MIN_HEADING_MATCH_CHARS:
+    if (
+        len(words) < 2
+        or len(normalized_title.replace(" ", "")) < MIN_HEADING_MATCH_CHARS
+    ):
         return page_text
     match = _heading_pattern(normalized_title).search(_normalize_punct(page_text))
-    return page_text[match.start():] if match else page_text
+    return page_text[match.start() :] if match else page_text
 
 
-def extract_section_text(reader: pypdf.PdfReader, page_start: int, page_end: int, title: str = "") -> str:
+def extract_section_text(
+    reader: pypdf.PdfReader, page_start: int, page_end: int, title: str = ""
+) -> str:
     page_end = min(page_end, len(reader.pages))
     texts = [reader.pages[i].extract_text() or "" for i in range(page_start, page_end)]
     if texts and title:
@@ -337,7 +371,9 @@ def chunk_text(text: str, tokenizer, max_tokens: int, overlap: int) -> list[str]
             f"got {type(tokenizer).__name__}"
         )
 
-    offsets = tokenizer(text, add_special_tokens=False, return_offsets_mapping=True)["offset_mapping"]
+    offsets = tokenizer(text, add_special_tokens=False, return_offsets_mapping=True)[
+        "offset_mapping"
+    ]
     if len(offsets) <= max_tokens:
         return [text]
 
@@ -359,12 +395,20 @@ def chunk_text(text: str, tokenizer, max_tokens: int, overlap: int) -> list[str]
 def build_chunks(pdf_path: Path, reader: pypdf.PdfReader, tokenizer) -> list[Chunk]:
     chunks: list[Chunk] = []
     for section in build_leaf_sections(pdf_path, reader):
-        text = extract_section_text(reader, section.page_start, section.page_end, section.title)
+        text = extract_section_text(
+            reader, section.page_start, section.page_end, section.title
+        )
         if len(text) < MIN_CHUNK_CHARS:
-            logger.debug("Skipping near-empty section %r in %s", section.breadcrumb, pdf_path.name)
+            logger.debug(
+                "Skipping near-empty section %r in %s",
+                section.breadcrumb,
+                pdf_path.name,
+            )
             continue
 
-        for index, piece in enumerate(chunk_text(text, tokenizer, MAX_TOKENS_PER_CHUNK, TOKEN_OVERLAP)):
+        for index, piece in enumerate(
+            chunk_text(text, tokenizer, MAX_TOKENS_PER_CHUNK, TOKEN_OVERLAP)
+        ):
             chunks.append(
                 Chunk(
                     source_pdf=pdf_path.name,
@@ -473,9 +517,7 @@ def replace_chunks(
             chunk.content,
             chunk.retrieval_hint,
             chunk.caption,
-            Json(chunk.structured_data)
-            if chunk.structured_data is not None
-            else None,
+            Json(chunk.structured_data) if chunk.structured_data is not None else None,
             chunk.object_key,
             chunk.media_type,
             chunk.token_count,
@@ -509,7 +551,9 @@ def replace_chunks(
     )
 
 
-def embed_chunks(model: SentenceTransformer, chunks: Sequence[Chunk]) -> list[list[float]]:
+def embed_chunks(
+    model: SentenceTransformer, chunks: Sequence[Chunk]
+) -> list[list[float]]:
     if not chunks:
         return []
     embeddings = model.encode(
@@ -528,13 +572,10 @@ def embed_contextual_chunks(
 
     def contextual_input(chunk: Chunk) -> str:
         authoritative = chunk.content
-        with_hint = (
-            authoritative
-            + (
-                f"\nRetrieval hint: {chunk.retrieval_hint}"
-                if HINT_IN_CANDIDATE_RETRIEVAL and chunk.retrieval_hint
-                else ""
-            )
+        with_hint = authoritative + (
+            f"\nRetrieval hint: {chunk.retrieval_hint}"
+            if HINT_IN_CANDIDATE_RETRIEVAL and chunk.retrieval_hint
+            else ""
         )
         try:
             return contextual_embedding_text_for_model(
@@ -588,7 +629,9 @@ def ingest_pdf(
     with conn.cursor() as cur:
         existing = _existing_document(cur, pdf_path.name)
     if existing and existing[1:] == (content_hash, signature):
-        logger.info("Skipping %s (content and ingest configuration unchanged)", pdf_path.name)
+        logger.info(
+            "Skipping %s (content and ingest configuration unchanged)", pdf_path.name
+        )
         return
 
     storage = storage or get_object_storage()
@@ -610,9 +653,7 @@ def ingest_pdf(
     narrative_chunks = build_chunks(pdf_path, reader, model.tokenizer)
     leaves = build_leaf_sections(pdf_path, reader)
     structured_enabled = bool(
-        _config.get("extraction", {})
-        .get("structured", {})
-        .get("enabled", True)
+        _config.get("extraction", {}).get("structured", {}).get("enabled", True)
     )
     structured_chunks: list[Chunk] = []
     object_prefix: str | None = None
@@ -648,9 +689,7 @@ def ingest_pdf(
     raw_embeddings = embed_chunks(model, chunks)
     contextual_embeddings = embed_contextual_chunks(model, chunks)
     chunk_counts = {
-        content_type: sum(
-            1 for chunk in chunks if chunk.content_type == content_type
-        )
+        content_type: sum(1 for chunk in chunks if chunk.content_type == content_type)
         for content_type in ("narrative", "table", "figure")
     }
 
@@ -671,7 +710,9 @@ def ingest_pdf(
             contextual_embeddings,
         )
     conn.commit()
-    for old_prefix in old_object_prefixes - ({object_prefix} if object_prefix else set()):
+    for old_prefix in old_object_prefixes - (
+        {object_prefix} if object_prefix else set()
+    ):
         try:
             storage.clear_prefix(old_prefix)
         except Exception:
@@ -717,10 +758,14 @@ def main() -> None:
         pdf_paths = sorted(args.pdf_dir.glob("*.pdf"))
         if args.only:
             pdf_paths = [
-                path
-                for path in pdf_paths
-                if args.only.lower() in path.name.lower()
+                path for path in pdf_paths if args.only.lower() in path.name.lower()
             ]
+        if not pdf_paths:
+            raise FileNotFoundError(
+                f"No PDF files matched in {args.pdf_dir}"
+                + (f" for --only {args.only!r}" if args.only else "")
+            )
+        failures: list[tuple[str, str]] = []
         for pdf_path in tqdm(pdf_paths, desc="Ingesting PDFs", unit="file"):
             try:
                 ingest_pdf(pdf_path, conn, model, storage=storage)
@@ -728,6 +773,13 @@ def main() -> None:
                 conn.rollback()
                 log_failure("ingest_pdf", pdf_path.name, exc)
                 logger.warning("Failed to ingest %s: %s", pdf_path.name, exc)
+                failures.append((pdf_path.name, str(exc)))
+        if failures:
+            summary = "; ".join(f"{name}: {error}" for name, error in failures)
+            raise RuntimeError(
+                f"PDF ingestion failed for {len(failures)}/{len(pdf_paths)} file(s): "
+                f"{summary}"
+            )
     finally:
         conn.close()
 

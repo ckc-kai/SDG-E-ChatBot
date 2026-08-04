@@ -24,7 +24,7 @@ from retrieval.query.excel.query import (
     execute_plan,
 )
 from retrieval.query.lanes import ALL_LANES, EXCEL, lane_of
-from retrieval.query.pdf.query import retrieve_with_diagnostics
+from retrieval.query.pdf.query import CAPTION_RERANK_WEIGHT, retrieve_with_diagnostics
 from retrieval.utils import connect_db
 
 logger = logging.getLogger(__name__)
@@ -92,9 +92,8 @@ def _gold_plan_score(row: dict[str, Any], conn) -> tuple[bool | None, str]:
     if kind == "clarification":
         return False, "unexpectedly_executed"
     if kind == "empty":
-        correct = (
-            result.contributing_facts == 0
-            and (not result.rows or result.rows[0][-1] is None)
+        correct = result.contributing_facts == 0 and (
+            not result.rows or result.rows[0][-1] is None
         )
         return correct, "empty_verified" if correct else "unexpected_value"
     if kind == "rows":
@@ -124,7 +123,11 @@ def _live_channel_score(
     outcome = answer_from_excel(row["question"], conn)
     if isinstance(outcome, ExcelAnswer):
         if behavior != "answer":
-            return False, "answered_when_expected_to_decline", str(outcome.result.rows[:1])
+            return (
+                False,
+                "answered_when_expected_to_decline",
+                str(outcome.result.rows[:1]),
+            )
         kind = row.get("expected_answer_kind", "numeric")
         if kind in {"numeric", "label", "text", "attribute"}:
             if not outcome.result.rows:
@@ -138,8 +141,10 @@ def _live_channel_score(
             return correct, "answered", str(actual)
         # Multi-row target behavior is intentionally challenge-only until the
         # production channel can formulate comparisons and trends.
-        return False, "live_channel_does_not_support_answer_shape", str(
-            outcome.result.rows[:3]
+        return (
+            False,
+            "live_channel_does_not_support_answer_shape",
+            str(outcome.result.rows[:3]),
         )
 
     if behavior == "decline":
@@ -154,11 +159,17 @@ def _retrieval_score(
     conn,
     lanes: tuple[str, ...] | None,
     k: int,
+    *,
+    isolate_excel: bool = False,
 ) -> dict[str, Any]:
     expected_table = row.get("table_number")
     expected_key = row.get("semantic_metric_key")
     ranked, diagnostics = retrieve_with_diagnostics(
-        row["question"], conn, rewrite_mode="off", lanes=lanes
+        row["question"],
+        conn,
+        rewrite_mode="off",
+        lanes=lanes,
+        content_types=("excel_card",) if isolate_excel else None,
     )
     top = ranked[:k]
 
@@ -202,9 +213,7 @@ def _retrieval_score(
                 "rerank_score": item.rerank_score,
                 "is_gold": is_target_card(item),
             }
-            for position, item in enumerate(
-                diagnostics.reranked_candidates, start=1
-            )
+            for position, item in enumerate(diagnostics.reranked_candidates, start=1)
         ],
     }
 
@@ -217,11 +226,12 @@ def score_row(
     *,
     skip_retrieval: bool = False,
     skip_live_channel: bool = False,
+    isolate_excel: bool = False,
 ) -> dict[str, Any]:
     retrieval = (
         {}
         if skip_retrieval
-        else _retrieval_score(row, conn, lanes, k)
+        else _retrieval_score(row, conn, lanes, k, isolate_excel=isolate_excel)
     )
     gold_correct, execution_status = _gold_plan_score(row, conn)
     if skip_live_channel:
@@ -234,9 +244,7 @@ def score_row(
         "question_type": row["question_type"],
         "difficulty": row.get("difficulty", "unknown"),
         "source_scope": row.get("source_scope", "unknown"),
-        "expected_channel_behavior": row.get(
-            "expected_channel_behavior", "answer"
-        ),
+        "expected_channel_behavior": row.get("expected_channel_behavior", "answer"),
         "table_number": row.get("table_number"),
         **retrieval,
         # Backward-compatible name consumed by run_combined_gate.
@@ -280,8 +288,7 @@ def validate_manifest(
     if actual_sha != suite["sha256"]:
         raise SystemExit(f"{eval_path} differs from its registered suite hash")
     expected = {
-        row["table_number"]: row["source_hash"]
-        for row in manifest["active_revisions"]
+        row["table_number"]: row["source_hash"] for row in manifest["active_revisions"]
     }
     active = _active_revision_hashes(conn)
     if expected != active:
@@ -320,23 +327,26 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--skip-retrieval", action="store_true")
     parser.add_argument("--skip-live-channel", action="store_true")
     parser.add_argument("--allow-corpus-drift", action="store_true")
+    parser.add_argument(
+        "--isolate-excel",
+        action="store_true",
+        help="Score Excel cards as an independent evidence group.",
+    )
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
 
     rows = [
-        json.loads(line)
-        for line in args.eval.read_text().splitlines()
-        if line.strip()
+        json.loads(line) for line in args.eval.read_text().splitlines() if line.strip()
     ]
     if args.limit:
         rows = rows[: args.limit]
     lanes = tuple(args.lanes) if args.lanes else None
+    if lanes and args.isolate_excel:
+        parser.error("--lanes and --isolate-excel are mutually exclusive")
     conn = connect_db()
     try:
-        validate_manifest(
-            args.eval, conn, allow_corpus_drift=args.allow_corpus_drift
-        )
+        validate_manifest(args.eval, conn, allow_corpus_drift=args.allow_corpus_drift)
         scores = [
             score_row(
                 row,
@@ -345,6 +355,7 @@ def main(argv: list[str] | None = None) -> None:
                 args.k,
                 skip_retrieval=args.skip_retrieval,
                 skip_live_channel=args.skip_live_channel,
+                isolate_excel=args.isolate_excel,
             )
             for row in rows
         ]
@@ -352,11 +363,11 @@ def main(argv: list[str] | None = None) -> None:
         conn.close()
 
     summary = _summary_block(scores, args.k)
-    print("=" * 74)
-    print(
-        f"EXCEL EVAL  questions={len(scores)}  "
-        f"lanes={'+'.join(lanes) if lanes else 'global'}"
+    route = (
+        "excel-group" if args.isolate_excel else "+".join(lanes) if lanes else "global"
     )
+    print("=" * 74)
+    print(f"EXCEL EVAL  questions={len(scores)}  " f"route={route}")
     print("=" * 74)
     for label, key in (
         ("card hit@1", "card_hit@1"),
@@ -389,8 +400,7 @@ def main(argv: list[str] | None = None) -> None:
     failures = [
         score
         for score in scores
-        if score["gold_plan_correct"] is False
-        or score["live_channel_correct"] is False
+        if score["gold_plan_correct"] is False or score["live_channel_correct"] is False
     ]
     if failures:
         print(f"\nFAILURES ({len(failures)}; first 16)")
@@ -404,7 +414,17 @@ def main(argv: list[str] | None = None) -> None:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(
             json.dumps(
-                {"summary": summary, "per_query": scores},
+                {
+                    "summary": summary,
+                    "run_config": {
+                        "caption_rerank_weight": CAPTION_RERANK_WEIGHT,
+                        "lanes": args.lanes,
+                        "isolate_excel": args.isolate_excel,
+                        "skip_retrieval": args.skip_retrieval,
+                        "skip_live_channel": args.skip_live_channel,
+                    },
+                    "per_query": scores,
+                },
                 indent=2,
                 default=str,
             )

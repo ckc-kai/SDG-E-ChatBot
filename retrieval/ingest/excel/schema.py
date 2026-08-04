@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import logging
 
+from psycopg2 import sql
+
 logger = logging.getLogger(__name__)
 
 MIGRATIONS_TABLE = """
@@ -164,19 +166,6 @@ MIGRATIONS: tuple[tuple[str, str], ...] = (
         """,
     ),
     (
-        "0006_chunks_corpus_lane_indexes",
-        # Partial indexes keep the Excel and PDF lanes from sharing one HNSW
-        # graph, so adding cards cannot perturb PDF candidate distribution.
-        """
-        CREATE INDEX IF NOT EXISTS chunks_excel_embedding_idx
-            ON chunks USING hnsw (embedding vector_cosine_ops)
-            WHERE content_type = 'excel_card';
-        CREATE INDEX IF NOT EXISTS chunks_excel_contextual_embedding_idx
-            ON chunks USING hnsw (contextual_embedding vector_cosine_ops)
-            WHERE content_type = 'excel_card';
-        """,
-    ),
-    (
         "0007_excel_card_link",
         # Lets card activation and revision activation stay consistent.
         """
@@ -188,10 +177,106 @@ MIGRATIONS: tuple[tuple[str, str], ...] = (
     ),
 )
 
+# HNSW builds on an existing production corpus must not run inside the regular
+# transactional migration path: plain CREATE INDEX blocks writers and a late
+# failure rolls back every earlier build. Each statement below runs and commits
+# independently with a short lock timeout. A retry skips valid indexes and
+# replaces any invalid artifact left by an interrupted concurrent build.
+CONCURRENT_INDEX_MIGRATIONS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
+    (
+        "0006_chunks_corpus_lane_indexes",
+        (
+            (
+                "chunks_excel_embedding_idx",
+                """CREATE INDEX CONCURRENTLY IF NOT EXISTS
+                   chunks_excel_embedding_idx
+                   ON chunks USING hnsw (embedding vector_cosine_ops)
+                   WHERE content_type = 'excel_card'""",
+            ),
+            (
+                "chunks_excel_contextual_embedding_idx",
+                """CREATE INDEX CONCURRENTLY IF NOT EXISTS
+                   chunks_excel_contextual_embedding_idx
+                   ON chunks USING hnsw (contextual_embedding vector_cosine_ops)
+                   WHERE content_type = 'excel_card'""",
+            ),
+        ),
+    ),
+    (
+        "0008_pdf_evidence_group_indexes",
+        tuple(
+            (
+                f"chunks_{content_type}_{column}_idx",
+                f"""CREATE INDEX CONCURRENTLY IF NOT EXISTS
+                    chunks_{content_type}_{column}_idx
+                    ON chunks USING hnsw ({column_name} vector_cosine_ops)
+                    WHERE content_type = '{content_type}'""",
+            )
+            for content_type in ("narrative", "table", "figure")
+            for column, column_name in (
+                ("embedding", "embedding"),
+                ("contextual_embedding", "contextual_embedding"),
+            )
+        ),
+    ),
+)
+
 
 def applied_versions(cur) -> set[str]:
     cur.execute("SELECT version FROM schema_migrations")
     return {row[0] for row in cur.fetchall()}
+
+
+def _apply_concurrent_index_migration(
+    conn,
+    version: str,
+    indexes: tuple[tuple[str, str], ...],
+) -> None:
+    """Build each HNSW index without a long writer-blocking table lock."""
+    conn.commit()
+    previous_autocommit = conn.autocommit
+    conn.autocommit = True
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET lock_timeout = '5s'")
+            cur.execute("SET statement_timeout = '0'")
+            for index_name, create_sql in indexes:
+                cur.execute(
+                    """
+                    SELECT i.indisvalid
+                    FROM pg_index i
+                    JOIN pg_class c ON c.oid = i.indexrelid
+                    WHERE c.relname = %s
+                    """,
+                    (index_name,),
+                )
+                state = cur.fetchone()
+                if state and not state[0]:
+                    cur.execute(
+                        sql.SQL("DROP INDEX CONCURRENTLY IF EXISTS {}").format(
+                            sql.Identifier(index_name)
+                        )
+                    )
+                cur.execute(create_sql)
+            cur.execute("RESET lock_timeout")
+            cur.execute("RESET statement_timeout")
+    finally:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("RESET lock_timeout")
+                cur.execute("RESET statement_timeout")
+        except Exception:
+            logger.warning("Could not reset migration session timeouts", exc_info=True)
+        finally:
+            conn.autocommit = previous_autocommit
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO schema_migrations (version) VALUES (%s) "
+            "ON CONFLICT (version) DO NOTHING",
+            (version,),
+        )
+    conn.commit()
 
 
 def migrate(conn) -> list[str]:
@@ -210,5 +295,11 @@ def migrate(conn) -> list[str]:
                 "INSERT INTO schema_migrations (version) VALUES (%s)", (version,)
             )
             conn.commit()
+            newly_applied.append(version)
+        for version, indexes in CONCURRENT_INDEX_MIGRATIONS:
+            if version in done:
+                continue
+            logger.info("Applying concurrent index migration %s", version)
+            _apply_concurrent_index_migration(conn, version, indexes)
             newly_applied.append(version)
     return newly_applied

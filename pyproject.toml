@@ -15,3 +15,8 @@ dependencies = [
     "sentence-transformers>=5.6.0",
     "tqdm>=4.66.0",
 ]
+
+[project.optional-dependencies]
+aws = [
+    "boto3>=1.43.62",
+]

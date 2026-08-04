@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import logging
 
 import psycopg2
 
 from retrieval.utils import database_config, embedding_config
 
 CONTENT_TYPES = ("narrative", "table", "figure")
+logger = logging.getLogger(__name__)
 
 
 def setup_database(conn=None) -> None:
@@ -131,6 +133,33 @@ def setup_database(conn=None) -> None:
                 ON chunks USING hnsw (contextual_embedding vector_cosine_ops);
                 """
             )
+            cur.execute("SELECT NOT EXISTS (SELECT 1 FROM chunks LIMIT 1)")
+            corpus_is_empty = cur.fetchone()[0]
+            if corpus_is_empty:
+                # Inline builds are safe during first-time setup because there
+                # are no rows or active writers. Existing databases receive
+                # these indexes through the concurrent Excel schema migration.
+                for content_type in CONTENT_TYPES:
+                    index_stem = content_type.replace("_", "")
+                    cur.execute(
+                        f"""
+                        CREATE INDEX IF NOT EXISTS chunks_{index_stem}_embedding_idx
+                        ON chunks USING hnsw (embedding vector_cosine_ops)
+                        WHERE content_type = '{content_type}';
+                        """
+                    )
+                    cur.execute(
+                        f"""
+                        CREATE INDEX IF NOT EXISTS chunks_{index_stem}_contextual_embedding_idx
+                        ON chunks USING hnsw (contextual_embedding vector_cosine_ops)
+                        WHERE content_type = '{content_type}';
+                        """
+                    )
+            else:
+                logger.info(
+                    "Skipping inline evidence-group HNSW builds on a populated "
+                    "corpus; run the concurrent schema migration instead"
+                )
             cur.execute(
                 """
                 CREATE INDEX IF NOT EXISTS chunks_search_gin_idx
@@ -186,7 +215,9 @@ def reset_database(conn=None) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Prepare the unified retrieval schema.")
+    parser = argparse.ArgumentParser(
+        description="Prepare the unified retrieval schema."
+    )
     parser.add_argument(
         "--reset",
         action="store_true",

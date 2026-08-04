@@ -24,8 +24,8 @@ The supported workflow has:
 - one `chunks` table for every content type;
 - raw and contextual embeddings generated automatically for every chunk;
 - separate PDF and execution-verified Excel query paths;
-- optional independent narrative, structured-PDF, and Excel retrieval lanes;
-- no query-type classifier and no structured/narrative result quota.
+- independently ranked narrative, PDF-table, PDF-figure, and Excel evidence;
+- no query-type classifier and no cross-content score calibration.
 
 ## Retrieval architecture
 
@@ -36,17 +36,22 @@ PDF
                                          ├─ unified chunks table ─┐
 Excel ── contract-driven facts/cards ────┘                        │
                                                                   │
-lane-enabled question                                             │
- ├─ narrative lane ────────────────────────────────────────────────┤
- ├─ structured PDF lane ───────────────────────────────────────────┤
- └─ Excel-card lane ───────────────────────────────────────────────┘
+question ── retrieve every requested evidence group
+ ├─ narrative group
+ ├─ PDF-table group
+ ├─ PDF-figure group
+ └─ Excel-card group
 
-Each lane
+Each group
  ├─ raw vector search
  ├─ contextual vector search
  ├─ PostgreSQL lexical search
- └─ candidate merge → rerank within lane → cross-lane merge
+ └─ candidate merge → rerank inside the group → return with provenance
 ```
+
+Reranker scores are comparable only inside a group. Grouped retrieval prevents
+an Excel card from displacing narrative evidence, or a figure from displacing
+a table. 
 
 Tables retain their exact grid in `structured_data`. Figure crops are stored
 through a filesystem/S3 abstraction and referenced by `object_key`.
@@ -111,7 +116,7 @@ Ingest the cleaned Excel CSVs:
 uv run python -m retrieval.ingest.excel
 ```
 
-Query all content types:
+Query all content types as independently ranked evidence groups:
 
 ```bash
 uv run python -m retrieval.query.pdf \
@@ -120,6 +125,19 @@ uv run python -m retrieval.query.pdf \
 
 The output labels every result as `narrative`, `table`, `figure`, or
 `excel_card`. Figure results also print the resolved local path or S3 URI.
+Pass `--legacy-flat` only when comparing with the previous global mixed ranking.
+
+Application code should honor the configured output contract through the
+dispatcher (or call `retrieve_evidence` explicitly):
+
+```python
+from retrieval.query.pdf import retrieve_configured
+
+evidence = retrieve_configured(question, connection)
+```
+
+The low-level `retrieve()` function intentionally keeps its historical flat
+list return type for source compatibility.
 
 Automatic query decomposition is controlled by `query_rewrite.mode`. Set it to
 `off` to guarantee no Anthropic request:
@@ -165,17 +183,20 @@ models:
 ```
 
 Changing the embedding model triggers a clean vector refresh on the next
-ingest. If the new embedding model has a different dimension, update
-`dimensions`, reset the schema, and re-ingest:
+ingest. For a model with different dimensions, build a second database, ingest
+and evaluate it, then switch the application connection:
 
 ```bash
-uv run python -m retrieval.setup_db --reset --yes
+createdb sdge_next_embedding
+uv run python -m retrieval.setup_db
 uv run python -m retrieval.ingest.pdf
+uv run python -m retrieval.ingest.excel
 ```
 
 A pgvector column has a fixed dimension, so a dimension change cannot be
-applied safely to existing vectors through configuration alone. Changing only
-the reranker does not require re-ingestion.
+applied safely to the active index through configuration alone. A parallel
+database keeps the current collection available for immediate rollback locally
+and on RDS/Aurora. Changing only the reranker does not require re-ingestion.
 
 The provider factory rejects unsupported values clearly. It is ready for a
 future Bedrock or SageMaker adapter, but this refactor intentionally implements
@@ -187,15 +208,15 @@ only local SentenceTransformers models.
 extraction:
   structured:
     figure_description:
-      generate: true
-      candidate_retrieval: true
+      generate: false
+      candidate_retrieval: false
       reranking: false
       answer_context: false
 ```
 
-The recommended defaults generate a local SmolVLM hint and use it only to
-expand candidate recall. A hallucinated hint therefore cannot directly decide
-the reranker order or become factual answer context.
+The lightweight default avoids a multi-GB vision-model dependency and relies
+on captions, page context, and the stored crop. Vision hints can be enabled as
+an optional recall experiment; they never become reranking or answer evidence.
 
 To remove the vision model from ingest entirely:
 
@@ -254,9 +275,13 @@ database password from Secrets Manager into `POSTGRES_PASSWORD` and use an IAM
 role for S3 access. The role needs object list, write, and delete permissions
 scoped to the configured bucket prefix.
 
-The S3 adapter loads `boto3` only when `provider: s3` is selected. Add `boto3`
-to the AWS runtime image or deployment dependencies; local filesystem runs do
-not require it.
+The S3 adapter loads `boto3` only when `provider: s3` is selected. Install the
+locked AWS extra in the ingest-worker image; local filesystem runs do not need
+these packages:
+
+```bash
+uv sync --extra aws
+```
 
 Run the same commands from the AWS ingest worker:
 
@@ -296,9 +321,9 @@ This code refactor does not migrate or re-ingest the existing local database.
 After the clean ingest, run both evaluation sets through the same unified query
 implementation.
 
-The unified evaluator auto-detects the suite from the input JSONL, runs the
-current three-lane route by default, and writes a dated result file. Use
-`--pdf` or `--excel` to make the adapter explicit.
+The unified evaluator auto-detects the suite and writes a dated result file.
+Use `--grouped` for the production evidence-group design. Omit it only to
+measure the current cross-content merged route.
 
 Narrative evaluation:
 
@@ -306,6 +331,7 @@ Narrative evaluation:
 uv run python -m eval.run_eval \
   --input eval/pdf/evaluation_natural.jsonl \
   --pdf narrative \
+  --grouped \
   --output current-route-gate \
   --misses
 ```
@@ -316,6 +342,7 @@ Table/figure evaluation:
 uv run python -m eval.run_eval \
   --input eval/pdf/evaluation_structured.jsonl \
   --pdf structured \
+  --grouped \
   --output current-route-gate \
   --misses
 ```
@@ -326,6 +353,7 @@ Excel evaluation:
 uv run python -m eval.run_eval \
   --input eval/excel/evaluation_excel.jsonl \
   --excel \
+  --grouped \
   --output current-route-gate
 ```
 
@@ -334,14 +362,6 @@ Results are written to `eval/pdf/results/narrative/`,
 `YYYY-MM-DD-FEATURE.json`. Add `--oracle` to evaluate only the suite's own lane.
 Historical pre-unification results remain in the PDF result subfolders, but
 should not be treated as measurements of the new unified schema.
-
-## Tests
-
-The unit tests do not connect to AWS or call external model APIs:
-
-```bash
-HF_HUB_OFFLINE=1 uv run --frozen python -m unittest discover -s tests
-```
 
 ## Project layout
 

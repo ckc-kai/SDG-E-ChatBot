@@ -39,6 +39,7 @@ from pathlib import Path
 
 from retrieval.query.lanes import ALL_LANES
 from retrieval.query.pdf.query import (
+    CAPTION_RERANK_WEIGHT,
     DEFAULT_EMBEDDING_MODE,
     DEFAULT_HYBRID_POOL_MODE,
     EMBEDDING_MODES,
@@ -171,7 +172,9 @@ def gold_signatures(conn, row: dict) -> list[GoldGroup]:
     return resolved_groups
 
 
-def _matches_gold_group(candidate: QueryObject | RankedResult, group: GoldGroup) -> bool:
+def _matches_gold_group(
+    candidate: QueryObject | RankedResult, group: GoldGroup
+) -> bool:
     query_object = _candidate_query_object(candidate)
     ids, contents = group
     return query_object.chunk_id in ids or normalize(query_object.content) in contents
@@ -213,13 +216,20 @@ def _first_gold_rank_in_candidates(
     """Return the first gold rank, including duplicate-content twin credit."""
     for rank, candidate in enumerate(candidates, start=1):
         query_object = _candidate_query_object(candidate)
-        if query_object.chunk_id in gold_ids or normalize(query_object.content) in gold_contents:
+        if (
+            query_object.chunk_id in gold_ids
+            or normalize(query_object.content) in gold_contents
+        ):
             return rank
     return None
 
 
 def _ndcg(flags: list[bool], num_gold: int, k: int) -> float:
-    dcg = sum(1.0 / math.log2(rank + 1) for rank, flag in enumerate(flags[:k], start=1) if flag)
+    dcg = sum(
+        1.0 / math.log2(rank + 1)
+        for rank, flag in enumerate(flags[:k], start=1)
+        if flag
+    )
     ideal_hits = min(num_gold, k)
     idcg = sum(1.0 / math.log2(rank + 1) for rank in range(1, ideal_hits + 1))
     return dcg / idcg if idcg > 0 else 0.0
@@ -228,7 +238,9 @@ def _ndcg(flags: list[bool], num_gold: int, k: int) -> float:
 def _metrics_at_cutoff(flags: list[bool], num_gold: int, k: int) -> dict[str, float]:
     cutoff_flags = flags[:k]
     found = sum(cutoff_flags)
-    first_rank = next((rank for rank, flag in enumerate(cutoff_flags, start=1) if flag), None)
+    first_rank = next(
+        (rank for rank, flag in enumerate(cutoff_flags, start=1) if flag), None
+    )
     return {
         "recall": found / num_gold if num_gold else 0.0,
         "mrr": 1.0 / first_rank if first_rank else 0.0,
@@ -242,7 +254,10 @@ def _is_gold_candidate(
     gold_contents: set[str],
 ) -> bool:
     query_object = _candidate_query_object(candidate)
-    return query_object.chunk_id in gold_ids or normalize(query_object.content) in gold_contents
+    return (
+        query_object.chunk_id in gold_ids
+        or normalize(query_object.content) in gold_contents
+    )
 
 
 def _position_for_gold_group(
@@ -268,6 +283,7 @@ def _candidate_position_details(
                 {
                     "position": position,
                     "chunk_id": candidate.chunk_id,
+                    "content_type": candidate.content_type,
                     "source_pdf": candidate.source_pdf,
                     "breadcrumb": candidate.breadcrumb,
                     "section_number": candidate.section_number,
@@ -285,6 +301,7 @@ def _candidate_position_details(
         {
             "position": position,
             "chunk_id": result.query_object.chunk_id,
+            "content_type": result.query_object.content_type,
             "source_pdf": result.query_object.source_pdf,
             "breadcrumb": result.query_object.breadcrumb,
             "section_number": result.query_object.section_number,
@@ -303,7 +320,9 @@ def _candidate_position_details(
                 "search_query_index": query_index,
                 "position": _position_for_gold_group(candidates, gold_group),
             }
-            for query_index, candidates in enumerate(diagnostics.candidate_sets, start=1)
+            for query_index, candidates in enumerate(
+                diagnostics.candidate_sets, start=1
+            )
         ]
         found_positions = [
             item["position"]
@@ -315,7 +334,9 @@ def _candidate_position_details(
                 "gold_item": gold_index,
                 "alternative_count": len(gold_group[0]),
                 "retrieval_positions": retrieval_positions,
-                "best_retrieval_position": min(found_positions) if found_positions else "not_found",
+                "best_retrieval_position": (
+                    min(found_positions) if found_positions else "not_found"
+                ),
                 "rerank_position": _position_for_gold_group(
                     diagnostics.reranked_candidates, gold_group
                 ),
@@ -337,6 +358,7 @@ def score_row(
     rrf_k: int = RRF_K,
     hybrid_pool_mode: str = DEFAULT_HYBRID_POOL_MODE,
     lanes: tuple[str, ...] | None = None,
+    content_types: tuple[str, ...] | None = None,
 ) -> QueryScore:
     gold_groups = gold_signatures(conn, row)
     gold_ids = set().union(*(ids for ids, _ in gold_groups))
@@ -354,9 +376,10 @@ def score_row(
         rrf_k=rrf_k,
         hybrid_pool_mode=hybrid_pool_mode,
         lanes=lanes,
+        content_types=content_types,
     )
     cutoffs = sorted(set(metric_cutoffs or []) | {k})
-    ranked = ranked[:max(cutoffs)]
+    ranked = ranked[: max(cutoffs)]
     api_rewrite_calls = get_rewrite_call_count() - calls_before
     trace = get_last_rewrite_trace() or {
         "source": "unknown",
@@ -366,12 +389,13 @@ def score_row(
     if trace["source"] == "api":
         print(f"  [rewrite] {row['id']}: -> {trace['sub_questions']}")
     elif trace["source"] == "fallback":
-        print(f"  [rewrite] {row['id']}: API call FAILED ({trace.get('error')}), used original question")
+        print(
+            f"  [rewrite] {row['id']}: API call FAILED ({trace.get('error')}), used original question"
+        )
 
     flags = _distinct_gold_hits(ranked, gold_groups)
     cutoff_metrics = {
-        cutoff: _metrics_at_cutoff(flags, num_gold, cutoff)
-        for cutoff in cutoffs
+        cutoff: _metrics_at_cutoff(flags, num_gold, cutoff) for cutoff in cutoffs
     }
 
     vector_gold_ranks = [
@@ -386,10 +410,12 @@ def score_row(
     )
 
     primary_flags = flags[:k]
-    first_rank = next((i for i, flag in enumerate(primary_flags, start=1) if flag), None)
+    first_rank = next(
+        (i for i, flag in enumerate(primary_flags, start=1) if flag), None
+    )
     primary_metrics = cutoff_metrics[k]
-    retrieval_candidates, reranked_candidates, gold_positions = _candidate_position_details(
-        diagnostics, gold_groups, gold_ids, gold_contents
+    retrieval_candidates, reranked_candidates, gold_positions = (
+        _candidate_position_details(diagnostics, gold_groups, gold_ids, gold_contents)
     )
 
     return QueryScore(
@@ -418,7 +444,9 @@ def score_row(
             }
             for channels in diagnostics.channel_candidate_sets
         ],
-        pooled_candidate_ids=[candidate.chunk_id for candidate in diagnostics.pooled_candidates],
+        pooled_candidate_ids=[
+            candidate.chunk_id for candidate in diagnostics.pooled_candidates
+        ],
         gold_best_vector_rank=gold_best_vector_rank,
         gold_full_rerank_rank=gold_full_rerank_rank,
         cutoff_metrics=cutoff_metrics,
@@ -457,7 +485,9 @@ def aggregate(
             "hit@1": round(_mean(subset, "hit_at_1"), 4),
         }
         for cutoff in cutoffs:
-            metrics[f"recall@{cutoff}"] = round(cutoff_mean(subset, cutoff, "recall"), 4)
+            metrics[f"recall@{cutoff}"] = round(
+                cutoff_mean(subset, cutoff, "recall"), 4
+            )
             metrics[f"mrr@{cutoff}"] = round(cutoff_mean(subset, cutoff, "mrr"), 4)
             metrics[f"ndcg@{cutoff}"] = round(cutoff_mean(subset, cutoff, "ndcg"), 4)
         metrics["mrr"] = metrics[f"mrr@{k}"]
@@ -473,27 +503,41 @@ def aggregate(
         "k": k,
         "metric_cutoffs": cutoffs,
         "overall": block(scores),
-        "by_difficulty": {name: block(rows) for name, rows in sorted(by_difficulty.items())},
-        "by_question_type": {name: block(rows) for name, rows in sorted(by_type.items())},
+        "by_difficulty": {
+            name: block(rows) for name, rows in sorted(by_difficulty.items())
+        },
+        "by_question_type": {
+            name: block(rows) for name, rows in sorted(by_type.items())
+        },
     }
 
 
 def print_report(
-    summary: dict, scores: list[QueryScore], k: int, show_misses: bool, skipped: list[dict]
+    summary: dict,
+    scores: list[QueryScore],
+    k: int,
+    show_misses: bool,
+    skipped: list[dict],
 ) -> None:
     def line(name: str, b: dict) -> str:
-        return (f"  {name:<24} n={b['count']:<4} "
-                f"hit@1={b['hit@1']:.3f}  recall@{k}={b[f'recall@{k}']:.3f}  "
-                f"mrr={b['mrr']:.3f}  ndcg@{k}={b[f'ndcg@{k}']:.3f}")
+        return (
+            f"  {name:<24} n={b['count']:<4} "
+            f"hit@1={b['hit@1']:.3f}  recall@{k}={b[f'recall@{k}']:.3f}  "
+            f"mrr={b['mrr']:.3f}  ndcg@{k}={b[f'ndcg@{k}']:.3f}"
+        )
 
     print("\n" + "=" * 78)
-    print(f"RETRIEVAL EVAL  (k={k}, questions scored={summary['overall']['count']}"
-          f"{f', skipped={len(skipped)}' if skipped else ''})")
+    print(
+        f"RETRIEVAL EVAL  (k={k}, questions scored={summary['overall']['count']}"
+        f"{f', skipped={len(skipped)}' if skipped else ''})"
+    )
     print("=" * 78)
 
     if skipped:
-        print(f"\nSKIPPED (stale gold reference -- likely chunk boundaries shifted on "
-              f"re-ingest): {len(skipped)}")
+        print(
+            f"\nSKIPPED (stale gold reference -- likely chunk boundaries shifted on "
+            f"re-ingest): {len(skipped)}"
+        )
         for s in skipped:
             print(f"  {s['id']}: {s['reason']}")
     print("OVERALL")
@@ -509,13 +553,17 @@ def print_report(
         misses = [s for s in scores if s.first_gold_rank is None]
         print(f"\nMISSES (no gold chunk in top-{k}): {len(misses)}")
         for s in misses:
-            print(f"  {s.id} [{s.difficulty}/{s.question_type}] retrieved={s.retrieved_ids}")
+            print(
+                f"  {s.id} [{s.difficulty}/{s.question_type}] retrieved={s.retrieved_ids}"
+            )
 
     by_source = defaultdict(list)
     for s in scores:
         by_source[s.rewrite_source].append(s)
     total_calls = sum(s.api_rewrite_calls for s in scores)
-    print(f"\nCLAUDE API REWRITE CALLS: {total_calls} call(s) across {len(scores)} question(s)")
+    print(
+        f"\nCLAUDE API REWRITE CALLS: {total_calls} call(s) across {len(scores)} question(s)"
+    )
     for source in ("api", "fallback", "simple", "disabled"):
         subset = by_source.get(source, [])
         if subset:
@@ -523,8 +571,12 @@ def print_report(
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Score retrieval against an evaluation JSONL.")
-    parser.add_argument("--eval", default=DEFAULT_EVAL_PATH, help="Path to evaluation JSONL.")
+    parser = argparse.ArgumentParser(
+        description="Score retrieval against an evaluation JSONL."
+    )
+    parser.add_argument(
+        "--eval", default=DEFAULT_EVAL_PATH, help="Path to evaluation JSONL."
+    )
     parser.add_argument(
         "--metric-k",
         "--k",
@@ -536,8 +588,12 @@ def main(argv: list[str] | None = None) -> None:
             "and this requested cutoff (--k remains an alias)."
         ),
     )
-    parser.add_argument("--out", type=Path, default=None, help="Optional JSON results output path.")
-    parser.add_argument("--misses", action="store_true", help="List questions with no gold in top-k.")
+    parser.add_argument(
+        "--out", type=Path, default=None, help="Optional JSON results output path."
+    )
+    parser.add_argument(
+        "--misses", action="store_true", help="List questions with no gold in top-k."
+    )
     parser.add_argument(
         "--lanes",
         nargs="*",
@@ -547,6 +603,13 @@ def main(argv: list[str] | None = None) -> None:
             "Retrieve and rerank within these lanes, merging only afterwards. "
             "Omit for the legacy single-pool path."
         ),
+    )
+    parser.add_argument(
+        "--content-types",
+        nargs="+",
+        choices=("narrative", "table", "figure", "excel_card"),
+        default=None,
+        help="Evaluate an isolated content group instead of a cross-lane merge.",
     )
     parser.add_argument(
         "--rewrite-mode",
@@ -601,6 +664,8 @@ def main(argv: list[str] | None = None) -> None:
         parser.error("--retrieval-top-k must be positive")
     if args.rrf_k < 1:
         parser.error("--rrf-k must be positive")
+    if args.lanes and args.content_types:
+        parser.error("--lanes and --content-types are mutually exclusive")
     metric_cutoffs = sorted({DEFAULT_K, args.k})
     rerank_top_k = (
         max(RERANK_TOP_K, max(metric_cutoffs))
@@ -642,6 +707,9 @@ def main(argv: list[str] | None = None) -> None:
                         rrf_k=args.rrf_k,
                         hybrid_pool_mode=args.hybrid_pool_mode,
                         lanes=tuple(args.lanes) if args.lanes else None,
+                        content_types=(
+                            tuple(args.content_types) if args.content_types else None
+                        ),
                     )
                 )
             except GoldNotFoundError as exc:
@@ -659,13 +727,22 @@ def main(argv: list[str] | None = None) -> None:
             "skipped": skipped,
             "api_rewrite_usage": {
                 "total_calls": sum(s.api_rewrite_calls for s in scores),
-                "questions_rewritten": sum(1 for s in scores if s.rewrite_source == "api"),
-                "questions_fallback": sum(1 for s in scores if s.rewrite_source == "fallback"),
-                "questions_simple": sum(1 for s in scores if s.rewrite_source == "simple"),
-                "questions_disabled": sum(1 for s in scores if s.rewrite_source == "disabled"),
+                "questions_rewritten": sum(
+                    1 for s in scores if s.rewrite_source == "api"
+                ),
+                "questions_fallback": sum(
+                    1 for s in scores if s.rewrite_source == "fallback"
+                ),
+                "questions_simple": sum(
+                    1 for s in scores if s.rewrite_source == "simple"
+                ),
+                "questions_disabled": sum(
+                    1 for s in scores if s.rewrite_source == "disabled"
+                ),
                 "questions_total": len(scores),
             },
             "retrieval_diagnostics": {
+                "caption_rerank_weight": CAPTION_RERANK_WEIGHT,
                 "metric_k": args.k,
                 "metric_cutoffs": metric_cutoffs,
                 "embedding_mode": args.embedding_mode,
@@ -674,6 +751,7 @@ def main(argv: list[str] | None = None) -> None:
                 "rewrite_mode": args.rewrite_mode,
                 "retrieval_top_k": args.retrieval_top_k,
                 "rerank_top_k": rerank_top_k,
+                "content_types": args.content_types,
                 "candidate_pool_size_min": min(
                     (len(s.pooled_candidate_ids) for s in scores),
                     default=0,
@@ -684,8 +762,7 @@ def main(argv: list[str] | None = None) -> None:
                 ),
                 "candidate_pool_size_mean": round(
                     (
-                        sum(len(s.pooled_candidate_ids) for s in scores)
-                        / len(scores)
+                        sum(len(s.pooled_candidate_ids) for s in scores) / len(scores)
                         if scores
                         else 0.0
                     ),

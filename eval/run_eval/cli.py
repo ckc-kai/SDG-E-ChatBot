@@ -31,9 +31,7 @@ def detect_suite(path: Path) -> str:
         return "excel"
     evidence = row.get("evidence") or []
     content_types = {
-        item.get("content_type")
-        for item in evidence
-        if isinstance(item, dict)
+        item.get("content_type") for item in evidence if isinstance(item, dict)
     }
     if content_types.intersection({"table", "figure"}):
         return "structured"
@@ -142,6 +140,14 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--skip-retrieval", action="store_true")
     parser.add_argument("--skip-live-channel", action="store_true")
     parser.add_argument("--allow-corpus-drift", action="store_true")
+    parser.add_argument(
+        "--grouped",
+        action="store_true",
+        help=(
+            "Evaluate the suite's independently ranked evidence group instead "
+            "of the current cross-content merged route."
+        ),
+    )
     return parser
 
 
@@ -168,16 +174,17 @@ def _common_args(
     if args.oracle and args.lanes:
         raise ValueError("--oracle and --lanes cannot be used together")
     lanes = (suite,) if args.oracle else tuple(args.lanes or DEFAULT_LANES)
-    return [
+    common = [
         "--eval",
         str(args.input_path),
         "--metric-k",
         str(metric_k),
         "--out",
         str(destination),
-        "--lanes",
-        *lanes,
     ]
+    if not args.grouped:
+        common.extend(["--lanes", *lanes])
+    return common
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -197,10 +204,11 @@ def main(argv: list[str] | None = None) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     lanes = (suite,) if args.oracle else tuple(args.lanes or DEFAULT_LANES)
 
+    route = "grouped" if args.grouped else "+".join(lanes)
     print(
         "UNIFIED EVAL: "
         f"suite={suite}, input={args.input_path}, "
-        f"lanes={'+'.join(lanes)}, output={destination}"
+        f"route={route}, output={destination}"
     )
     runner_args = _common_args(args, suite, destination)
     if suite == "narrative":
@@ -222,6 +230,8 @@ def main(argv: list[str] | None = None) -> None:
         )
         if args.misses:
             runner_args.append("--misses")
+        if args.grouped:
+            runner_args.extend(["--content-types", "narrative"])
         narrative.main(runner_args)
     elif suite == "structured":
         runner_args.extend(
@@ -236,6 +246,8 @@ def main(argv: list[str] | None = None) -> None:
         )
         if args.misses:
             runner_args.append("--misses")
+        if args.grouped:
+            runner_args.append("--isolate-content-type")
         structured.main(runner_args)
     else:
         if args.limit is not None:
@@ -246,4 +258,6 @@ def main(argv: list[str] | None = None) -> None:
             runner_args.append("--skip-live-channel")
         if args.allow_corpus_drift:
             runner_args.append("--allow-corpus-drift")
+        if args.grouped:
+            runner_args.append("--isolate-excel")
         excel.main(runner_args)

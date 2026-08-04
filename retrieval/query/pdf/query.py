@@ -26,6 +26,8 @@ from retrieval.contextual_embeddings import CONTEXTUAL_EMBEDDING_RECIPE
 from retrieval.failure_log import get_failure_logger
 from retrieval.query.lanes import (
     ALL_LANES,
+    EXCEL,
+    NARRATIVE,
     LaneOutcome,
     content_types_for,
     lane_confidence,
@@ -47,9 +49,7 @@ _config = load_config()
 _rewrite_config = _config.get("query_rewrite", {})
 _retrieval_config = _config.get("retrieval", {})
 _embedding_config = embedding_config()
-QUERY_REWRITE_MODEL = _rewrite_config.get(
-    "model", "claude-haiku-4-5-20251001"
-)
+QUERY_REWRITE_MODEL = _rewrite_config.get("model", "claude-haiku-4-5-20251001")
 QUERY_REWRITE_MODE = _rewrite_config.get("mode", "auto")
 MAX_REWRITE_SUBQUESTIONS = _rewrite_config.get("max_subquestions", 2)
 RETRIEVAL_TOP_K = _retrieval_config.get("retrieval_top_k", 30)
@@ -58,22 +58,14 @@ RRF_K = _retrieval_config.get("rrf_k", 60)
 DEFAULT_EMBEDDING_MODE = _retrieval_config.get("embedding_mode", "hybrid")
 DEFAULT_HYBRID_POOL_MODE = _retrieval_config.get("hybrid_pool_mode", "union")
 EMBEDDING_MODEL_NAME = _embedding_config["name"]
-CAPTION_RERANK_WEIGHT = float(
-    _retrieval_config.get("caption_rerank_weight", 0.25)
-)
-LEXICAL_CAPTION_WEIGHT = float(
-    _retrieval_config.get("lexical_caption_weight", 4.0)
-)
-LEXICAL_HINT_WEIGHT = float(
-    _retrieval_config.get("lexical_hint_weight", 0.25)
-)
+CAPTION_RERANK_WEIGHT = float(_retrieval_config.get("caption_rerank_weight", 0.25))
+LEXICAL_CAPTION_WEIGHT = float(_retrieval_config.get("lexical_caption_weight", 4.0))
+LEXICAL_HINT_WEIGHT = float(_retrieval_config.get("lexical_hint_weight", 0.25))
 DEDUPLICATE_EXACT_CONTENT = bool(
     _retrieval_config.get("deduplicate_exact_content", True)
 )
 _figure_description_config = (
-    _config.get("extraction", {})
-    .get("structured", {})
-    .get("figure_description", {})
+    _config.get("extraction", {}).get("structured", {}).get("figure_description", {})
 )
 HINT_IN_LEXICAL_RETRIEVAL = bool(
     _figure_description_config.get("candidate_retrieval", True)
@@ -88,14 +80,28 @@ CONFIDENCE_FLOOR = float(_retrieval_config.get("lane_confidence_floor", 0.0))
 # training suite's question mix into ranking. Enable only for diagnostics.
 SCORE_CALIBRATION = str(_retrieval_config.get("score_calibration", "off")).lower()
 _calibrator = (
-    Calibrator.load() if SCORE_CALIBRATION not in {"off", "false", "0"}
+    Calibrator.load()
+    if SCORE_CALIBRATION not in {"off", "false", "0"}
     else Calibrator({})
 )
 EMBEDDING_MODES = ("raw", "contextual", "hybrid")
 HYBRID_POOL_MODES = ("rrf", "union")
+EVIDENCE_GROUP_CONTENT_TYPES: dict[str, tuple[str, ...]] = {
+    NARRATIVE: ("narrative",),
+    "table": ("table",),
+    "figure": ("figure",),
+    EXCEL: ("excel_card",),
+}
+EVIDENCE_GROUPS = tuple(EVIDENCE_GROUP_CONTENT_TYPES)
 _EMBEDDING_COLUMNS = {
     "raw": "embedding",
     "contextual": "contextual_embedding",
+}
+_PARTIAL_INDEX_FILTERS: dict[tuple[str, ...], str] = {
+    ("narrative",): "AND c.content_type = 'narrative'",
+    ("table",): "AND c.content_type = 'table'",
+    ("figure",): "AND c.content_type = 'figure'",
+    ("excel_card",): "AND c.content_type = 'excel_card'",
 }
 
 _LEXICAL_STOPWORDS = {
@@ -233,6 +239,24 @@ class RetrievalDiagnostics:
     lane_outcomes: list[LaneOutcome] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class EvidenceGroup:
+    """Independently ranked evidence for one authoritative content shape."""
+
+    name: str
+    content_types: tuple[str, ...]
+    results: list[RankedResult]
+    diagnostics: RetrievalDiagnostics
+
+
+@dataclass(frozen=True)
+class EvidenceRetrievalResult:
+    """Retrieval output whose scores are comparable only inside each group."""
+
+    question: str
+    groups: dict[str, EvidenceGroup]
+
+
 def _decomposition_reason(question: str) -> str | None:
     """Return a high-precision reason to decompose, independent of eval labels.
 
@@ -309,8 +333,10 @@ def query_rewrite(question: str, mode: str | None = None) -> list[str]:
             messages=[{"role": "user", "content": question}],
         )
         sub_questions = json.loads(_strip_json_fence(response.content[0].text))
-        if not isinstance(sub_questions, list) or not sub_questions or not all(
-            isinstance(item, str) for item in sub_questions
+        if (
+            not isinstance(sub_questions, list)
+            or not sub_questions
+            or not all(isinstance(item, str) for item in sub_questions)
         ):
             raise ValueError(f"Unexpected rewrite response shape: {sub_questions!r}")
         search_queries = [question, *_deduplicate_subquestions(question, sub_questions)]
@@ -325,7 +351,9 @@ def query_rewrite(question: str, mode: str | None = None) -> list[str]:
         return search_queries
     except Exception as exc:
         log_failure("query_rewrite", question, exc)
-        logger.warning("query_rewrite failed, falling back to original question: %s", exc)
+        logger.warning(
+            "query_rewrite failed, falling back to original question: %s", exc
+        )
         _last_rewrite_trace = {
             "question": question,
             "sub_questions": [question],
@@ -347,18 +375,21 @@ def _validate_embedding_mode(conn, embedding_mode: str) -> str:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT count(*)
+                SELECT EXISTS (
+                    SELECT 1
                 FROM chunks
                 WHERE contextual_embedding IS NULL
                    OR contextual_embedding_model IS DISTINCT FROM %s
                    OR contextual_embedding_recipe IS DISTINCT FROM %s
+                    LIMIT 1
+                )
                 """,
                 (EMBEDDING_MODEL_NAME, CONTEXTUAL_EMBEDDING_RECIPE),
             )
             incomplete = cur.fetchone()[0]
         if incomplete:
             raise RuntimeError(
-                f"Contextual embeddings are missing or stale for {incomplete} chunk(s). "
+                "One or more contextual embeddings are missing or stale. "
                 "Run `uv run python -m retrieval.ingest.pdf.ingest` to "
                 "re-ingest them."
             )
@@ -372,11 +403,26 @@ def _search_by_vector(
     *,
     embedding_mode: str,
     content_types: tuple[str, ...] | None = None,
+    validate_embedding: bool = True,
 ) -> list[QueryObject]:
-    embedding_column = _validate_embedding_mode(conn, embedding_mode)
-    type_filter = "AND c.content_type = ANY(%s)" if content_types else ""
+    embedding_column = (
+        _validate_embedding_mode(conn, embedding_mode)
+        if validate_embedding
+        else _EMBEDDING_COLUMNS[embedding_mode]
+    )
+    # PostgreSQL cannot prove that ``content_type = ANY($1)`` implies a
+    # partial-index predicate, even for a one-item runtime array. These four
+    # clauses are fixed internal constants, not interpolated caller input, and
+    # allow the independently ranked evidence groups to use their own HNSW
+    # graphs. Multi-type compatibility lanes retain the parameterized filter.
+    type_filter = _PARTIAL_INDEX_FILTERS.get(content_types) if content_types else None
+    parameterized_type_filter = bool(content_types) and type_filter is None
+    if parameterized_type_filter:
+        type_filter = "AND c.content_type = ANY(%s)"
+    type_filter = type_filter or ""
     params: list = [query_vector]
-    if content_types:
+    if parameterized_type_filter:
+        assert content_types is not None
         params.append(list(content_types))
     params.append(top_k)
     with conn.cursor() as cur:
@@ -450,9 +496,7 @@ def _lexical_query(question: str) -> str:
             continue
         seen.add(token)
         tokens.append(token)
-    for phrase in re.findall(
-        r"\b[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){2,}\b", question
-    ):
+    for phrase in re.findall(r"\b[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){2,}\b", question):
         acronym = "".join(word[0] for word in phrase.split()).lower()
         if len(acronym) >= 3 and acronym not in seen:
             seen.add(acronym)
@@ -630,9 +674,7 @@ def _merge_candidates(candidate_sets: list[list[QueryObject]]) -> list[QueryObje
             existing_quality = (
                 existing.retrieval_score
                 if existing is not None and existing.retrieval_score is not None
-                else -existing.distance
-                if existing is not None
-                else float("-inf")
+                else -existing.distance if existing is not None else float("-inf")
             )
             if existing is None or candidate_quality > existing_quality:
                 best_by_id[candidate.chunk_id] = candidate
@@ -661,9 +703,7 @@ def _lexical_terms(text: str) -> set[str]:
         for token in re.findall(r"[a-z0-9]+", text.lower())
         if len(token) >= 3 and token not in _LEXICAL_STOPWORDS
     }
-    for phrase in re.findall(
-        r"\b[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){2,}\b", text
-    ):
+    for phrase in re.findall(r"\b[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){2,}\b", text):
         terms.add("".join(word[0] for word in phrase.split()).lower())
     return terms
 
@@ -735,14 +775,25 @@ def retrieve_with_diagnostics(
     rrf_k: int = RRF_K,
     hybrid_pool_mode: str = DEFAULT_HYBRID_POOL_MODE,
     lanes: tuple[str, ...] | None = None,
+    content_types: tuple[str, ...] | None = None,
+    search_queries: list[str] | None = None,
+    query_vectors: list | None = None,
+    _skip_embedding_validation: bool = False,
 ) -> tuple[list[RankedResult], RetrievalDiagnostics]:
     """
     rewrite -> search -> merge -> rerank
     """
-    if lanes is None and LANE_MODE not in {"off", "", None}:
+    if lanes and content_types:
+        raise ValueError("lanes and content_types are mutually exclusive")
+    if lanes is None and content_types is None and LANE_MODE not in {"off", "", None}:
         lanes = ALL_LANES
-    search_queries = query_rewrite(question, mode=rewrite_mode)
-    model = get_embedding_model()
+    if search_queries is None:
+        search_queries = query_rewrite(question, mode=rewrite_mode)
+    elif not search_queries:
+        raise ValueError("search_queries must contain at least one query")
+    if query_vectors is not None and len(query_vectors) != len(search_queries):
+        raise ValueError("query_vectors must align one-to-one with search_queries")
+    model = None if query_vectors is not None else get_embedding_model()
     if embedding_mode not in EMBEDDING_MODES:
         raise ValueError(
             f"Unknown embedding mode {embedding_mode!r}; expected one of {EMBEDDING_MODES}"
@@ -752,6 +803,12 @@ def retrieve_with_diagnostics(
             f"Unknown hybrid pool mode {hybrid_pool_mode!r}; "
             f"expected one of {HYBRID_POOL_MODES}"
         )
+    if not _skip_embedding_validation:
+        modes = (
+            ("raw", "contextual") if embedding_mode == "hybrid" else (embedding_mode,)
+        )
+        for mode in modes:
+            _validate_embedding_mode(conn, mode)
 
     # Each lane retrieves its OWN top-k. Filtering a single global top-k to a
     # lane would starve the smaller lanes at the candidate stage, which is a
@@ -767,7 +824,8 @@ def retrieve_with_diagnostics(
             embedding_mode=embedding_mode,
             rrf_k=rrf_k,
             hybrid_pool_mode=hybrid_pool_mode,
-            content_types=content_types_for([lane]) if lane else None,
+            content_types=(content_types_for([lane]) if lane else content_types),
+            query_vectors=query_vectors,
         )
         per_lane_sets[lane] = lane_sets
         per_lane_channels[lane] = lane_channels
@@ -845,11 +903,13 @@ def _rank_by_lane(
         lane_ranked = rerank(question, candidates, top_k=None)
         lane_size = len(lane_ranked)
         calibrated = [
-            _calibrator.score(
-                result.query_object.content_type, result.rerank_score, lane_size
+            (
+                _calibrator.score(
+                    result.query_object.content_type, result.rerank_score, lane_size
+                )
+                if use_calibration
+                else result.rerank_score
             )
-            if use_calibration
-            else result.rerank_score
             for result in lane_ranked
         ]
         confidence = lane_confidence(lane, calibrated)
@@ -877,18 +937,24 @@ def _generate_candidates(
     rrf_k: int,
     hybrid_pool_mode: str,
     content_types: tuple[str, ...] | None,
+    query_vectors: list | None = None,
 ) -> tuple[list[list[QueryObject]], list[dict[str, list[QueryObject]]]]:
     candidate_sets: list[list[QueryObject]] = []
     channel_candidate_sets: list[dict[str, list[QueryObject]]] = []
-    for search_query in search_queries:
+    for query_index, search_query in enumerate(search_queries):
+        query_vector = (
+            query_vectors[query_index]
+            if query_vectors is not None
+            else model.encode(search_query.strip(), normalize_embeddings=True)
+        )
         if embedding_mode == "hybrid":
-            query_vector = model.encode(search_query.strip(), normalize_embeddings=True)
             raw_candidates = _search_by_vector(
                 query_vector,
                 retrieval_top_k,
                 conn,
                 embedding_mode="raw",
                 content_types=content_types,
+                validate_embedding=False,
             )
             contextual_candidates = _search_by_vector(
                 query_vector,
@@ -896,6 +962,7 @@ def _generate_candidates(
                 conn,
                 embedding_mode="contextual",
                 content_types=content_types,
+                validate_embedding=False,
             )
             channels = {
                 "raw": raw_candidates,
@@ -913,15 +980,13 @@ def _generate_candidates(
                     rrf_k=rrf_k,
                 )
         else:
-            query_vector = model.encode(
-                search_query.strip(), normalize_embeddings=True
-            )
             candidates = _search_by_vector(
                 query_vector,
                 retrieval_top_k,
                 conn,
                 embedding_mode=embedding_mode,
                 content_types=content_types,
+                validate_embedding=False,
             )
             channels = {embedding_mode: candidates}
         lexical_candidates = _search_lexical(
@@ -956,6 +1021,7 @@ def retrieve(
     rrf_k: int = RRF_K,
     hybrid_pool_mode: str = DEFAULT_HYBRID_POOL_MODE,
     lanes: tuple[str, ...] | None = None,
+    content_types: tuple[str, ...] | None = None,
 ) -> list[RankedResult]:
     ranked, _ = retrieve_with_diagnostics(
         question,
@@ -967,8 +1033,99 @@ def retrieve(
         rrf_k=rrf_k,
         hybrid_pool_mode=hybrid_pool_mode,
         lanes=lanes,
+        content_types=content_types,
     )
     return ranked
+
+
+def retrieve_evidence(
+    question: str,
+    conn,
+    *,
+    groups: tuple[str, ...] = EVIDENCE_GROUPS,
+    rewrite_mode: str | None = None,
+    retrieval_top_k: int = RETRIEVAL_TOP_K,
+    rerank_top_k: int = RERANK_TOP_K,
+    embedding_mode: str = DEFAULT_EMBEDDING_MODE,
+    rrf_k: int = RRF_K,
+    hybrid_pool_mode: str = DEFAULT_HYBRID_POOL_MODE,
+) -> EvidenceRetrievalResult:
+    """Retrieve independently ranked evidence groups without score mixing.
+
+    The same question is intentionally run against every requested group. A
+    caller can use one or several groups without relying on a question-type
+    classifier, and adding a new corpus cannot displace another group's
+    results. Query rewriting is still controlled by ``rewrite_mode`` and is
+    disabled by the recommended configuration.
+    """
+    unknown = sorted(set(groups) - set(EVIDENCE_GROUP_CONTENT_TYPES))
+    if unknown:
+        raise ValueError(
+            f"Unknown evidence group(s) {unknown}; expected {list(EVIDENCE_GROUPS)}"
+        )
+
+    retrieved: dict[str, EvidenceGroup] = {}
+    # Rewriting is a question-level operation. Reuse it across evidence groups
+    # so enabling the optional Claude path never multiplies API calls by the
+    # number of independently ranked corpora.
+    search_queries = query_rewrite(question, mode=rewrite_mode)
+    model = get_embedding_model()
+    query_vectors = [
+        model.encode(search_query.strip(), normalize_embeddings=True)
+        for search_query in search_queries
+    ]
+    modes = ("raw", "contextual") if embedding_mode == "hybrid" else (embedding_mode,)
+    for mode in modes:
+        _validate_embedding_mode(conn, mode)
+    for group in groups:
+        selected_types = EVIDENCE_GROUP_CONTENT_TYPES[group]
+        results, diagnostics = retrieve_with_diagnostics(
+            question,
+            conn,
+            rewrite_mode=rewrite_mode,
+            retrieval_top_k=retrieval_top_k,
+            rerank_top_k=rerank_top_k,
+            embedding_mode=embedding_mode,
+            rrf_k=rrf_k,
+            hybrid_pool_mode=hybrid_pool_mode,
+            content_types=selected_types,
+            search_queries=search_queries,
+            query_vectors=query_vectors,
+            _skip_embedding_validation=True,
+        )
+        retrieved[group] = EvidenceGroup(
+            name=group,
+            content_types=selected_types,
+            results=results,
+            diagnostics=diagnostics,
+        )
+    return EvidenceRetrievalResult(question=question, groups=retrieved)
+
+
+def retrieve_configured(
+    question: str,
+    conn,
+    *,
+    output_mode: str | None = None,
+    groups: tuple[str, ...] = EVIDENCE_GROUPS,
+    **kwargs,
+) -> EvidenceRetrievalResult | list[RankedResult]:
+    """Public application dispatcher honoring ``retrieval.output_mode``.
+
+    ``retrieve`` remains the stable low-level flat-list compatibility API.
+    New application integrations should call this dispatcher or call
+    ``retrieve_evidence`` explicitly when they require the grouped contract.
+    """
+    selected_mode = output_mode or str(
+        _retrieval_config.get("output_mode", "legacy_flat")
+    )
+    if selected_mode == "grouped":
+        return retrieve_evidence(question, conn, groups=groups, **kwargs)
+    if selected_mode == "legacy_flat":
+        return retrieve(question, conn, **kwargs)
+    raise ValueError(
+        f"Unknown output mode {selected_mode!r}; expected 'grouped' or 'legacy_flat'"
+    )
 
 
 def main() -> None:
@@ -996,6 +1153,18 @@ def main() -> None:
         default=RRF_K,
         help="Reciprocal-rank-fusion constant used by hybrid mode (default: 60).",
     )
+    parser.add_argument(
+        "--groups",
+        nargs="+",
+        choices=EVIDENCE_GROUPS,
+        default=list(EVIDENCE_GROUPS),
+        help="Evidence groups to retrieve when grouped output is enabled.",
+    )
+    parser.add_argument(
+        "--legacy-flat",
+        action="store_true",
+        help="Use the backward-compatible cross-content ranked list.",
+    )
     args = parser.parse_args()
     if args.rrf_k < 1:
         parser.error("--rrf-k must be positive")
@@ -1003,37 +1172,59 @@ def main() -> None:
 
     conn = connect_db()
     try:
-        results = retrieve(
-            args.question,
-            conn,
-            embedding_mode=args.embedding_mode,
-            rrf_k=args.rrf_k,
-            hybrid_pool_mode=args.hybrid_pool_mode,
-        )
+        output_mode = str(_retrieval_config.get("output_mode", "legacy_flat"))
+        use_grouped = output_mode == "grouped" and not args.legacy_flat
+        if use_grouped:
+            evidence = retrieve_evidence(
+                args.question,
+                conn,
+                groups=tuple(args.groups),
+                embedding_mode=args.embedding_mode,
+                rrf_k=args.rrf_k,
+                hybrid_pool_mode=args.hybrid_pool_mode,
+            )
+            result_groups = {
+                name: group.results for name, group in evidence.groups.items()
+            }
+        else:
+            result_groups = {
+                "legacy_flat": retrieve(
+                    args.question,
+                    conn,
+                    embedding_mode=args.embedding_mode,
+                    rrf_k=args.rrf_k,
+                    hybrid_pool_mode=args.hybrid_pool_mode,
+                )
+            }
     finally:
         conn.close()
 
-    if not results:
+    if not any(result_groups.values()):
         print("No results found.")
         return
 
     storage = get_object_storage()
-    for rank, result in enumerate(results, start=1):
-        qo = result.query_object
-        retrieval_detail = (
-            f"rrf_score={qo.retrieval_score:.6f}"
-            if qo.retrieval_score is not None
-            else f"distance={qo.distance:.4f}"
-        )
-        print(
-            f"\n[{rank}] [{qo.content_type}] "
-            f"rerank_score={result.rerank_score:.4f} {retrieval_detail}"
-        )
-        print(f"    {qo.source_pdf} (p.{qo.page_start}-{qo.page_end})")
-        print(f"    {qo.breadcrumb}")
-        if qo.object_key:
-            print(f"    object: {storage.uri(qo.object_key)}")
-        print(f"    {qo.content[:300]}")
+    for group_name, results in result_groups.items():
+        print(f"\n=== {group_name.upper()} EVIDENCE ===")
+        if not results:
+            print("No results.")
+            continue
+        for rank, result in enumerate(results, start=1):
+            qo = result.query_object
+            retrieval_detail = (
+                f"retrieval_score={qo.retrieval_score:.6f}"
+                if qo.retrieval_score is not None
+                else f"distance={qo.distance:.4f}"
+            )
+            print(
+                f"\n[{rank}] [{qo.content_type}] "
+                f"rerank_score={result.rerank_score:.4f} {retrieval_detail}"
+            )
+            print(f"    {qo.source_pdf} (p.{qo.page_start}-{qo.page_end})")
+            print(f"    {qo.breadcrumb}")
+            if qo.object_key:
+                print(f"    object: {storage.uri(qo.object_key)}")
+            print(f"    {qo.content[:300]}")
 
 
 if __name__ == "__main__":

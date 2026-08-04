@@ -35,6 +35,7 @@ from pathlib import Path
 from eval.run_eval.narrative import normalize
 from retrieval.query.lanes import ALL_LANES
 from retrieval.query.pdf.query import (
+    CAPTION_RERANK_WEIGHT,
     QueryObject,
     RankedResult,
     retrieve_with_diagnostics,
@@ -115,9 +116,7 @@ def _query_object(
     return candidate
 
 
-def _matches_group(
-    candidate: QueryObject | RankedResult, group: GoldGroup
-) -> bool:
+def _matches_group(candidate: QueryObject | RankedResult, group: GoldGroup) -> bool:
     qo = _query_object(candidate)
     ids, contents = group
     return qo.chunk_id in ids or normalize(qo.content) in contents
@@ -177,6 +176,7 @@ def score_row(
     retrieval_top_k: int | None = None,
     rerank_top_k: int | None = None,
     lanes: tuple[str, ...] | None = None,
+    isolate_content_type: bool = False,
 ) -> StructuredQueryScore:
     gold_groups = gold_signatures(conn, row)
     num_gold = len(gold_groups)
@@ -184,13 +184,13 @@ def score_row(
     kwargs: dict = {"rewrite_mode": rewrite_mode}
     if lanes:
         kwargs["lanes"] = tuple(lanes)
+    if isolate_content_type:
+        kwargs["content_types"] = (row["question_type"],)
     if retrieval_top_k is not None:
         kwargs["retrieval_top_k"] = retrieval_top_k
     if rerank_top_k is not None:
         kwargs["rerank_top_k"] = rerank_top_k
-    ranked, diagnostics = retrieve_with_diagnostics(
-        row["question"], conn, **kwargs
-    )
+    ranked, diagnostics = retrieve_with_diagnostics(row["question"], conn, **kwargs)
 
     cutoffs = sorted(set(metric_cutoffs or []) | {k})
     ranked = ranked[: max(cutoffs)]
@@ -225,13 +225,9 @@ def score_row(
                 "chunk_id": result.query_object.chunk_id,
                 "content_type": result.query_object.content_type,
                 "rerank_score": result.rerank_score,
-                "is_gold": any(
-                    _matches_group(result, group) for group in gold_groups
-                ),
+                "is_gold": any(_matches_group(result, group) for group in gold_groups),
             }
-            for position, result in enumerate(
-                diagnostics.reranked_candidates, start=1
-            )
+            for position, result in enumerate(diagnostics.reranked_candidates, start=1)
         ],
         pooled_gold_rank=pooled_gold_rank,
         structured_in_top_k=sum(
@@ -270,7 +266,9 @@ def aggregate(scores: list[StructuredQueryScore], k: int, cutoffs: list[int]) ->
         "k": k,
         "metric_cutoffs": cutoffs,
         "overall": block(scores),
-        "by_question_type": {name: block(rows) for name, rows in sorted(by_type.items())},
+        "by_question_type": {
+            name: block(rows) for name, rows in sorted(by_type.items())
+        },
         "by_difficulty": {
             name: block(rows) for name, rows in sorted(by_difficulty.items())
         },
@@ -313,7 +311,9 @@ def print_report(
 
     pool_misses = [s for s in scores if s.pooled_gold_rank is None]
     rerank_misses = [
-        s for s in scores if s.pooled_gold_rank is not None and s.first_gold_rank is None
+        s
+        for s in scores
+        if s.pooled_gold_rank is not None and s.first_gold_rank is None
     ]
     print(
         f"\nDIAGNOSTICS: candidate-generation misses={len(pool_misses)}, "
@@ -322,7 +322,10 @@ def print_report(
         f"{_mean([s.structured_in_top_k for s in scores]):.2f}"
     )
     if show_misses:
-        for label, subset in (("POOL MISS", pool_misses), ("RERANK MISS", rerank_misses)):
+        for label, subset in (
+            ("POOL MISS", pool_misses),
+            ("RERANK MISS", rerank_misses),
+        ):
             for s in subset:
                 print(
                     f"  [{label}] {s.id} [{s.difficulty}/{s.question_type}] "
@@ -334,22 +337,36 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description="Score structured retrieval against an evaluation JSONL."
     )
-    parser.add_argument("--eval", default=DEFAULT_EVAL_PATH, help="Path to evaluation JSONL.")
+    parser.add_argument(
+        "--eval", default=DEFAULT_EVAL_PATH, help="Path to evaluation JSONL."
+    )
     parser.add_argument("--metric-k", dest="k", type=int, default=DEFAULT_K)
-    parser.add_argument("--out", type=Path, default=None, help="Optional JSON output path.")
+    parser.add_argument(
+        "--out", type=Path, default=None, help="Optional JSON output path."
+    )
     parser.add_argument("--misses", action="store_true", help="List gold misses.")
     parser.add_argument(
         "--rewrite-mode", choices=("auto", "off", "always"), default="off"
     )
     parser.add_argument(
-        "--lanes", nargs="*", choices=list(ALL_LANES), default=None,
+        "--lanes",
+        nargs="*",
+        choices=list(ALL_LANES),
+        default=None,
         help="Retrieve and rerank within these lanes before merging.",
+    )
+    parser.add_argument(
+        "--isolate-content-type",
+        action="store_true",
+        help="Score table and figure evidence as independent retrieval groups.",
     )
     parser.add_argument("--retrieval-top-k", type=int, default=None)
     parser.add_argument("--rerank-top-k", type=int, default=None)
     args = parser.parse_args(argv)
     if args.k < 1:
         parser.error("--metric-k must be positive")
+    if args.lanes and args.isolate_content_type:
+        parser.error("--lanes and --isolate-content-type are mutually exclusive")
 
     metric_cutoffs = sorted({DEFAULT_K, 10, args.k})
     rows = load_eval(args.eval)
@@ -367,10 +384,13 @@ def main(argv: list[str] | None = None) -> None:
                         metric_cutoffs=metric_cutoffs,
                         rewrite_mode=args.rewrite_mode,
                         retrieval_top_k=args.retrieval_top_k,
-                        rerank_top_k=args.rerank_top_k
-                        if args.rerank_top_k is not None
-                        else max(metric_cutoffs),
+                        rerank_top_k=(
+                            args.rerank_top_k
+                            if args.rerank_top_k is not None
+                            else max(metric_cutoffs)
+                        ),
                         lanes=tuple(args.lanes) if args.lanes else None,
+                        isolate_content_type=args.isolate_content_type,
                     )
                 )
             except GoldNotFoundError as exc:
@@ -390,6 +410,18 @@ def main(argv: list[str] | None = None) -> None:
         payload = {
             "summary": summary,
             "skipped": skipped,
+            "run_config": {
+                "caption_rerank_weight": CAPTION_RERANK_WEIGHT,
+                "rewrite_mode": args.rewrite_mode,
+                "lanes": args.lanes,
+                "isolate_content_type": args.isolate_content_type,
+                "retrieval_top_k": args.retrieval_top_k,
+                "rerank_top_k": (
+                    args.rerank_top_k
+                    if args.rerank_top_k is not None
+                    else max(metric_cutoffs)
+                ),
+            },
             "per_query": [
                 {
                     "id": s.id,
