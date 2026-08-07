@@ -57,6 +57,16 @@ Task 4 can wrap this call in its FastAPI endpoint. Task 3 handles prompt
 construction, model calls, structured-output parsing, insufficient-context
 handling, and citation checks.
 
+Task 4 may pass Task 2's ranked results without trimming them specifically for
+the model. Task 3 has no fixed Top-K limit: it adds ranked chunks while the
+complete prompt still fits the configured model context window, with space
+reserved for the answer. Only chunk IDs actually included in that prompt can
+be cited by the model.
+
+Task 3 also applies a configurable token safety factor because Task 2's
+embedding-token count may differ from the answer model's tokenizer. Task 4
+does not need to calculate or trim tokens itself.
+
 ## What Task 3 returns
 
 Task 3 gives Task 4 one of the public results below.

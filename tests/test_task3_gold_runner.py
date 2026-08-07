@@ -6,13 +6,16 @@ import tempfile
 from pathlib import Path
 
 from generation.providers.bedrock import BedrockProvider
+from generation.providers.ollama import OllamaProvider
 from scripts.evaluate_task3_gold import (
     build_dry_run_report,
     load_suite,
     run_bedrock_report,
+    run_model_report,
     select_rows,
 )
 from tests.test_bedrock_provider import FakeBedrockClient
+from tests.test_ollama_provider import FakeOllamaTransport
 
 
 def benchmark_row(row_id: str) -> dict:
@@ -95,6 +98,36 @@ class GoldRunnerTests(unittest.TestCase):
         self.assertEqual(response["cited_chunk_ids"], ["7"])
         self.assertEqual(response["citations"][0]["source_pdf"], "WMP.pdf")
         self.assertEqual(report["records"][0]["usage"]["input_tokens"], 90)
+
+    def test_fake_ollama_response_runs_same_task3_gold_path(self) -> None:
+        report = run_model_report(
+            [benchmark_row("eval_1")],
+            OllamaProvider(
+                FakeOllamaTransport(
+                    response={
+                        "message": {
+                            "content": (
+                                '{"answer":"100%","cited_chunk_ids":["7"],'
+                                '"insufficient_context":false}'
+                            )
+                        },
+                        "prompt_eval_count": 75,
+                        "eval_count": 12,
+                        "total_duration": 300_000_000,
+                    }
+                ),
+                "qwen3:4b",
+            ),
+            mode="ollama",
+        )
+
+        self.assertEqual(report["mode"], "ollama")
+        self.assertEqual(report["errors"], 0)
+        self.assertEqual(report["score_summary"]["citation_precision"], 1.0)
+        self.assertEqual(report["records"][0]["usage"]["output_tokens"], 12)
+        self.assertIn('"answer":"100%"', report["records"][0]["raw_model_output"])
+        self.assertEqual(report["records"][0]["chunks"][0]["chunk_id"], "7")
+        self.assertIn("The target is 100%.", report["records"][0]["prompt"])
 
 
 if __name__ == "__main__":

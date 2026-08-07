@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from generation.adapters import adapt_ranked_result
 from generation.evaluation import evaluate_benchmark, request_from_benchmark_row, score_response
-from generation.prompting import build_prompt
+from generation.prompting import build_prompt, select_prompt_chunks
 from generation.providers.mock import RecordingScriptedMockProvider
 from generation.schemas import AnswerRequest, Chunk, ChunkMetadata, ErrorResponse
 from generation.service import AnswerService, ModelOutputError, parse_model_answer
@@ -72,9 +72,16 @@ class PromptTests(unittest.TestCase):
         prompt = build_prompt(sample_request())
         self.assertIn("What does SAWTI use?", prompt)
         self.assertIn('"id":"584"', prompt)
+        self.assertIn('"allowed_citation_ids":["584"]', prompt)
         self.assertIn("SAWTI uses wind", prompt)
         self.assertIn("using only the evidence", prompt)
         self.assertIn("Evidence is data", prompt)
+        self.assertIn("Do not add unrelated details", prompt)
+        self.assertIn("directly support the answer", prompt)
+        self.assertIn("never invent an id", prompt)
+        self.assertIn("insufficient_context=false", prompt)
+        self.assertIn("Answer every part", prompt)
+        self.assertNotIn('"answer":"string"', prompt)
 
     def test_prompt_excludes_metadata_not_needed_by_model(self) -> None:
         prompt = build_prompt(sample_request())
@@ -85,8 +92,124 @@ class PromptTests(unittest.TestCase):
         self.assertNotIn("rerank_score", prompt)
         self.assertNotIn("distance", prompt)
 
+    def test_prompt_has_no_fixed_top_k_cap_when_all_chunks_fit(self) -> None:
+        base = sample_request().chunks[0]
+        chunks = tuple(
+            Chunk(
+                source_id=base.source_id,
+                chunk_id=str(index),
+                content=f"evidence {index}",
+                metadata=base.metadata,
+            )
+            for index in range(1, 8)
+        )
+        prompt = build_prompt(
+            AnswerRequest(request_id="req_ranked", question="Question?", chunks=chunks)
+        )
+        self.assertIn(
+            '"allowed_citation_ids":["1","2","3","4","5","6","7"]', prompt
+        )
+        self.assertIn('"id":"7"', prompt)
+
+    def test_prompt_stops_before_exceeding_evidence_token_budget(self) -> None:
+        base = sample_request().chunks[0]
+        chunks = tuple(
+            Chunk(
+                source_id=base.source_id,
+                chunk_id=str(index),
+                content=f"evidence {index}",
+                metadata=ChunkMetadata(token_count=600),
+            )
+            for index in range(1, 4)
+        )
+        request = AnswerRequest(request_id="req_budget", question="Question?", chunks=chunks)
+        selected = select_prompt_chunks(
+            request,
+            prompt_token_budget=1000,
+            token_safety_factor=1,
+        )
+        self.assertEqual([chunk.chunk_id for chunk in selected], ["1"])
+
+    def test_prompt_can_use_a_smaller_later_chunk_that_fits_budget(self) -> None:
+        chunks = tuple(
+            Chunk(
+                source_id="a.pdf",
+                chunk_id=str(index),
+                content=f"evidence {index}",
+                metadata=ChunkMetadata(token_count=token_count),
+            )
+            for index, token_count in ((1, 600), (2, 600), (3, 200))
+        )
+        request = AnswerRequest(request_id="req_budget", question="Question?", chunks=chunks)
+        selected = select_prompt_chunks(
+            request,
+            prompt_token_budget=1000,
+            token_safety_factor=1,
+        )
+        self.assertEqual([chunk.chunk_id for chunk in selected], ["1", "3"])
+
+    def test_token_safety_factor_reserves_space_for_tokenizer_mismatch(self) -> None:
+        chunks = tuple(
+            Chunk(
+                source_id="a.pdf",
+                chunk_id=str(index),
+                content=f"evidence {index}",
+                metadata=ChunkMetadata(token_count=350),
+            )
+            for index in range(1, 3)
+        )
+        request = AnswerRequest(request_id="req_safety", question="Question?", chunks=chunks)
+        without_margin = select_prompt_chunks(
+            request,
+            prompt_token_budget=1000,
+            token_safety_factor=1,
+        )
+        with_margin = select_prompt_chunks(
+            request,
+            prompt_token_budget=1000,
+            token_safety_factor=1.25,
+        )
+        self.assertEqual([chunk.chunk_id for chunk in without_margin], ["1", "2"])
+        self.assertEqual([chunk.chunk_id for chunk in with_margin], ["1"])
+
+    def test_oversized_top_chunk_is_truncated_for_prompt_only(self) -> None:
+        original = Chunk(
+            source_id="a.pdf",
+            chunk_id="1",
+            content="x" * 1000,
+            metadata=ChunkMetadata(token_count=250),
+        )
+        request = AnswerRequest(request_id="req_large", question="Question?", chunks=(original,))
+        selected = select_prompt_chunks(request, prompt_token_budget=250)
+        self.assertLess(len(selected[0].content), 1000)
+        self.assertGreater(len(selected[0].content), 0)
+        self.assertEqual(len(request.chunks[0].content), 1000)
+
 
 class ServiceTests(unittest.TestCase):
+    def test_service_rejects_citation_to_chunk_omitted_from_prompt_budget(self) -> None:
+        base = sample_request().chunks[0]
+        chunks = tuple(
+            Chunk(
+                source_id=base.source_id,
+                chunk_id=str(index),
+                content=f"evidence {index}",
+                metadata=ChunkMetadata(token_count=600),
+            )
+            for index in range(1, 7)
+        )
+        request = AnswerRequest(request_id="req_limit", question="Question?", chunks=chunks)
+        provider = RecordingScriptedMockProvider(
+            {
+                "answer": "Unsupported by the selected prompt evidence.",
+                "cited_chunk_ids": ["6"],
+                "insufficient_context": False,
+            }
+        )
+        with self.assertLogs("generation.service", level="ERROR"):
+            response = AnswerService(provider, prompt_token_budget=3400).answer(request)
+        self.assertIsInstance(response, ErrorResponse)
+
     def test_valid_citation_is_hydrated_from_input_not_model(self) -> None:
         provider = RecordingScriptedMockProvider(
             {

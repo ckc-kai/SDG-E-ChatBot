@@ -77,6 +77,19 @@ python scripts/evaluate_task3_gold.py `
 
 Only after reviewing the first response, increase `--limit` to 5 and then 10.
 
+While Bedrock access is pending, the same suite can use a real local Ollama
+model. This tests model behavior rather than the deterministic mock:
+
+```powershell
+python scripts/evaluate_task3_gold.py `
+  --mode ollama `
+  --suite eval/task3_gold_smoke_suite.json `
+  --limit 1
+```
+
+Review one result before increasing the limit. See `docs/task3-ollama.md` for
+configuration and the full Task 2 -> Task 3 command.
+
 ## Insufficient-context evaluation
 
 The answerable benchmark suite does not measure insufficient-context accuracy.

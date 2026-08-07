@@ -10,7 +10,13 @@ from collections.abc import Mapping
 from typing import Any
 
 from generation.citation_validation import CitationValidationError, validate_and_hydrate_citations
-from generation.prompting import build_prompt
+from generation.prompting import (
+    DEFAULT_CONTEXT_WINDOW_TOKENS,
+    DEFAULT_OUTPUT_TOKEN_RESERVE,
+    DEFAULT_TOKEN_SAFETY_FACTOR,
+    PromptBudgetError,
+    prepare_prompt,
+)
 from generation.providers.base import ModelProvider, ProviderError
 from generation.schemas import AnswerRequest, AnswerResponse, ErrorResponse, ModelAnswer
 
@@ -51,8 +57,36 @@ def parse_model_answer(raw: str) -> ModelAnswer:
 
 
 class AnswerService:
-    def __init__(self, provider: ModelProvider) -> None:
+    def __init__(
+        self,
+        provider: ModelProvider,
+        *,
+        prompt_token_budget: int | None = None,
+        token_safety_factor: float | None = None,
+    ) -> None:
         self.provider = provider
+        context_tokens = getattr(
+            provider, "context_tokens", DEFAULT_CONTEXT_WINDOW_TOKENS
+        )
+        output_reserve = getattr(
+            provider, "max_tokens", DEFAULT_OUTPUT_TOKEN_RESERVE
+        )
+        calculated_budget = context_tokens - output_reserve
+        self.prompt_token_budget = (
+            calculated_budget if prompt_token_budget is None else prompt_token_budget
+        )
+        if self.prompt_token_budget <= 0:
+            raise ValueError("prompt_token_budget must be positive")
+        provider_safety_factor = getattr(
+            provider, "token_safety_factor", DEFAULT_TOKEN_SAFETY_FACTOR
+        )
+        self.token_safety_factor = (
+            provider_safety_factor
+            if token_safety_factor is None
+            else token_safety_factor
+        )
+        if self.token_safety_factor < 1:
+            raise ValueError("token_safety_factor must be at least 1")
 
     def answer(self, request: AnswerRequest) -> AnswerResponse | ErrorResponse:
         started = time.perf_counter()
@@ -69,16 +103,45 @@ class AnswerService:
                 warnings=("No evidence chunks were provided",),
             )
 
-        prompt = build_prompt(request)
         try:
-            model_answer = parse_model_answer(self.provider.generate(prompt))
-            valid_ids, citations, warnings = validate_and_hydrate_citations(request, model_answer)
+            prepared_prompt = prepare_prompt(
+                request,
+                prompt_token_budget=self.prompt_token_budget,
+                token_safety_factor=self.token_safety_factor,
+            )
+            prompt_request = AnswerRequest(
+                request_id=request.request_id,
+                question=request.question,
+                chunks=prepared_prompt.chunks,
+            )
+            raw_model_answer = self.provider.generate(prepared_prompt.text)
+            usage = getattr(self.provider, "last_usage", None)
+            actual_input_tokens = getattr(usage, "input_tokens", None)
+            if (
+                isinstance(actual_input_tokens, int)
+                and actual_input_tokens > self.prompt_token_budget
+            ):
+                logger.warning(
+                    "Provider input tokens exceeded Task 3 prompt budget for "
+                    "request_id=%s: actual=%d budget=%d estimated=%d "
+                    "safety_adjusted=%d",
+                    request.request_id,
+                    actual_input_tokens,
+                    self.prompt_token_budget,
+                    prepared_prompt.estimated_tokens,
+                    prepared_prompt.safety_adjusted_tokens,
+                )
+            model_answer = parse_model_answer(raw_model_answer)
+            valid_ids, citations, warnings = validate_and_hydrate_citations(
+                prompt_request, model_answer
+            )
         except (
             ModelOutputError,
             CitationValidationError,
             ProviderError,
             TimeoutError,
             ConnectionError,
+            PromptBudgetError,
         ):
             # Keep provider/model details in server logs. Task 4 receives only
             # the stable public error contract and never raw exception text.
