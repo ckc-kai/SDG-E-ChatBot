@@ -1,45 +1,50 @@
-"""
-Role: Pydantic request/response shapes for the API. 
-- data-shape definitions
-- validate incoming requests automatically (rejects malformed input with 422 error ) 
-- auto-generate interactive docs at /docs.
+"""Public FastAPI request and response models.
 
-Field names/types derived directly from QueryObject/RankedResult dataclasses in retrieval/query.py
+The response mirrors Task 3's minimal public contract.  Retrieval scores and
+full chunk text stay inside the backend; only validated citations are exposed
+to the browser.
 """
-from pydantic import BaseModel
+
+from __future__ import annotations
+
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Filters(BaseModel):
-
-    content_type: str | None = None   # narrative | table | figure
+    content_type: Literal["narrative", "table", "figure", "excel_card"] | None = None
     section_number: str | None = None
     page: int | None = None
 
 
 class AskRequest(BaseModel):
-    question: str
+    model_config = ConfigDict(coerce_numbers_to_str=False)
+
+    request_id: str | None = None
+    question: str = Field(min_length=1)
     filters: Filters | None = None
-    embedding_mode: str | None = None   # raw | contextual | hybrid
-    rewrite_mode: str | None = None     # auto | off | always
+    embedding_mode: Literal["raw", "contextual", "hybrid"] | None = None
+    rewrite_mode: Literal["auto", "off", "always"] | None = None
 
 
-class Source(BaseModel):
-    doc_id: int                # QueryObject.chunk_id
-    source_pdf: str
-    breadcrumb: str
-    section_number: str | None
-    page_start: int
-    page_end: int
-    content_type: str          # narrative | table | figure
-    snippet: str                # QueryObject.content, truncated for display
-    caption: str | None
-    object_key: str | None      # present for figures -- an S3 reference
-    rerank_score: float
+class Citation(BaseModel):
+    chunk_id: str
+    source_pdf: str | None = None
+    page_start: int | None = None
+    page_end: int | None = None
+    sheet: str | None = None
+    row_start: int | None = None
+    row_end: int | None = None
+    breadcrumb: str | None = None
 
 
 class AskResponse(BaseModel):
+    request_id: str
     answer: str
-    sources: list[Source]
+    cited_chunk_ids: list[str]
+    citations: list[Citation]
+    insufficient_context: bool
 
 
 class DocumentMetadata(BaseModel):
@@ -53,5 +58,5 @@ class DocumentsResponse(BaseModel):
 
 
 class ErrorResponse(BaseModel):
+    request_id: str
     error: str
-    detail: str | None = None

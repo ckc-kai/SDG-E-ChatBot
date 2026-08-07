@@ -1,4 +1,37 @@
 # SDG-E-ChatBot
+UCLA MEng Capstone project for grounded question answering over SDG&E
+regulatory filings.
+
+Task 2 retrieval code is in `retrieval/`. Task 3's framework-neutral generation
+core is in `generation/`; it supports deterministic mocks, a local Ollama
+provider, and an Amazon Bedrock Converse provider. Live Bedrock calls remain
+disabled until account access and credentials are available. See
+`docs/task3-contract.md` for the Task 2/Task 4 contract and
+`docs/task3-ollama.md` for local end-to-end testing.
+
+## Local web app quick start
+
+The database must already be running and populated. Starting the web app does
+not ingest the corpus again.
+
+```powershell
+# One-time setup
+uv sync
+Copy-Item .env.example .env
+Set-Location frontend
+npm ci
+Set-Location ..
+
+# Local answer model (in a separate terminal)
+ollama pull qwen3:4b
+ollama serve
+
+# Start FastAPI and React
+powershell -ExecutionPolicy Bypass -File scripts/run_local.ps1
+```
+
+Set `TASK3_PROVIDER=ollama` and `OLLAMA_MODEL=qwen3:4b` in `.env`, then open
+<http://127.0.0.1:5173>. Backend/frontend logs are written under `logs/local/`.
 
 # Excel Cleaning
 

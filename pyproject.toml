@@ -16,6 +16,7 @@ dependencies = [
     "tqdm>=4.66.0",
     # Added for the backend application layer (Member 4):
     "fastapi>=0.115.0",
+    "openpyxl>=3.1.5",
     "uvicorn>=0.32.0",
 ]
 

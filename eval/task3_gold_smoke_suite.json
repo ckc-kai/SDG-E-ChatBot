@@ -1,0 +1,46 @@
+{
+  "name": "task3_gold_smoke_v1",
+  "description": "Ten answerable benchmark cases for isolated Task 3 Bedrock smoke evaluation.",
+  "cases": [
+    {
+      "id": "wmp_eval_0001",
+      "focus": "Simple regulatory threshold and percentage accuracy"
+    },
+    {
+      "id": "wmp_eval_0002",
+      "focus": "Multi-part numeric change plus explanation"
+    },
+    {
+      "id": "wmp_eval_0005",
+      "focus": "Safety-culture list completeness"
+    },
+    {
+      "id": "wmp_eval_0042",
+      "focus": "Hard synthesis across two evidence chunks"
+    },
+    {
+      "id": "wmp_eval_0050",
+      "focus": "Risk-assessment methodology explanation"
+    },
+    {
+      "id": "wmp_eval_0083",
+      "focus": "Short factual mitigation-program answer"
+    },
+    {
+      "id": "wmp_eval_0114",
+      "focus": "Cost-component synthesis across two evidence chunks"
+    },
+    {
+      "id": "wmp_eval_0135",
+      "focus": "PSPS table/list extraction with contact titles"
+    },
+    {
+      "id": "wmp_eval_0140",
+      "focus": "PSPS multilingual list completeness"
+    },
+    {
+      "id": "wmp_eval_0149",
+      "focus": "Errata and table-correction precision"
+    }
+  ]
+}

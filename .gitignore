@@ -22,5 +22,7 @@ config/config.yaml
 .env
 
 .tests
+.venv/
 
-docs/
+# Local source corpus. PDF/Excel files are ingested locally, not committed.
+files/

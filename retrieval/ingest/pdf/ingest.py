@@ -616,6 +616,8 @@ def ingest_pdf(
     model: SentenceTransformer,
     *,
     storage=None,
+    structured_enabled: bool | None = None,
+    skip_existing: bool = False,
 ) -> None:
     """Extract and replace all content types for one PDF atomically."""
     from retrieval.ingest.pdf.structured_extraction import (
@@ -625,9 +627,18 @@ def ingest_pdf(
     )
 
     content_hash = hash_file(pdf_path)
-    signature = ingest_signature()
+    if structured_enabled is None:
+        structured_enabled = bool(
+            _config.get("extraction", {}).get("structured", {}).get("enabled", True)
+        )
+    signature = hashlib.sha256(
+        f"{ingest_signature()}|structured={structured_enabled}".encode()
+    ).hexdigest()
     with conn.cursor() as cur:
         existing = _existing_document(cur, pdf_path.name)
+    if existing and skip_existing:
+        logger.info("Skipping existing document %s", pdf_path.name)
+        return
     if existing and existing[1:] == (content_hash, signature):
         logger.info(
             "Skipping %s (content and ingest configuration unchanged)", pdf_path.name
@@ -652,9 +663,6 @@ def ingest_pdf(
     reader = pypdf.PdfReader(pdf_path)
     narrative_chunks = build_chunks(pdf_path, reader, model.tokenizer)
     leaves = build_leaf_sections(pdf_path, reader)
-    structured_enabled = bool(
-        _config.get("extraction", {}).get("structured", {}).get("enabled", True)
-    )
     structured_chunks: list[Chunk] = []
     object_prefix: str | None = None
     if structured_enabled:
@@ -747,6 +755,16 @@ def main() -> None:
         default=None,
         help="Only ingest PDFs whose filename contains this substring.",
     )
+    parser.add_argument(
+        "--narrative-only",
+        action="store_true",
+        help="Ingest PDF text without Docling table/figure extraction.",
+    )
+    parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="Skip any filename already present, regardless of ingest signature.",
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
@@ -768,7 +786,14 @@ def main() -> None:
         failures: list[tuple[str, str]] = []
         for pdf_path in tqdm(pdf_paths, desc="Ingesting PDFs", unit="file"):
             try:
-                ingest_pdf(pdf_path, conn, model, storage=storage)
+                ingest_pdf(
+                    pdf_path,
+                    conn,
+                    model,
+                    storage=storage,
+                    structured_enabled=False if args.narrative_only else None,
+                    skip_existing=args.skip_existing,
+                )
             except Exception as exc:
                 conn.rollback()
                 log_failure("ingest_pdf", pdf_path.name, exc)
