@@ -19,6 +19,11 @@ dependencies = [
     "uvicorn>=0.32.0",
 ]
 
+[project.optional-dependencies]
+aws = [
+    "boto3>=1.43.62",
+]
+
 # Dev-only dependencies -- needed to run tests (FastAPI's TestClient
 # requires httpx), not needed in the production deployment image.
 [dependency-groups]

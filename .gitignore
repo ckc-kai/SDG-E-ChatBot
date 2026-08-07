@@ -22,3 +22,5 @@ config/config.yaml
 .env
 
 .tests
+
+docs/

@@ -1,0 +1,671 @@
+# Reviewed column contracts for the cleaned SDG&E QDR CSVs.
+#
+# Every column of every cleaned file is assigned exactly one bucket:
+#
+#   identity     how the fact/record id is derived
+#   semantic     human metric concept used to group semantic cards
+#   measure      value + unit (long_metric) or melted columns (wide_risk)
+#   period       reporting year/quarter and the 14/15 vintage-vs-reporting axes
+#   promoted     typed dimension columns on excel_facts / excel_records
+#   json         dimensions jsonb (filterable, untyped)
+#   annotations  comments / blank_meaning
+#   provenance   source location + crosswalk & schema audit metadata
+#   entity       entity-record mapping (families: entity)
+#   excluded     never persisted anywhere (sensitive)
+#   ignored      present but carries no signal; recorded in column_inventory only
+#
+# A column absent from all buckets is reported as unknown and is NOT loaded.
+
+version: excel-contracts-v1
+
+defaults:
+  utility: utility_id
+  annotations: [comments, blank_meaning]
+
+tables:
+
+  # ---------------------------------------------------------------- Table 1
+  table_01:
+    family: entity
+    title: WMP activities
+    description: >-
+      SDG&E Wildfire Mitigation Plan activities and programs with annual
+      targets, cumulative quarterly progress, and completion status.
+    identity:
+      column: record_id
+    entity:
+      type: wmp_activity
+      key: activity_tracking_id
+      title: wmp_activity_name
+      date_start: project_start_date
+      date_end: project_end_date
+      status: status
+    period:
+      year: reporting_year
+      quarter: reporting_quarter
+    promoted: []
+    json:
+      - activity_classification
+      - wmp_category
+      - wmp_initiative
+      - wmp_initiative_name_if_other
+      - wmp_section
+      - wmp_activity_code
+      - metric_number
+      - wmp_page_number
+      - submission_date
+      - risk_target_reduction
+      - midyear_target
+      - quant_target_units
+      - annual_quant_target
+      - annual_qual_target
+      - quant_actual_progress_q1
+      - quant_actual_progress_q1_2
+      - quant_actual_progress_q1_3
+      - quant_actual_progress_q1_4
+      - qual_actual_progress_q1
+      - qual_actual_progress_q1_2
+      - qual_actual_progress_q1_3
+      - qual_actual_progress_q1_4
+      - corrective_actions_if_delayed
+      - activity_description
+      - activity_objective
+      - legacy_wmp_category_section
+      - legacy_energy_safety_activity
+      - legacy_activity_name_if_other
+      - annual_target_join_status
+      - annual_target_source_type
+      - compliance_reference
+    searchable_text:
+      - wmp_activity_name
+      - activity_objective
+      - wmp_category
+      - wmp_initiative
+      - wmp_initiative_name_if_other
+      - risk_target_reduction
+      - annual_qual_target
+      - qual_actual_progress_q1
+      - qual_actual_progress_q1_2
+      - qual_actual_progress_q1_3
+      - qual_actual_progress_q1_4
+      - corrective_actions_if_delayed
+      - status
+    provenance:
+      - source_file
+      - source_sheet
+      - source_row
+      - source_revision
+      - source_schema
+      - annual_target_source_file
+      - annual_target_source_sheet
+      - annual_target_source_row
+      - annual_target_source_url
+    annotations: [comments]
+    # Goal 7: personal data and internal links never reach retrieval.
+    excluded:
+      - person_in_charge_name
+      - person_in_charge_email
+      - folder_link
+    ignored:
+      - audit
+      - audit_file_documentation_requested
+
+  # ---------------------------------------------------------------- Table 2
+  table_02:
+    family: long_metric
+    title: Risk events, outages, and inspection findings
+    description: >-
+      Quarterly operational metrics including risk events, inspections
+      performed, and findings by inspection type and method.
+    identity:
+      synthesize: [series_id, reporting_year, reporting_quarter, source_value_cell]
+    series_id: series_id
+    source_metric_number: row_aligned_v4_metric_number
+    semantic_group:
+      fields: [metric_name]
+      category: metric_type
+    measure:
+      value: actual_value_canonical
+      unit: unit_canonical
+    period:
+      year: reporting_year
+      quarter: reporting_quarter
+    promoted: [hftd_tier, line_type]
+    json: [wind_warning_status, inspection_type, inspection_method, legacy_program_name]
+    provenance:
+      - source_file
+      - source_sheet
+      - source_row
+      - source_value_cell
+      - source_revision
+      - source_report_quarter
+      - schema_version
+      - guideline_url
+      - crosswalk_status
+      - legacy_metric_number
+      - unit_conversion
+
+  # ---------------------------------------------------------------- Table 3
+  table_03:
+    family: long_metric
+    title: Utility-defined metrics with definitions and purpose
+    description: >-
+      Utility-selected performance metrics, each with a written definition,
+      stated purpose, and third-party validation flag.
+    identity:
+      synthesize: [metric_number, reporting_year, reporting_quarter, source_value_cell]
+    source_metric_number: metric_number
+    semantic_group:
+      fields: [metric]
+      category: metric_group_crosswalk
+      definition: definition
+      purpose: purpose
+      assumptions: assumptions_made_to_connect_metric_to_purpose
+    measure:
+      value: actual_value_canonical
+      unit: unit_canonical
+    period:
+      year: reporting_year
+      quarter: reporting_quarter
+    promoted: []
+    json: [third_party_validation]
+    provenance:
+      - source_file
+      - source_sheet
+      - source_row
+      - source_value_cell
+      - source_revision
+      - source_report_quarter
+      - source_number_format
+      - schema_version
+      - guideline_url
+      - crosswalk_status
+      - legacy_metric_number_crosswalk
+      - value_conversion
+
+  # ---------------------------------------------------------------- Table 4
+  table_04:
+    family: long_metric
+    title: Weather-condition circuit mile days
+    description: >-
+      Overhead circuit mile days under red flag warning, high wind warning,
+      and elevated fire potential index conditions.
+    identity:
+      column: record_id
+    source_metric_number: metric_number
+    semantic_group:
+      fields: [metric_name]
+      category: metric_type
+    measure:
+      value: actual_value
+      unit: unit_canonical
+    period:
+      year: reporting_year
+      quarter: reporting_quarter
+    promoted: [hftd_tier, line_type]
+    json: [line_type_scope, comparison_group_id]
+    provenance:
+      - source_file
+      - source_sheet
+      - source_row
+      - source_value_cell
+      - source_revision
+      - source_report_quarter
+      - schema_version
+      - guideline_url
+      - crosswalk_status
+      - unit_crosswalk_status
+      - legacy_metric_number_mapped
+      - distribution_metric_number_crosswalk
+      - transmission_metric_number_crosswalk
+
+  # ---------------------------------------------------------------- Table 5
+  table_05:
+    family: long_metric
+    title: Risk events by driver
+    description: >-
+      Unplanned outages and wire down events broken out by risk event driver,
+      line type, and HFTD tier.
+    identity:
+      column: record_id
+    source_metric_number: metric_number
+    semantic_group:
+      fields: [metric_name]
+      category: metric_type
+    measure:
+      value: actual_value
+      unit: unit_canonical
+    period:
+      year: reporting_year
+      quarter: reporting_quarter
+    promoted: [hftd_tier, line_type]
+    json: [risk_event_driver, risk_event_driver_tracked]
+    provenance:
+      - source_file
+      - source_sheet
+      - source_row
+      - source_value_cell
+      - source_revision
+      - source_report_quarter
+      - schema_version
+      - guideline_url
+      - legacy_metric_number_mapped
+      - legacy_metric_number_status
+      - label_crosswalk_status
+      - unit_crosswalk_status
+
+  # ---------------------------------------------------------------- Table 6
+  table_06:
+    family: long_metric
+    title: Ignitions by driver
+    description: >-
+      Reported ignitions broken out by ignition driver, line type, and
+      HFTD tier.
+    identity:
+      column: record_id
+    source_metric_number: metric_number
+    semantic_group:
+      fields: [metric_type]
+    measure:
+      value: actual_value
+      unit: unit_canonical
+    period:
+      year: reporting_year
+      quarter: reporting_quarter
+    promoted: [hftd_tier, line_type]
+    json: [ignition_driver, ignition_driver_tracked]
+    provenance:
+      - source_file
+      - source_sheet
+      - source_row
+      - source_value_cell
+      - source_revision
+      - source_report_quarter
+      - schema_version
+      - guideline_url
+      - legacy_metric_number_mapped
+      - v3_1_to_v3_2_domain_status
+      - v3_2_to_v4_label_status
+      - unit_crosswalk_status
+
+  # ---------------------------------------------------------------- Table 7
+  table_07:
+    family: long_metric
+    title: System composition
+    description: >-
+      Overhead and underground circuit miles, critical facilities, and
+      customer counts by HFTD tier, area type, and WUI status.
+    identity:
+      column: record_id
+    source_metric_number: metric_number
+    semantic_group:
+      fields: [metric_type]
+    measure:
+      value: actual_value
+      unit: unit_canonical
+    period:
+      year: reporting_year
+      quarter: reporting_quarter
+    promoted: [hftd_tier, line_type]
+    json: [area_type, wui_status]
+    provenance:
+      - source_file
+      - source_sheet
+      - source_row
+      - source_value_cell
+      - source_revision
+      - source_report_quarter
+      - schema_version
+      - guideline_url
+      - crosswalk_status
+      - unit_crosswalk_status
+      - legacy_metric_number_mapped
+
+  # ---------------------------------------------------------------- Table 8
+  table_08:
+    family: long_metric
+    title: Net system additions and removals
+    description: >-
+      Net additions or removals of overhead and underground circuit miles and
+      related assets by HFTD tier, area type, and WUI status.
+    identity:
+      column: record_id
+    source_metric_number: metric_number
+    semantic_group:
+      fields: [metric_type]
+    measure:
+      value: actual_value
+      unit: unit_canonical
+    period:
+      year: reporting_year
+      quarter: reporting_quarter
+    promoted: [hftd_tier, line_type]
+    json: [area_type, wui_status]
+    provenance:
+      - source_file
+      - source_sheet
+      - source_row
+      - source_value_cell
+      - source_revision
+      - source_report_quarter
+      - schema_version
+      - guideline_url
+      - crosswalk_status
+      - unit_crosswalk_status
+      - legacy_metric_number_mapped
+
+  # ---------------------------------------------------------------- Table 9
+  table_09:
+    family: long_metric
+    title: System upgrades
+    description: >-
+      Circuit miles, substations, and related assets upgraded, by HFTD tier,
+      area type, and WUI status.
+    identity:
+      column: record_id
+    source_metric_number: metric_number
+    semantic_group:
+      fields: [metric_type]
+    measure:
+      value: actual_value
+      unit: unit_canonical
+    period:
+      year: reporting_year
+      quarter: reporting_quarter
+    promoted: [hftd_tier, line_type]
+    json: [area_type, wui_status]
+    provenance:
+      - source_file
+      - source_sheet
+      - source_row
+      - source_value_cell
+      - source_revision
+      - source_report_quarter
+      - schema_version
+      - guideline_url
+      - crosswalk_status
+      - unit_crosswalk_status
+      - legacy_metric_number_mapped
+
+  # --------------------------------------------------------------- Table 10
+  table_10:
+    family: long_metric
+    title: PSPS and fast-trip metrics
+    description: >-
+      Public Safety Power Shutoff and fast-trip event frequency, scope,
+      duration, customer impact, and community outreach metrics.
+    identity:
+      column: record_id
+    source_metric_number: row_aligned_v4_metric_number
+    semantic_group:
+      fields: [metric_name]
+      category: metric_type
+    measure:
+      value: actual_value
+      unit: unit_canonical
+    period:
+      year: reporting_year
+      quarter: reporting_quarter
+    promoted: []
+    json: [wind_warning_status]
+    provenance:
+      - source_file
+      - source_sheet
+      - source_row
+      - source_value_cell
+      - source_revision
+      - source_report_quarter
+      - schema_version
+      - guideline_url
+      - metric_number
+      - legacy_metric_number_mapped
+      - legacy_metric_number_status
+      - semantic_crosswalk_status
+      - unit_crosswalk_status
+
+  # --------------------------------------------------------------- Table 11
+  table_11:
+    family: long_metric
+    title: WMP spend by initiative
+    description: >-
+      Capital and operating wildfire mitigation spend in thousands of dollars
+      by WMP category, initiative, and activity.
+    identity:
+      column: record_id
+    source_metric_number: mapped_v4_metric_number
+    semantic_group:
+      fields: [wmp_initiative]
+      category: wmp_category
+    measure:
+      value: actual_value_canonical
+      unit: unit_canonical
+    period:
+      year: reporting_year
+    promoted: [hftd_tier]
+    json:
+      - expense_type
+      - wmp_category
+      - wmp_activity
+      - tracking_id_normalized
+      - group_tracking_ids
+      - primary_driver_targeted
+      - secondary_drivers_targeted
+      - year_initiated
+      - most_recent_proceeding
+      - memorandum_account
+      - current_compliance_status
+      - associated_rules
+      - other_spend_category
+      - comparison_group_id
+    provenance:
+      - source_file
+      - source_sheet
+      - source_row
+      - source_value_cell
+      - source_revision
+      - schema_version
+      - guideline_url
+      - metric_number
+      - initiative_mapping_status
+
+  # --------------------------------------------------------------- Table 13
+  table_13:
+    family: entity
+    title: Open work orders
+    description: >-
+      Individual open repair work orders with equipment type, GO 95 Rule 18
+      priority, open and due dates, and quarterly snapshot lineage.
+    identity:
+      column: record_id
+    entity:
+      type: work_order
+      key: work_order_key
+      title: work_order_number
+      date_start: date_opened
+      date_due: due_date
+      status: go95_rule18_priority
+    period:
+      year: reporting_year
+      quarter: reporting_quarter
+      period_end_date: period_end_date
+    promoted: [hftd_tier, line_type]
+    json:
+      - equipment_type
+      - source_metric_number
+      - metric_number_scope
+      - utility_specific_repair_priority
+      - date_reinspected_or_modified
+      - due_date_after_reinspected_or_modified
+      - go95_priority_after_reinspected_or_modified
+      - reason_for_reinspection
+      - exact_duplicate_group_key
+      - exact_duplicate_count
+      - exact_duplicate_index
+      - work_order_key_occurrence_count_in_period
+      - prior_period_presence_status
+      - first_seen_period
+      - last_seen_period
+      - quarters_observed
+    # Executor rule 8: default aggregates keep one row per exact duplicate set.
+    dedupe:
+      default_filter:
+        field: exact_duplicate_index
+        value: "1"
+    provenance:
+      - source_file
+      - source_sheet
+      - source_row
+      - source_metric_cell
+      - source_revision
+      - schema_version
+      - source_url
+      - guideline_url
+      - work_order_key_method
+      - hftd_crosswalk_status
+      - go95_priority_crosswalk_status
+      - utility_priority_crosswalk_status
+
+  # --------------------------------------------------------------- Table 14
+  table_14:
+    family: wide_risk
+    title: Utility risk by tier and line type
+    description: >-
+      Modeled wildfire, PSPS, and PEDS risk components for the whole utility,
+      broken out by HFTD tier and line type.
+    identity:
+      column: record_id
+    source_metric_number: metric_number
+    period:
+      year: reporting_year
+      source_vintage: source_vintage_year
+      basis: year_basis
+    melt:
+      measure_columns:
+        - overall_utility_risk
+        - wildfire_risk
+        - outage_program_risk
+        - wildfire_likelihood
+        - ignition_likelihood
+        - equipment_caused_likelihood_of_ignition
+        - contact_from_vegetation_likelihood_of_ignition
+        - contact_from_object_likelihood_of_ignition
+        - burn_likelihood
+        - wildfire_consequence
+        - wildfire_hazard_intensity
+        - wildfire_exposure_potential
+        - wildfire_vulnerability
+        - psps_risk
+        - psps_likelihood
+        - psps_consequence
+        - psps_exposure_potential
+        - psps_vulnerability
+        - peds_risk
+        - peds_likelihood
+        - peds_consequence
+        - peds_exposure_potential
+        - peds_vulnerability
+    promoted: [hftd_tier, line_type]
+    json: []
+    provenance:
+      - source_file
+      - source_sheet
+      - source_row
+      - source_revision
+      - schema_version
+      - source_url
+      - guideline_url
+      - metric_number_status
+      - hftd_crosswalk_status
+      - line_type_crosswalk_status
+      - wildfire_risk_crosswalk_status
+      - outage_program_risk_crosswalk_status
+      - year_alignment_status
+      - revision_selection_status
+
+  # --------------------------------------------------------------- Table 15
+  table_15:
+    family: wide_risk
+    title: Highest-risk circuit segments
+    description: >-
+      Modeled wildfire, PSPS, and PEDS risk components for individual
+      distribution circuit segments in the highest-risk population.
+    identity:
+      column: record_id
+    source_metric_number: metric_number
+    period:
+      year: reporting_year
+      source_vintage: source_vintage_year
+      basis: year_basis
+    melt:
+      measure_columns:
+        - overall_utility_risk
+        - wildfire_risk
+        - outage_program_risk
+        - wildfire_likelihood
+        - ignition_likelihood
+        - equipment_caused_likelihood_of_ignition
+        - contact_from_vegetation_likelihood_of_ignition
+        - contact_from_object_likelihood_of_ignition
+        - burn_likelihood
+        - wildfire_consequence
+        - wildfire_hazard_intensity
+        - wildfire_exposure_potential
+        - wildfire_vulnerability
+        - psps_risk
+        - psps_likelihood
+        - psps_consequence
+        - psps_exposure_potential
+        - psps_vulnerability
+        - peds_risk
+        - peds_likelihood
+        - peds_consequence
+        - peds_exposure_potential
+        - peds_vulnerability
+    promoted: [hftd_tier, line_type]
+    json:
+      - segment_id
+      - risk_granularity
+      - segment_length_mi
+      - inclusion_reason
+      - overall_risk_rank
+      - source_row_order
+    provenance:
+      - source_file
+      - source_sheet
+      - source_row
+      - source_revision
+      - schema_version
+      - source_url
+      - guideline_url
+      - metric_number_status
+      - risk_granularity_status
+      - line_type_status
+      - hftd_status
+      - year_alignment_status
+      - revision_selection_status
+
+# Human labels for melted risk measures, used in card text and results.
+measure_labels:
+  overall_utility_risk: Overall utility risk
+  wildfire_risk: Wildfire risk
+  outage_program_risk: Outage program risk
+  wildfire_likelihood: Wildfire likelihood
+  ignition_likelihood: Ignition likelihood
+  equipment_caused_likelihood_of_ignition: Equipment-caused likelihood of ignition
+  contact_from_vegetation_likelihood_of_ignition: Contact from vegetation likelihood of ignition
+  contact_from_object_likelihood_of_ignition: Contact from object likelihood of ignition
+  burn_likelihood: Burn likelihood
+  wildfire_consequence: Wildfire consequence
+  wildfire_hazard_intensity: Wildfire hazard intensity
+  wildfire_exposure_potential: Wildfire exposure potential
+  wildfire_vulnerability: Wildfire vulnerability
+  psps_risk: PSPS risk
+  psps_likelihood: PSPS likelihood
+  psps_consequence: PSPS consequence
+  psps_exposure_potential: PSPS exposure potential
+  psps_vulnerability: PSPS vulnerability
+  peds_risk: PEDS risk
+  peds_likelihood: PEDS likelihood
+  peds_consequence: PEDS consequence
+  peds_exposure_potential: PEDS exposure potential
+  peds_vulnerability: PEDS vulnerability
