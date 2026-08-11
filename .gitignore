@@ -26,3 +26,7 @@ config/config.yaml
 
 # Local source corpus. PDF/Excel files are ingested locally, not committed.
 files/
+
+local
+
+user_questions/beta_golden_questions.json
