@@ -72,6 +72,7 @@ class AdapterTests(unittest.TestCase):
 
 
 class PromptTests(unittest.TestCase):
+
     def test_prompt_contains_question_evidence_ids_and_grounding_rules(self) -> None:
         prompt = build_prompt(sample_request())
         self.assertIn("What does SAWTI use?", prompt)
@@ -87,10 +88,10 @@ class PromptTests(unittest.TestCase):
         self.assertIn("Do not add unrelated details", prompt)
         self.assertNotIn('"answer":"string"', prompt)
 
-    def test_prompt_includes_source_but_excludes_display_and_ranking_metadata(self) -> None:
+    def test_prompt_excludes_citation_display_and_ranking_metadata(self) -> None:
         prompt = build_prompt(sample_request())
         self.assertIn('"context":"8 Wildfire Mitigations', prompt)
-        self.assertIn('"source":"WMP.pdf"', prompt)
+        self.assertNotIn('"source":"WMP.pdf"', prompt)
         self.assertNotIn("page_start", prompt)
         self.assertNotIn("page_end", prompt)
         self.assertNotIn("rerank_score", prompt)
@@ -147,7 +148,7 @@ class PromptTests(unittest.TestCase):
         request = AnswerRequest(request_id="req_budget", question="Question?", chunks=chunks)
         selected = select_prompt_chunks(
             request,
-            prompt_token_budget=1100,
+            prompt_token_budget=1300,
             token_safety_factor=1,
         )
         self.assertEqual([chunk.chunk_id for chunk in selected], ["1", "3"])
@@ -165,12 +166,12 @@ class PromptTests(unittest.TestCase):
         request = AnswerRequest(request_id="req_safety", question="Question?", chunks=chunks)
         without_margin = select_prompt_chunks(
             request,
-            prompt_token_budget=1000,
+            prompt_token_budget=1200,
             token_safety_factor=1,
         )
         with_margin = select_prompt_chunks(
             request,
-            prompt_token_budget=1000,
+            prompt_token_budget=1200,
             token_safety_factor=1.25,
         )
         self.assertEqual([chunk.chunk_id for chunk in without_margin], ["1", "2"])
@@ -184,7 +185,7 @@ class PromptTests(unittest.TestCase):
             metadata=ChunkMetadata(token_count=250),
         )
         request = AnswerRequest(request_id="req_large", question="Question?", chunks=(original,))
-        selected = select_prompt_chunks(request, prompt_token_budget=450)
+        selected = select_prompt_chunks(request, prompt_token_budget=600)
         self.assertLess(len(selected[0].content), 1000)
         self.assertGreater(len(selected[0].content), 0)
         self.assertEqual(len(request.chunks[0].content), 1000)
@@ -254,7 +255,7 @@ class ServiceTests(unittest.TestCase):
         self.assertIn("Model cited unknown chunk_id: 999", log_output)
         self.assertIn("Answer has no valid supporting citation", log_output)
 
-    def test_insufficient_answer_does_not_require_a_citation(self) -> None:
+    def test_insufficient_answer_preserves_cited_partial_findings(self) -> None:
         provider = RecordingScriptedMockProvider(
             {
                 "answer": "A long partial explanation that must not be shown.",
@@ -265,9 +266,22 @@ class ServiceTests(unittest.TestCase):
         response = AnswerService(provider).answer(sample_request())
         self.assertFalse(isinstance(response, ErrorResponse))
         self.assertTrue(response.insufficient_context)
+        self.assertEqual(response.answer, "A long partial explanation that must not be shown.")
+        self.assertEqual(response.cited_chunk_ids, ("584",))
+        self.assertEqual(len(response.citations), 1)
+        self.assertEqual(provider.call_count, 1)
+
+    def test_uncited_insufficient_answer_is_normalized(self) -> None:
+        provider = RecordingScriptedMockProvider(
+            {
+                "answer": "Unsupported explanation.",
+                "cited_chunk_ids": [],
+                "insufficient_context": True,
+            }
+        )
+        response = AnswerService(provider).answer(sample_request())
         self.assertEqual(response.answer, INSUFFICIENT_CONTEXT_ANSWER)
         self.assertEqual(response.cited_chunk_ids, ())
-        self.assertEqual(response.citations, ())
 
     def test_duplicate_citations_are_deduplicated(self) -> None:
         provider = RecordingScriptedMockProvider(
@@ -288,6 +302,7 @@ class ServiceTests(unittest.TestCase):
         self.assertTrue(response.insufficient_context)
         self.assertEqual(provider.call_count, 0)
         self.assertIn("No evidence chunks were provided", response.warnings)
+
 
     def test_invalid_json_parser_raises_controlled_error(self) -> None:
         with self.assertRaises(ModelOutputError):

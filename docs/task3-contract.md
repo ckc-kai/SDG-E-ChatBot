@@ -1,5 +1,27 @@
 # Task 3 and Task 4 contract
 
+Task 4 normally sends only the user's `question`. For complex questions, the
+backend can automatically create searchable subquestions, retrieve the available
+evidence types for each one, deduplicate the chunks, and then produce one
+final Task 3 answer.
+
+Complex questions are automatically planned into at most two retrieval
+questions. The planner provider is separate from the answer provider, so local
+Ollama can plan while Groq or Bedrock produces the final answer.
+
+Task 4 may optionally restrict retrieval to one or several verified types:
+
+```json
+{
+  "question": "Compare the targets and explain the reasons.",
+  "filters": {"content_types": ["narrative", "table"]}
+}
+```
+
+The older `content_type` field remains supported for one type. Do not send
+`content_type` and `content_types` together. `rewrite_mode: "off"` disables
+planning, `"always"` forces it, and omitted/`"auto"` plans only complex questions.
+
 ## What Task 4 gives Task 3
 
 The expected flow is for Task 4 to call Task 2 retrieval and then give Task 3:
@@ -109,11 +131,33 @@ If Task 2 returns no chunks, Task 3 does not call the model:
 }
 ```
 
-This same response is used when chunks are present but do not support every
-material part of the question. Task 3 replaces any longer model explanation
-with the fixed sentence above and removes citations. Task 4 should still use
-`insufficient_context`, rather than matching the sentence, to identify this
-case.
+If the evidence supports useful partial findings but not the complete question,
+Task 3 may instead return those findings with validated citations:
+
+```json
+{
+  "request_id": "req_003",
+  "answer": "The evidence does not establish repeated missed targets across the full cycle. It does show that one initiative was reported as delayed.",
+  "cited_chunk_ids": ["101"],
+  "citations": [
+    {
+      "chunk_id": "101",
+      "source_pdf": "WMP.pdf",
+      "page_start": 10,
+      "page_end": 11,
+      "sheet": null,
+      "row_start": null,
+      "row_end": null,
+      "breadcrumb": "Target status"
+    }
+  ],
+  "insufficient_context": true
+}
+```
+
+Task 4 should use `insufficient_context`, rather than matching a specific
+sentence. When it is `true`, the answer may be either a complete refusal or a
+cited partial finding, but it must not be presented as a complete answer.
 
 ### Answer-generation failure
 

@@ -35,6 +35,20 @@ class RetrievalServiceTests(unittest.TestCase):
         RetrievalService().retrieve("q", content_type="excel_card")
         self.assertEqual(retrieve.call_args.kwargs["groups"], ("excel",))
 
+    @patch("services.retrieval_service.retrieve_configured")
+    @patch("services.retrieval_service.connect_db")
+    @patch("services.retrieval_service.answer_from_excel")
+    def test_multiple_content_filters_map_to_unique_groups(
+        self, answer_from_excel, connect_db, retrieve
+    ):
+        retrieve.return_value = EvidenceRetrievalResult(question="q", groups={})
+        RetrievalService().retrieve(
+            "q", content_types=("narrative", "table", "figure", "table")
+        )
+        self.assertEqual(
+            retrieve.call_args.kwargs["groups"], ("narrative", "table", "figure")
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

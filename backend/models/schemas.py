@@ -14,6 +14,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class Filters(BaseModel):
     content_type: Literal["narrative", "table", "figure", "excel_card"] | None = None
+    content_types: list[
+        Literal["narrative", "table", "figure", "excel_card"]
+    ] | None = Field(default=None, min_length=1)
     section_number: str | None = None
     page: int | None = None
 

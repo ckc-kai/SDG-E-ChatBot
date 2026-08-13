@@ -25,6 +25,14 @@ $env:PYTHONUTF8 = "1"
 $env:TORCHDYNAMO_DISABLE = "1"
 $env:TORCH_COMPILE_DISABLE = "1"
 
+# A Conda certificate override can break TLS for this project's non-Conda
+# Python. Remove it only from the child processes started by this script.
+if ($env:SSL_CERT_FILE -and
+    $env:SSL_CERT_FILE -match "(?i)[\\/]miniconda[^\\/]*[\\/]" -and
+    $Python -notmatch "(?i)[\\/]miniconda[^\\/]*[\\/]") {
+    Remove-Item Env:SSL_CERT_FILE
+}
+
 $Backend = Start-Process -FilePath $Python `
     -ArgumentList @("-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "$BackendPort") `
     -WorkingDirectory $BackendDir `

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from functools import lru_cache
 import time
@@ -11,6 +12,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from generation.schemas import ErrorResponse as GenerationErrorResponse
+from generation.planning import needs_planning
 from models.schemas import AskRequest, AskResponse
 from services.generation_service import GenerationService
 from services.retrieval_service import RetrievalService, RetrievalTimings
@@ -39,12 +41,34 @@ def ask(
     pipeline_started = time.perf_counter()
     request_id = payload.request_id or f"req_{uuid4().hex}"
     try:
-        bundle = retrieval_service.retrieve(
-            payload.question,
-            embedding_mode=payload.embedding_mode,
-            rewrite_mode=payload.rewrite_mode,
-            content_type=(payload.filters.content_type if payload.filters else None),
-        )
+        filters = payload.filters
+        single_type = filters.content_type if filters else None
+        multiple_types = tuple(filters.content_types) if filters and filters.content_types else None
+        if single_type and multiple_types:
+            return JSONResponse(
+                status_code=422,
+                content={"request_id": request_id, "error": "invalid_filters"},
+            )
+        retrieval_kwargs = {
+            "embedding_mode": payload.embedding_mode,
+            "rewrite_mode": "off",
+        }
+        if single_type or multiple_types:
+            bundle = retrieval_service.retrieve(
+                payload.question,
+                content_type=single_type,
+                content_types=multiple_types,
+                **retrieval_kwargs,
+            )
+        elif payload.rewrite_mode == "off" or (
+            payload.rewrite_mode != "always" and not needs_planning(payload.question)
+        ):
+            bundle = retrieval_service.retrieve(payload.question, **retrieval_kwargs)
+        else:
+            plan = generation_service.plan_retrieval(payload.question)
+            bundle = retrieval_service.retrieve_plan(
+                payload.question, plan, **retrieval_kwargs
+            )
     except Exception:
         logger.exception(
             "Task 2 retrieval failed for request_id=%s total_ms=%d",
@@ -57,6 +81,12 @@ def ask(
         )
 
     result = generation_service.generate(request_id, payload.question, bundle)
+    if isinstance(bundle.plan_diagnostics, dict):
+        logger.info(
+            "retrieval_plan request_id=%s diagnostics=%s",
+            request_id,
+            json.dumps(bundle.plan_diagnostics, ensure_ascii=False, separators=(",", ":")),
+        )
     _log_pipeline_timing(
         request_id,
         bundle,

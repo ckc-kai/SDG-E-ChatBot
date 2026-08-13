@@ -65,6 +65,31 @@ class AskRouterTests(unittest.TestCase):
     def test_rejects_missing_question(self):
         self.assertEqual(self.client.post("/api/ask", json={}).status_code, 422)
 
+    def test_accepts_multiple_content_types(self):
+        self.retrieval.retrieve.return_value = MagicMock()
+        self.generation.generate.return_value = AnswerResponse(
+            request_id="req_types", answer="ok", cited_chunk_ids=(), citations=(),
+            insufficient_context=False, model_id="fake", latency_ms=1,
+        )
+        response = self.client.post("/api/ask", json={
+            "request_id": "req_types", "question": "q",
+            "filters": {"content_types": ["narrative", "table"]},
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            self.retrieval.retrieve.call_args.kwargs["content_types"],
+            ("narrative", "table"),
+        )
+
+    def test_rejects_single_and_multiple_content_type_together(self):
+        response = self.client.post("/api/ask", json={
+            "question": "q", "filters": {
+                "content_type": "table", "content_types": ["narrative"]
+            },
+        })
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"], "invalid_filters")
+
 
 if __name__ == "__main__":
     unittest.main()

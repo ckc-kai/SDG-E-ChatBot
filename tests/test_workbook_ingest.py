@@ -6,7 +6,7 @@ from pathlib import Path
 
 from openpyxl import Workbook
 
-from retrieval.ingest.excel.workbook import build_workbook_chunks
+from retrieval.ingest.excel.workbook import _main_region_end, build_workbook_chunks
 
 
 class FakeTokenizer:
@@ -18,6 +18,10 @@ class FakeTokenizer:
 
 
 class WorkbookIngestTests(unittest.TestCase):
+    def test_main_region_ignores_isolated_cell_after_huge_gap(self):
+        self.assertEqual(_main_region_end({1, 2, 3, 1_048_565}), 3)
+        self.assertEqual(_main_region_end(set(range(1, 20_001))), 20_000)
+
     def test_preserves_sheet_rows_and_skips_empty_rows(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "sample.xlsx"

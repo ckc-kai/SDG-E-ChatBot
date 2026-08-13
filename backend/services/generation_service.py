@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import os
+import re
 import time
 
 from generation.adapters import adapt_ranked_results
@@ -17,6 +19,7 @@ from generation.schemas import (
 from generation.service import AnswerService
 from retrieval.query.pdf import EVIDENCE_GROUPS, EvidenceRetrievalResult
 from services.retrieval_service import RetrievalBundle
+from generation.planning import RetrievalPlan, build_retrieval_plan
 
 
 def interleave_grouped_results(evidence: EvidenceRetrievalResult) -> list:
@@ -35,11 +38,31 @@ def interleave_grouped_results(evidence: EvidenceRetrievalResult) -> list:
     ]
 
 
+def deduplicate_chunks(chunks: list[Chunk]) -> list[Chunk]:
+    """Keep the highest-ranked copy of identical evidence.
+
+    Task 2 may return the same text through multiple evidence groups or document
+    versions. Citation metadata stays on the retained chunk and never enters the
+    model prompt.
+    """
+    seen: set[str] = set()
+    unique: list[Chunk] = []
+    for chunk in chunks:
+        normalized = re.sub(r"\s+", " ", chunk.content).strip().casefold()
+        key = normalized or f"empty:{chunk.chunk_id}"
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(chunk)
+    return unique
+
+
 class GenerationService:
-    def __init__(self, answer_service: AnswerService | None = None):
+    def __init__(self, answer_service: AnswerService | None = None, planner_provider=None):
         self._answer_service = answer_service or AnswerService(
             create_provider_from_env()
         )
+        self._planner_provider = planner_provider or _create_planner_provider()
 
     def generate(
         self,
@@ -51,8 +74,12 @@ class GenerationService:
         adapter_started = time.perf_counter()
         ranked_results = interleave_grouped_results(bundle.evidence)
         chunks = list(adapt_ranked_results(ranked_results))
-        if bundle.verified_excel is not None:
-            chunks.insert(0, _verified_excel_chunk(bundle.verified_excel))
+        verified_items = bundle.verified_excels or (
+            (bundle.verified_excel,) if bundle.verified_excel is not None else ()
+        )
+        for answer in reversed(verified_items):
+            chunks.insert(0, _verified_excel_chunk(answer))
+        chunks = deduplicate_chunks(chunks)
         request = AnswerRequest(
             request_id=request_id,
             question=question,
@@ -72,6 +99,9 @@ class GenerationService:
             ),
         )
 
+    def plan_retrieval(self, question: str) -> RetrievalPlan:
+        return build_retrieval_plan(question, self._planner_provider)
+
     def warmup(self) -> None:
         """Warm providers that expose a no-answer local preload hook."""
         warmup = getattr(self._answer_service.provider, "warmup", None)
@@ -84,6 +114,15 @@ def _int_or_none(value) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _create_planner_provider():
+    provider_name = os.getenv("TASK3_PLANNER_PROVIDER", "ollama").strip().casefold()
+    values = dict(os.environ)
+    if provider_name == "ollama":
+        values["OLLAMA_MODEL"] = values.get("TASK3_PLANNER_MODEL", "qwen3:4b")
+        values["OLLAMA_MAX_TOKENS"] = values.get("TASK3_PLANNER_MAX_TOKENS", "500")
+    return create_provider_from_env(provider_name, environ=values)
 
 
 def _verified_excel_chunk(answer) -> Chunk:
