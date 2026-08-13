@@ -28,9 +28,9 @@ def contextual_embedding_text_for_model(
     """Compose context while guaranteeing that stored chunk text is not truncated.
 
     The complete document/section/chunk form is preferred. If it exceeds the
-    model limit, the supplementary source-filename line is removed first. The
-    full breadcrumb and chunk content are retained. Current 400-token chunks fit
-    after that fallback; the final guard raises instead of silently truncating.
+    model limit, optional context is removed in order: the source filename,
+    then the breadcrumb and ``Chunk:`` label. The stored chunk content is never
+    truncated. The final guard raises only when the content itself is too long.
     """
     def bounded_token_count(text: str) -> int:
         return len(
@@ -52,9 +52,17 @@ def contextual_embedding_text_for_model(
     parts.append(f"Chunk: {content}")
     contextual_text = "\n".join(parts)
     token_count = bounded_token_count(contextual_text)
-    if token_count > max_seq_length:
-        raise ValueError(
-            "Contextual embedding input exceeds the model limit even without the "
-            f"document line ({token_count} > {max_seq_length})."
-        )
-    return contextual_text
+    if token_count <= max_seq_length:
+        return contextual_text
+
+    # A chunk may sit exactly at the model's limit. In that case even the
+    # contextual labels can add one or more tokens, so fall back to the
+    # authoritative content alone rather than rejecting the whole document.
+    token_count = bounded_token_count(content)
+    if token_count <= max_seq_length:
+        return content
+
+    raise ValueError(
+        "Embedding input content exceeds the model limit "
+        f"({token_count} > {max_seq_length})."
+    )
