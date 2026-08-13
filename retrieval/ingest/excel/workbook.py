@@ -3,8 +3,10 @@
 The reviewed ``sdge_tableNN`` CSV pipeline remains the authoritative path for
 the quarterly-data-report tables.  This module covers additional workbooks in
 the local ``files/`` corpus without pretending they follow those contracts.
-Rows are preserved as labelled text and their exact sheet/row provenance is
-stored in ``structured_data``.
+Worksheet tables are rendered as Markdown with repeated headers and their exact
+cell grids/ranges are stored in ``structured_data``. Formula text and cached
+workbook values are both preserved when available. Irregular sheets still use
+generated column labels, so no non-empty cell is discarded.
 """
 
 from __future__ import annotations
@@ -12,14 +14,17 @@ from __future__ import annotations
 import argparse
 import hashlib
 import logging
-from xml.etree.ElementTree import iterparse
+import xml.sax
+from xml.sax.handler import ContentHandler
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Sequence
 
 from openpyxl import load_workbook
-from openpyxl.utils.cell import coordinate_to_tuple
+from openpyxl.styles.numbers import BUILTIN_FORMATS, is_date_format
+from openpyxl.utils.cell import coordinate_to_tuple, get_column_letter
+from openpyxl.utils.datetime import from_excel
 from psycopg2.extras import Json, execute_values
 from tqdm import tqdm
 
@@ -33,8 +38,9 @@ from retrieval.utils import connect_db, embedding_config, get_embedding_model
 
 
 logger = logging.getLogger(__name__)
-EXTRACTOR = "openpyxl-generic-v1"
-INGEST_RECIPE = "generic-xlsx-rows-v1"
+EXTRACTOR = "openpyxl-table-aware-v2"
+INGEST_RECIPE = "generic-xlsx-tables-v2"
+HEADER_SCAN_ROWS = 20
 
 
 @dataclass(frozen=True)
@@ -44,6 +50,23 @@ class WorkbookChunk:
     row_end: int
     content: str
     token_count: int
+    header_row_start: int | None
+    header_row_end: int | None
+    column_start: int
+    column_end: int
+    grid: tuple[tuple[str, ...], ...]
+    formula_grid: tuple[tuple[str | None, ...], ...]
+
+    @property
+    def cell_range(self) -> str:
+        first_row = min(
+            self.row_start,
+            self.header_row_start if self.header_row_start is not None else self.row_start,
+        )
+        return (
+            f"{get_column_letter(self.column_start)}{first_row}:"
+            f"{get_column_letter(self.column_end)}{self.row_end}"
+        )
 
 
 def _file_hash(path: Path) -> str:
@@ -62,54 +85,164 @@ def _cell_text(value: object) -> str:
     return " ".join(str(value).split())
 
 
-def _row_text(row_number: int, values: Sequence[object]) -> str:
-    cells = []
+def _markdown_cell(value: str) -> str:
+    return value.replace("|", "\\|").replace("\n", " ")
+
+
+def _markdown_row(values: Sequence[str]) -> str:
+    return "| " + " | ".join(_markdown_cell(value) for value in values) + " |"
+
+
+def _unique_headers(values: Sequence[object]) -> tuple[str, ...]:
+    """Return readable, unique labels, filling blank cells with Excel columns."""
+    seen: dict[str, int] = {}
+    labels: list[str] = []
     for index, value in enumerate(values, start=1):
-        text = _cell_text(value)
-        if text:
-            cells.append(f"C{index}={text}")
-    return f"Row {row_number}: " + " | ".join(cells)
+        base = _cell_text(value) or f"Column {get_column_letter(index)}"
+        seen[base] = seen.get(base, 0) + 1
+        labels.append(base if seen[base] == 1 else f"{base} ({seen[base]})")
+    return tuple(labels)
+
+
+def _header_row(rows: Sequence[tuple[int, Sequence[object]]]) -> int | None:
+    """Choose a conservative table header from the first populated rows.
+
+    A candidate needs at least two textual labels. The row with the most labels
+    wins; ties prefer the earliest row so ordinary tables are not mistaken for
+    later all-text data rows.
+    """
+    candidates: list[tuple[int, int, int]] = []
+    for row_number, values in rows[:HEADER_SCAN_ROWS]:
+        populated = [value for value in values if _cell_text(value)]
+        textual = [
+            value
+            for value in populated
+            if isinstance(value, str) and not value.startswith("=")
+        ]
+        if len(populated) >= 2 and len(textual) >= 2:
+            candidates.append((len(textual), len(populated), -row_number))
+    winner = max(candidates, default=(0, 0, 0))
+    return -winner[2] or None
+
+
+def _display_and_formulas(
+    formula_values: Sequence[object], cached_values: Sequence[object]
+) -> tuple[tuple[str, ...], tuple[str | None, ...]]:
+    display: list[str] = []
+    formulas: list[str | None] = []
+    for formula_value, cached_value in zip(formula_values, cached_values, strict=True):
+        is_formula = isinstance(formula_value, str) and formula_value.startswith("=")
+        formulas.append(formula_value if is_formula else None)
+        chosen = cached_value if is_formula and cached_value is not None else formula_value
+        display.append(_cell_text(chosen))
+    return tuple(display), tuple(formulas)
 
 
 def _token_count(tokenizer, text: str) -> int:
     return len(tokenizer.encode(text, add_special_tokens=True))
 
 
-def _nonempty_bounds(workbook, worksheet) -> tuple[int, int]:
-    """Return bounds based on values/formulas, ignoring formatting-only cells.
+class _SheetMetadataHandler(ContentHandler):
+    """Constant-memory scan of meaningful cells and formulas in sheet XML."""
 
-    Regulatory workbooks sometimes apply formatting to Excel's final row or
-    column. ``openpyxl`` then reports a million rows or 16,384 columns and its
-    read-only iterator materializes every missing cell. Reading the worksheet
-    XML directly lets us bound iteration by cells that contain actual data.
-    """
-    max_row = 0
-    max_column = 0
+    def __init__(self, workbook) -> None:
+        super().__init__()
+        self.workbook = workbook
+        self.max_row = 0
+        self.max_column = 0
+        self.formulas: dict[str, str] = {}
+        self.values: dict[str, object] = {}
+        self.coordinate: str | None = None
+        self.cell_type: str | None = None
+        self.style_id = 0
+        self.has_content = False
+        self.in_formula = False
+        self.in_value = False
+        self.in_inline_text = False
+        self.formula_parts: list[str] = []
+        self.value_parts: list[str] = []
+
+    def startElement(self, name, attrs) -> None:  # noqa: N802 - SAX API
+        if name == "c":
+            self.coordinate = attrs.get("r")
+            self.cell_type = attrs.get("t")
+            self.style_id = int(attrs.get("s", "0"))
+            self.has_content = False
+            self.formula_parts = []
+            self.value_parts = []
+        elif self.coordinate and name == "f":
+            self.in_formula = True
+            self.has_content = True
+        elif self.coordinate and name == "v":
+            self.in_value = True
+            self.has_content = True
+        elif self.coordinate and name == "t" and self.cell_type == "inlineStr":
+            self.in_inline_text = True
+            self.has_content = True
+
+    def characters(self, content: str) -> None:
+        if self.in_formula:
+            self.formula_parts.append(content)
+        if self.in_value or self.in_inline_text:
+            self.value_parts.append(content)
+
+    def endElement(self, name: str) -> None:  # noqa: N802 - SAX API
+        if name == "f":
+            self.in_formula = False
+        elif name == "v":
+            self.in_value = False
+        elif name == "t":
+            self.in_inline_text = False
+        elif name == "c":
+            if self.has_content and self.coordinate:
+                row, column = coordinate_to_tuple(self.coordinate)
+                self.max_row = max(self.max_row, row)
+                self.max_column = max(self.max_column, column)
+                formula = "".join(self.formula_parts).strip()
+                if formula:
+                    self.formulas[self.coordinate] = f"={formula}"
+                raw = "".join(self.value_parts)
+                if raw != "":
+                    self.values[self.coordinate] = self._value(raw)
+            self.coordinate = None
+            self.formula_parts = []
+            self.value_parts = []
+
+    def _value(self, raw: str) -> object:
+        if self.cell_type == "s":
+            try:
+                return self.workbook.shared_strings[int(raw)]
+            except (IndexError, ValueError):
+                return raw
+        if self.cell_type == "b":
+            return raw == "1"
+        if self.cell_type in {"str", "inlineStr", "e"}:
+            return raw
+        try:
+            number = float(raw)
+        except ValueError:
+            return raw
+        try:
+            style = self.workbook._cell_styles[self.style_id]
+            number_format = BUILTIN_FORMATS.get(style.numFmtId)
+            if number_format is None and style.numFmtId >= 164:
+                number_format = self.workbook._number_formats[style.numFmtId - 164]
+            if number_format and is_date_format(number_format):
+                return from_excel(number, self.workbook.epoch)
+        except (IndexError, TypeError, ValueError):
+            pass
+        return int(number) if number.is_integer() else number
+
+
+def _sheet_metadata(
+    workbook, worksheet
+) -> tuple[int, int, dict[str, str], dict[str, object]]:
+    handler = _SheetMetadataHandler(workbook)
+    parser = xml.sax.make_parser()
+    parser.setContentHandler(handler)
     with workbook._archive.open(worksheet._worksheet_path) as source:
-        for _, element in iterparse(source, events=("end",)):
-            local_name = element.tag.rsplit("}", 1)[-1]
-            if local_name == "c":
-                has_content = False
-                for child in element:
-                    child_name = child.tag.rsplit("}", 1)[-1]
-                    if child_name == "f":
-                        has_content = True
-                        break
-                    if child_name == "v" and child.text is not None:
-                        has_content = True
-                        break
-                    if child_name == "is" and "".join(child.itertext()).strip():
-                        has_content = True
-                        break
-                coordinate = element.attrib.get("r")
-                if has_content and coordinate:
-                    row, column = coordinate_to_tuple(coordinate)
-                    max_row = max(max_row, row)
-                    max_column = max(max_column, column)
-                element.clear()
-            elif local_name == "row":
-                element.clear()
-    return max_row, max_column
+        parser.parse(source)
+    return handler.max_row, handler.max_column, handler.formulas, handler.values
 
 
 def _bounded_text_parts(tokenizer, prefix: str, text: str, max_tokens: int) -> list[str]:
@@ -134,22 +267,71 @@ def _bounded_text_parts(tokenizer, prefix: str, text: str, max_tokens: int) -> l
 
 
 def build_workbook_chunks(path: Path, tokenizer, max_tokens: int) -> list[WorkbookChunk]:
-    """Read every non-empty worksheet row and pack it into bounded chunks."""
-    workbook = load_workbook(path, read_only=True, data_only=False)
+    """Read every non-empty sheet cell into row-aware, table-like chunks."""
+    # Read cached/display values through openpyxl and formulas directly from the
+    # same XLSX XML archive. Opening data_only=True and data_only=False copies at
+    # once caused excessive memory use on large regulatory workbooks.
+    workbook = load_workbook(path, read_only=True, data_only=True)
     chunks: list[WorkbookChunk] = []
     try:
         for worksheet in workbook.worksheets:
-            max_row, max_column = _nonempty_bounds(workbook, worksheet)
+            max_row, max_column, formulas_by_cell, cached_by_cell = _sheet_metadata(
+                workbook, worksheet
+            )
             if max_row == 0 or max_column == 0:
                 continue
-            prefix = f"Workbook: {path.name}\nSheet: {worksheet.title}\n"
-            pending: list[tuple[int, str]] = []
+            populated: list[
+                tuple[int, tuple[str, ...], tuple[str | None, ...]]
+            ] = []
+            raw_for_header: list[tuple[int, Sequence[object]]] = []
+            for row_number in range(1, max_row + 1):
+                cached_row = tuple(
+                    cached_by_cell.get(f"{get_column_letter(column)}{row_number}")
+                    for column in range(1, max_column + 1)
+                )
+                formula_row = tuple(
+                    formulas_by_cell.get(
+                        f"{get_column_letter(column)}{row_number}", cached_value
+                    )
+                    for column, cached_value in enumerate(cached_row, start=1)
+                )
+                display, formulas = _display_and_formulas(formula_row, cached_row)
+                if not any(display):
+                    continue
+                populated.append((row_number, display, formulas))
+                raw_for_header.append((row_number, formula_row))
+
+            if not populated:
+                continue
+
+            detected_header_row = _header_row(raw_for_header)
+            detected = next(
+                (row for row in populated if row[0] == detected_header_row), None
+            )
+            headers = (
+                _unique_headers(detected[1])
+                if detected
+                else _unique_headers([None] * max_column)
+            )
+            prefix = (
+                f"Workbook: {path.name}\nSheet: {worksheet.title}\n"
+                f"Header row: {detected_header_row or 'generated'}\n"
+            )
+            separator = tuple("---" for _ in headers)
+            pending: list[tuple[int, tuple[str, ...], tuple[str | None, ...]]] = []
 
             def flush() -> None:
                 if not pending:
                     return
-                body = "\n".join(text for _, text in pending)
-                content = prefix + body
+                grid = (headers, *(row[1] for row in pending))
+                formula_grid = (
+                    tuple(None for _ in headers),
+                    *(row[2] for row in pending),
+                )
+                content = prefix + "\n".join(
+                    [_markdown_row(headers), _markdown_row(separator),
+                     *(_markdown_row(row[1]) for row in pending)]
+                )
                 chunks.append(
                     WorkbookChunk(
                         sheet=worksheet.title,
@@ -157,33 +339,36 @@ def build_workbook_chunks(path: Path, tokenizer, max_tokens: int) -> list[Workbo
                         row_end=pending[-1][0],
                         content=content,
                         token_count=_token_count(tokenizer, content),
+                        header_row_start=detected_header_row,
+                        header_row_end=detected_header_row,
+                        column_start=1,
+                        column_end=max_column,
+                        grid=grid,
+                        formula_grid=formula_grid,
                     )
                 )
                 pending.clear()
 
-            rows = worksheet.iter_rows(
-                min_row=1,
-                max_row=max_row,
-                min_col=1,
-                max_col=max_column,
-                values_only=True,
-            )
-            for row_number, row in enumerate(rows, start=1):
-                text = _row_text(row_number, row)
-                if text.endswith(": "):
+            for row_number, display, formulas in populated:
+                if detected_header_row is not None and row_number == detected_header_row:
                     continue
                 candidate = prefix + "\n".join(
-                    [*(item[1] for item in pending), text]
+                    [_markdown_row(headers), _markdown_row(separator),
+                     *( _markdown_row(item[1]) for item in pending),
+                     _markdown_row(display)]
                 )
                 if pending and _token_count(tokenizer, candidate) > max_tokens:
                     flush()
-                    candidate = prefix + text
+                    candidate = prefix + "\n".join(
+                        [_markdown_row(headers), _markdown_row(separator),
+                         _markdown_row(display)]
+                    )
                 if _token_count(tokenizer, candidate) > max_tokens:
-                    # Preserve a pathological wide row in bounded pieces.  The
-                    # sheet and row number are repeated in every piece.
+                    # Preserve a pathological wide row in bounded text pieces.
                     flush()
+                    row_text = f"Source row {row_number}: {_markdown_row(display)}"
                     for part in _bounded_text_parts(
-                        tokenizer, prefix, text, max_tokens
+                        tokenizer, prefix, row_text, max_tokens
                     ):
                         content = prefix + part
                         chunks.append(
@@ -193,10 +378,16 @@ def build_workbook_chunks(path: Path, tokenizer, max_tokens: int) -> list[Workbo
                                 row_number,
                                 content,
                                 _token_count(tokenizer, content),
+                                detected_header_row,
+                                detected_header_row,
+                                1,
+                                max_column,
+                                (headers, display),
+                                (tuple(None for _ in headers), formulas),
                             )
                         )
                 else:
-                    pending.append((row_number, text))
+                    pending.append((row_number, display, formulas))
             flush()
     finally:
         workbook.close()
@@ -269,10 +460,7 @@ def ingest_workbook(path: Path, conn, model, *, force: bool = False) -> str:
         for index, (chunk, raw, contextual) in enumerate(
             zip(chunks, raw_embeddings, contextual_embeddings, strict=True)
         ):
-            breadcrumb = (
-                f"{path.name} > {chunk.sheet} > rows "
-                f"{chunk.row_start}-{chunk.row_end}"
-            )
+            breadcrumb = f"{path.name} > {chunk.sheet} > {chunk.cell_range}"
             rows.append(
                 (
                     document_id,
@@ -285,14 +473,23 @@ def ingest_workbook(path: Path, conn, model, *, force: bool = False) -> str:
                     "excel_card",
                     chunk.content,
                     None,
-                    f"{chunk.sheet}, rows {chunk.row_start}-{chunk.row_end}",
+                    f"{chunk.sheet}, {chunk.cell_range}",
                     Json(
                         {
-                            "kind": "workbook_rows",
+                            "kind": "workbook_table",
                             "source_file": path.name,
                             "sheet": chunk.sheet,
+                            "cell_range": chunk.cell_range,
+                            "header_row_start": chunk.header_row_start,
+                            "header_row_end": chunk.header_row_end,
                             "row_start": chunk.row_start,
                             "row_end": chunk.row_end,
+                            "column_start": chunk.column_start,
+                            "column_end": chunk.column_end,
+                            "grid": [list(row) for row in chunk.grid],
+                            "formula_grid": [
+                                list(row) for row in chunk.formula_grid
+                            ],
                         }
                     ),
                     None,
