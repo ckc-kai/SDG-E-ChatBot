@@ -18,6 +18,7 @@ execution lives in ``retrieval.query.excel``.
 import argparse
 import json
 import logging
+import math
 import re
 from dataclasses import dataclass, field, replace
 
@@ -61,6 +62,11 @@ EMBEDDING_MODEL_NAME = _embedding_config["name"]
 CAPTION_RERANK_WEIGHT = float(_retrieval_config.get("caption_rerank_weight", 0.25))
 LEXICAL_CAPTION_WEIGHT = float(_retrieval_config.get("lexical_caption_weight", 4.0))
 LEXICAL_HINT_WEIGHT = float(_retrieval_config.get("lexical_hint_weight", 0.25))
+_lexical_query_mode = _retrieval_config.get("lexical_query_mode", "focused")
+LEXICAL_QUERY_MODE = (
+    "off" if _lexical_query_mode is False else str(_lexical_query_mode).lower()
+)
+RERANK_BATCH_SIZE = int(_retrieval_config.get("rerank_batch_size", 8))
 DEDUPLICATE_EXACT_CONTENT = bool(
     _retrieval_config.get("deduplicate_exact_content", True)
 )
@@ -140,6 +146,19 @@ _LEXICAL_STOPWORDS = {
     "who",
     "with",
     "would",
+}
+_LEXICAL_GENERIC_TERMS = {
+    "compare",
+    "explain",
+    "mitigation",
+    "plan",
+    "provide",
+    "report",
+    "review",
+    "risk",
+    "sdge",
+    "wildfire",
+    "wmp",
 }
 
 _REWRITE_MODES = {"auto", "off", "always"}
@@ -276,6 +295,45 @@ def _needs_decomposition(question: str) -> bool:
     return _decomposition_reason(question) is not None
 
 
+@dataclass(frozen=True)
+class SourceRole:
+    """A document role explicitly required by the user's question."""
+
+    name: str
+    query: str
+    filename_patterns: tuple[str, ...]
+
+
+def required_source_roles(question: str) -> tuple[SourceRole, ...]:
+    """Route explicit OEIS/guideline comparisons without a model call."""
+    normalized = " ".join(question.strip().split())
+    lowered = normalized.casefold()
+    if "oeis" not in lowered or "guideline" not in lowered:
+        return ()
+    return (
+        SourceRole(
+            name="oeis_decision",
+            query=(
+                "2023-2025 OEIS decision areas for continued improvement risk "
+                "methodology mitigation selection prioritization"
+            ),
+            filename_patterns=(
+                "FINAL_SDGE_20232025_WMP_Decision_and_Cover_Letter.pdf",
+            ),
+        ),
+        SourceRole(
+            name="wmp_guidelines",
+            query=(
+                "2026-2028 WMP guidelines requirements risk methodology activity "
+                "selection prioritization scheduling risk reduction"
+            ),
+            filename_patterns=(
+                "FINAL 2026-2028_Wildfire_Mitigation_Plan_Guidelines.pdf",
+            ),
+        ),
+    )
+
+
 def _deduplicate_subquestions(question: str, sub_questions: list[str]) -> list[str]:
     seen = {question.casefold()}
     unique: list[str] = []
@@ -403,6 +461,7 @@ def _search_by_vector(
     *,
     embedding_mode: str,
     content_types: tuple[str, ...] | None = None,
+    source_patterns: tuple[str, ...] | None = None,
     validate_embedding: bool = True,
 ) -> list[QueryObject]:
     embedding_column = (
@@ -420,10 +479,13 @@ def _search_by_vector(
     if parameterized_type_filter:
         type_filter = "AND c.content_type = ANY(%s)"
     type_filter = type_filter or ""
+    source_filter = "AND d.filename ILIKE ANY(%s)" if source_patterns else ""
     params: list = [query_vector]
     if parameterized_type_filter:
         assert content_types is not None
         params.append(list(content_types))
+    if source_patterns:
+        params.append(list(source_patterns))
     params.append(top_k)
     with conn.cursor() as cur:
         cur.execute(
@@ -435,7 +497,7 @@ def _search_by_vector(
                    c.{embedding_column} <=> %s AS distance
             FROM chunks c
             JOIN documents d ON d.id = c.document_id
-            WHERE true {type_filter}
+            WHERE true {type_filter} {source_filter}
             ORDER BY distance
             LIMIT %s
             """,
@@ -487,7 +549,7 @@ def search(
     )
 
 
-def _lexical_query(question: str) -> str:
+def _broad_lexical_query(question: str) -> str:
     """Build an OR query from meaningful terms, including likely acronyms."""
     tokens: list[str] = []
     seen: set[str] = set()
@@ -502,6 +564,33 @@ def _lexical_query(question: str) -> str:
             seen.add(acronym)
             tokens.append(acronym)
     return " OR ".join(tokens)
+
+
+def _focused_lexical_query(question: str, max_terms: int = 4) -> str:
+    """Build a selective AND query; dense channels preserve broad recall."""
+    tokens = [
+        token.casefold()
+        for token in re.findall(r"[A-Za-z0-9]+", question)
+        if len(token) >= 3
+        and token.casefold() not in _LEXICAL_STOPWORDS
+        and token.casefold() not in _LEXICAL_GENERIC_TERMS
+    ]
+    unique = list(dict.fromkeys(tokens))
+    numeric = [token for token in unique if any(char.isdigit() for char in token)]
+    distinctive = sorted(
+        (token for token in unique if token not in numeric),
+        key=lambda token: (-len(token), unique.index(token)),
+    )
+    selected = [*numeric, *distinctive][:max_terms]
+    return " ".join(selected)
+
+
+def _lexical_query(question: str) -> str:
+    if LEXICAL_QUERY_MODE == "off":
+        return ""
+    if LEXICAL_QUERY_MODE == "focused":
+        return _focused_lexical_query(question)
+    return _broad_lexical_query(question)
 
 
 def _search_lexical(
@@ -743,7 +832,7 @@ def rerank(
     if not candidates:
         return []
     pairs = [(question, _candidate_text(candidate)) for candidate in candidates]
-    scores = get_reranker_model().predict(pairs)
+    scores = get_reranker_model().predict(pairs, batch_size=RERANK_BATCH_SIZE)
     ranked = sorted(
         (
             (
@@ -1063,8 +1152,41 @@ def retrieve_evidence(
         raise ValueError(
             f"Unknown evidence group(s) {unknown}; expected {list(EVIDENCE_GROUPS)}"
         )
+    if not groups:
+        return EvidenceRetrievalResult(question=question, groups={})
 
     retrieved: dict[str, EvidenceGroup] = {}
+    source_roles = required_source_roles(question)
+    if source_roles:
+        modes = (
+            ("raw", "contextual") if embedding_mode == "hybrid" else (embedding_mode,)
+        )
+        for mode in modes:
+            _validate_embedding_mode(conn, mode)
+        for group in groups:
+            selected_types = EVIDENCE_GROUP_CONTENT_TYPES[group]
+            if group in {EXCEL, "figure"}:
+                results: list[RankedResult] = []
+                diagnostics = RetrievalDiagnostics([], [], [], [], [])
+            else:
+                results, diagnostics = _retrieve_source_role_group(
+                    source_roles,
+                    conn,
+                    content_types=selected_types,
+                    retrieval_top_k=retrieval_top_k,
+                    rerank_top_k=rerank_top_k,
+                    embedding_mode=embedding_mode,
+                    rrf_k=rrf_k,
+                    hybrid_pool_mode=hybrid_pool_mode,
+                )
+            retrieved[group] = EvidenceGroup(
+                name=group,
+                content_types=selected_types,
+                results=results,
+                diagnostics=diagnostics,
+            )
+        return EvidenceRetrievalResult(question=question, groups=retrieved)
+
     # Rewriting is a question-level operation. Reuse it across evidence groups
     # so enabling the optional Claude path never multiplies API calls by the
     # number of independently ranked corpora.
@@ -1100,6 +1222,94 @@ def retrieve_evidence(
             diagnostics=diagnostics,
         )
     return EvidenceRetrievalResult(question=question, groups=retrieved)
+
+
+def _retrieve_source_role_group(
+    source_roles: tuple[SourceRole, ...],
+    conn,
+    *,
+    content_types: tuple[str, ...],
+    retrieval_top_k: int,
+    rerank_top_k: int,
+    embedding_mode: str,
+    rrf_k: int,
+    hybrid_pool_mode: str,
+) -> tuple[list[RankedResult], RetrievalDiagnostics]:
+    """Retrieve each required document role independently and preserve coverage."""
+    model = get_embedding_model()
+    per_role_top_k = max(1, math.ceil(rerank_top_k / len(source_roles)))
+    ranked_by_role: list[list[RankedResult]] = []
+    candidate_sets: list[list[QueryObject]] = []
+    channel_sets: list[dict[str, list[QueryObject]]] = []
+    pooled: list[QueryObject] = []
+
+    for role in source_roles:
+        vector = model.encode(role.query, normalize_embeddings=True)
+        channels: dict[str, list[QueryObject]] = {}
+        if embedding_mode == "hybrid":
+            raw = _search_by_vector(
+                vector,
+                retrieval_top_k,
+                conn,
+                embedding_mode="raw",
+                content_types=content_types,
+                source_patterns=role.filename_patterns,
+                validate_embedding=False,
+            )
+            contextual = _search_by_vector(
+                vector,
+                retrieval_top_k,
+                conn,
+                embedding_mode="contextual",
+                content_types=content_types,
+                source_patterns=role.filename_patterns,
+                validate_embedding=False,
+            )
+            channels = {"raw": raw, "contextual": contextual}
+            candidates = (
+                raw_preserving_union(raw, contextual)
+                if hybrid_pool_mode == "union"
+                else reciprocal_rank_fusion(
+                    [raw, contextual], retrieval_top_k, rrf_k=rrf_k
+                )
+            )
+        else:
+            candidates = _search_by_vector(
+                vector,
+                retrieval_top_k,
+                conn,
+                embedding_mode=embedding_mode,
+                content_types=content_types,
+                source_patterns=role.filename_patterns,
+                validate_embedding=False,
+            )
+            channels = {embedding_mode: candidates}
+        candidate_sets.append(candidates)
+        channel_sets.append(channels)
+        pooled.extend(candidates)
+        ranked_by_role.append(rerank(role.query, candidates, top_k=per_role_top_k))
+
+    results = deduplicate_ranked(_interleave_ranked_groups(ranked_by_role))[
+        :rerank_top_k
+    ]
+    diagnostics = RetrievalDiagnostics(
+        search_queries=[role.query for role in source_roles],
+        candidate_sets=candidate_sets,
+        channel_candidate_sets=channel_sets,
+        pooled_candidates=_merge_candidates([pooled]),
+        reranked_candidates=results,
+    )
+    return results, diagnostics
+
+
+def _interleave_ranked_groups(
+    groups: list[list[RankedResult]],
+) -> list[RankedResult]:
+    """Preserve required-role coverage under a small downstream token budget."""
+    longest = max((len(group) for group in groups), default=0)
+    return [
+        group[rank] for rank in range(longest) for group in groups if rank < len(group)
+    ]
 
 
 def retrieve_configured(

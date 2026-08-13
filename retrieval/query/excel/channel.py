@@ -35,8 +35,10 @@ from retrieval.query.excel.query import (
     ExcelQueryPlan,
     Filter,
     PlanError,
+    bind_entity_key,
     bind_dimensions,
     bind_period,
+    bind_years,
     dimension_vocabulary,
     execute_plan,
 )
@@ -54,6 +56,29 @@ ENTITY_TABLES = {1: "wmp_activity", 13: "work_order"}
 # execution success is weak evidence there. Require the question to actually ask
 # for a count, otherwise a narrative question can be handed a meaningless tally.
 _COUNT_CUES = ("how many", "number of", "count of", "how much")
+_ENTITY_HISTORY_CUES = (
+    "target",
+    "actual",
+    "progress",
+    "percent complete",
+    "completion",
+    "cumulative",
+)
+_TABLE1_HISTORY_FIELDS = (
+    "annual_quant_target",
+    "quant_actual_progress_q1_4",
+    "quant_target_units",
+)
+
+
+def is_entity_history_question(question: str) -> bool:
+    """True when an exact WMP id and time-series value request are explicit."""
+    lowered = question.casefold()
+    return (
+        bind_entity_key(question) is not None
+        and bool(bind_years(question))
+        and any(cue in lowered for cue in _ENTITY_HISTORY_CUES)
+    )
 
 
 @dataclass
@@ -80,6 +105,65 @@ class ExcelDecline:
     card_score: float | None = None
 
 
+def _exact_entity_card(conn, entity_key: str) -> tuple[int, str, dict] | None:
+    """Resolve an exact reviewed entity card without semantic retrieval."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id, caption, structured_data
+            FROM chunks
+            WHERE content_type = 'excel_card'
+              AND structured_data ->> 'entity_key' = %s
+            ORDER BY id
+            LIMIT 1
+            """,
+            (entity_key,),
+        )
+        row = cur.fetchone()
+    return (row[0], row[1] or "", row[2] or {}) if row else None
+
+
+def _missing_requested_years(
+    bound: dict[str, Any], result: ExcelExecutionResult
+) -> tuple[int, ...]:
+    requested = tuple(bound.get("reporting_years", ()))
+    if not requested or "reporting_year" not in result.columns:
+        return ()
+    year_index = result.columns.index("reporting_year")
+    returned = {int(row[year_index]) for row in result.rows}
+    return tuple(year for year in requested if year not in returned)
+
+
+def _has_complete_history_values(result: ExcelExecutionResult) -> bool:
+    """The deterministic history renderer requires target, actual, and unit."""
+    required = ("selected_0", "selected_1", "selected_2")
+    if not all(column in result.columns for column in required):
+        return False
+    indexes = tuple(result.columns.index(column) for column in required)
+    return bool(result.rows) and all(
+        all(row[index] is not None for index in indexes) for row in result.rows
+    )
+
+
+def _keep_requested_years(bound: dict[str, Any], result: ExcelExecutionResult) -> None:
+    """Remove interval rows that were not explicitly requested by the user."""
+    requested = set(bound.get("reporting_years", ()))
+    if not requested or "reporting_year" not in result.columns:
+        return
+    year_index = result.columns.index("reporting_year")
+    kept_indexes = [
+        index
+        for index, row in enumerate(result.rows)
+        if int(row[year_index]) in requested
+    ]
+    result.rows = [result.rows[index] for index in kept_indexes]
+    result.provenance = [
+        result.provenance[index]
+        for index in kept_indexes
+        if index < len(result.provenance)
+    ]
+
+
 def _plan_for_card(
     question: str,
     card_data: dict,
@@ -92,6 +176,41 @@ def _plan_for_card(
 
     is_entity_table = table_number in ENTITY_TABLES
     bound: dict[str, Any] = dict(bind_period(question))
+    entity_key = bind_entity_key(question)
+    years = bind_years(question)
+    lowered = question.casefold()
+
+    if (
+        table_number == 1
+        and entity_key
+        and years
+        and any(cue in lowered for cue in _ENTITY_HISTORY_CUES)
+    ):
+        bound.update(entity_key=entity_key, reporting_years=years)
+        filters = [Filter("entity_key", value=entity_key)]
+        if len(years) == 1:
+            filters.append(Filter("reporting_year", value=years[0]))
+        else:
+            filters.extend(
+                [
+                    Filter("reporting_year", operator="gte", value=years[0]),
+                    Filter("reporting_year", operator="lte", value=years[-1]),
+                ]
+            )
+        return (
+            ExcelQueryPlan(
+                table_number=table_number,
+                source=RECORDS,
+                operation="select",
+                filters=tuple(filters),
+                group_by=("reporting_year", "record_id"),
+                select_json_keys=_TABLE1_HISTORY_FIELDS,
+                descending=False,
+                limit=max(3, years[-1] - years[0] + 1),
+            ),
+            bound,
+        )
+
     vocabulary = dimension_vocabulary(
         conn, table_number, source=RECORDS if is_entity_table else FACTS
     )
@@ -125,6 +244,49 @@ def answer_from_excel(
 ) -> ExcelAnswer | ExcelDecline:
     """Attempt an exact Excel answer; decline rather than guess."""
     contracts = contracts or load_contracts()
+    lowered = question.lower()
+    entity_key = bind_entity_key(question)
+    if entity_key and is_entity_history_question(question):
+        exact_card = _exact_entity_card(conn, entity_key)
+        if exact_card is None:
+            return ExcelDecline(f"no reviewed Excel entity card for {entity_key}")
+        card_chunk_id, card_caption, card_data = exact_card
+        try:
+            plan, bound = _plan_for_card(question, card_data, conn, contracts)
+            result = execute_plan(plan, conn, contracts=contracts)
+        except (PlanError, KeyError, ValueError) as exc:
+            return ExcelDecline(f"exact entity plan refused: {exc}", card_caption, 1.0)
+        _keep_requested_years(bound, result)
+        if not result.is_answer:
+            return ExcelDecline(
+                "exact entity plan returned no usable value", card_caption, 1.0
+            )
+        missing_years = _missing_requested_years(bound, result)
+        if missing_years:
+            return ExcelDecline(
+                "missing requested years: "
+                + ", ".join(str(year) for year in missing_years),
+                card_caption,
+                1.0,
+            )
+        if not _has_complete_history_values(result):
+            return ExcelDecline(
+                "one or more requested years lacks target, actual, or unit data",
+                card_caption,
+                1.0,
+            )
+        return ExcelAnswer(
+            question=question,
+            card_chunk_id=card_chunk_id,
+            card_caption=card_caption,
+            card_score=1.0,
+            table_number=plan.table_number,
+            semantic_metric_key=plan.semantic_metric_key,
+            plan=plan,
+            result=result,
+            bound=bound,
+        )
+
     cards = retrieve(question, conn, rewrite_mode="off", lanes=(EXCEL,))
     if not cards:
         return ExcelDecline("no Excel card retrieved")
@@ -145,18 +307,22 @@ def answer_from_excel(
         )
 
     table_number = card_data.get("table_number")
-    lowered = question.lower()
-    if table_number in ENTITY_TABLES and not any(
-        cue in lowered for cue in _COUNT_CUES
+    is_entity_history = (
+        table_number == 1
+        and bind_entity_key(question) is not None
+        and any(cue in lowered for cue in _ENTITY_HISTORY_CUES)
+    )
+    if (
+        table_number in ENTITY_TABLES
+        and not is_entity_history
+        and not any(cue in lowered for cue in _COUNT_CUES)
     ):
         return ExcelDecline(
             "entity-table card but the question does not ask for a count",
             best.query_object.caption,
             best.rerank_score,
         )
-    if table_number not in ENTITY_TABLES and not card_data.get(
-        "semantic_metric_key"
-    ):
+    if table_number not in ENTITY_TABLES and not card_data.get("semantic_metric_key"):
         return ExcelDecline(
             "card names no metric concept, so a sum would span the whole table",
             best.query_object.caption,
@@ -166,12 +332,19 @@ def answer_from_excel(
     try:
         plan, bound = _plan_for_card(question, card_data, conn, contracts)
     except (PlanError, KeyError, ValueError) as exc:
-        return ExcelDecline(f"could not build a valid plan: {exc}",
-                            best.query_object.caption, best.rerank_score)
+        return ExcelDecline(
+            f"could not build a valid plan: {exc}",
+            best.query_object.caption,
+            best.rerank_score,
+        )
 
     # A period is the minimum specificity for a defensible exact answer;
     # without one, a "sum" silently spans every year in the corpus.
-    if "reporting_year" not in bound and "source_vintage_year" not in bound:
+    if not {
+        "reporting_year",
+        "reporting_years",
+        "source_vintage_year",
+    }.intersection(bound):
         return ExcelDecline(
             "question names no reporting period",
             best.query_object.caption,
@@ -182,12 +355,16 @@ def answer_from_excel(
         result = execute_plan(plan, conn, contracts=contracts)
     except PlanError as exc:
         # Includes the deliberate tables 14/15 year-basis clarification.
-        return ExcelDecline(f"plan refused: {exc}",
-                            best.query_object.caption, best.rerank_score)
+        return ExcelDecline(
+            f"plan refused: {exc}", best.query_object.caption, best.rerank_score
+        )
 
     if not result.is_answer:
-        return ExcelDecline("plan returned no usable value",
-                            best.query_object.caption, best.rerank_score)
+        return ExcelDecline(
+            "plan returned no usable value",
+            best.query_object.caption,
+            best.rerank_score,
+        )
 
     # "Nothing matched" is not evidence that the question was an Excel question.
     # An entity count of zero, or a sum with no contributing facts, means the

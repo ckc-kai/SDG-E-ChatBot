@@ -41,6 +41,7 @@ def validate_and_hydrate_citations(
                 row_start=metadata.row_start,
                 row_end=metadata.row_end,
                 breadcrumb=metadata.breadcrumb,
+                contributing_sources=metadata.contributing_sources,
             )
         )
     return tuple(valid_ids), tuple(citations), tuple(warnings)

@@ -43,15 +43,38 @@ OPERATORS = {"eq": "=", "ne": "<>", "gt": ">", "gte": ">=", "lt": "<", "lte": "<
 # Typed columns that may be filtered, grouped, or ordered on. Anything else must
 # be addressed through the jsonb payload, by parameterized key.
 FACT_COLUMNS = {
-    "table_number", "record_id", "source_metric_number", "series_id",
-    "semantic_metric_key", "metric_name", "measure_name", "utility_id",
-    "reporting_year", "reporting_quarter", "source_vintage_year", "year_basis",
-    "period_end_date", "hftd_tier", "line_type", "unit",
+    "table_number",
+    "record_id",
+    "source_metric_number",
+    "series_id",
+    "semantic_metric_key",
+    "metric_name",
+    "measure_name",
+    "utility_id",
+    "reporting_year",
+    "reporting_quarter",
+    "source_vintage_year",
+    "year_basis",
+    "period_end_date",
+    "hftd_tier",
+    "line_type",
+    "unit",
 }
 RECORD_COLUMNS = {
-    "table_number", "record_id", "entity_key", "entity_type", "title",
-    "utility_id", "reporting_year", "reporting_quarter", "hftd_tier",
-    "line_type", "date_start", "date_due", "date_end", "status",
+    "table_number",
+    "record_id",
+    "entity_key",
+    "entity_type",
+    "title",
+    "utility_id",
+    "reporting_year",
+    "reporting_quarter",
+    "hftd_tier",
+    "line_type",
+    "date_start",
+    "date_due",
+    "date_end",
+    "status",
 }
 JSON_COLUMN = {FACTS: "dimensions", RECORDS: "attributes"}
 VALUE_COLUMN = {FACTS: "value_numeric", RECORDS: None}
@@ -141,7 +164,7 @@ def _validate(plan: ExcelQueryPlan, contract: TableContract) -> None:
             raise PlanError(f"unknown operator {flt.operator!r}")
         if not flt.json_key and flt.field not in allowed:
             raise PlanError(f"{flt.field!r} is not a filterable column")
-    for column in (*plan.group_by, *( (plan.order_by,) if plan.order_by else () )):
+    for column in (*plan.group_by, *((plan.order_by,) if plan.order_by else ())):
         if column not in allowed and column not in {"value", "aggregate"}:
             raise PlanError(f"{column!r} is not groupable/orderable")
     if plan.select_json_keys and plan.operation != "select":
@@ -163,7 +186,9 @@ def _validate(plan: ExcelQueryPlan, contract: TableContract) -> None:
             )
 
 
-def compile_plan(plan: ExcelQueryPlan, contract: TableContract) -> tuple[str, list[Any]]:
+def compile_plan(
+    plan: ExcelQueryPlan, contract: TableContract
+) -> tuple[str, list[Any]]:
     """Return parameterized SQL and its parameters. Identifiers are allowlisted."""
     _validate(plan, contract)
     source = plan.source
@@ -303,15 +328,23 @@ def execute_plan(
                 meta_params,
             )
             contributing, revision_id = cur.fetchone()
+            provenance_limit = plan.limit if plan.operation == "select" else 5
+            provenance_order = ""
+            if plan.operation == "select":
+                order_columns = plan.group_by or ("record_id",)
+                provenance_order = " ORDER BY " + ", ".join(
+                    f"rec.{column}" for column in order_columns
+                )
             cur.execute(
                 f"""
                 SELECT rec.provenance
                 FROM excel_records rec
                 JOIN excel_revisions r ON r.id = rec.revision_id
                 WHERE {meta_where}
-                LIMIT 5
+                {provenance_order}
+                LIMIT %s
                 """,
-                meta_params,
+                [*meta_params, provenance_limit],
             )
             provenance = [row[0] or {} for row in cur.fetchall()]
 
@@ -381,15 +414,33 @@ def _record_scope(
 # --------------------------------------------------------------------------
 
 _YEAR_RE = re.compile(r"\b(20[2-3][0-9])\b")
+_YEAR_RANGE_RE = re.compile(r"\b(20[2-3][0-9])\s*[-\u2013\u2014]\s*(20[2-3][0-9])\b")
 _QUARTER_RE = re.compile(r"\bQ([1-4])\b", re.IGNORECASE)
+_WMP_ENTITY_RE = re.compile(r"\bWMP\.\d+[A-Za-z]?\b", re.IGNORECASE)
+
+
+def bind_years(question: str) -> tuple[int, ...]:
+    """Return every explicitly requested year, expanding inclusive ranges."""
+    years = {int(value) for value in _YEAR_RE.findall(question)}
+    for start_text, end_text in _YEAR_RANGE_RE.findall(question):
+        start, end = int(start_text), int(end_text)
+        if start <= end and end - start <= 10:
+            years.update(range(start, end + 1))
+    return tuple(sorted(years))
+
+
+def bind_entity_key(question: str) -> str | None:
+    """Extract an exact WMP activity identifier without an LLM call."""
+    match = _WMP_ENTITY_RE.search(question)
+    return match.group(0).upper() if match else None
 
 
 def bind_period(question: str) -> dict[str, int]:
     """Extract only a 4-digit year and Q1-Q4 token. Nothing else is bound."""
     bound: dict[str, int] = {}
-    years = _YEAR_RE.findall(question)
-    if len(set(years)) == 1:
-        bound["reporting_year"] = int(years[0])
+    years = bind_years(question)
+    if len(years) == 1:
+        bound["reporting_year"] = years[0]
     quarters = _QUARTER_RE.findall(question)
     if len(set(quarters)) == 1:
         bound["reporting_quarter"] = int(quarters[0])

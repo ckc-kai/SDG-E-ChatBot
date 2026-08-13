@@ -5,14 +5,25 @@ import unittest
 from dataclasses import dataclass
 
 from generation.adapters import adapt_ranked_result
-from generation.evaluation import evaluate_benchmark, request_from_benchmark_row, score_response
+from generation.citation_validation import validate_and_hydrate_citations
+from generation.evaluation import (
+    evaluate_benchmark,
+    request_from_benchmark_row,
+    score_response,
+)
 from generation.prompting import (
     INSUFFICIENT_CONTEXT_ANSWER,
     build_prompt,
     select_prompt_chunks,
 )
 from generation.providers.mock import RecordingScriptedMockProvider
-from generation.schemas import AnswerRequest, Chunk, ChunkMetadata, ErrorResponse
+from generation.schemas import (
+    AnswerRequest,
+    Chunk,
+    ChunkMetadata,
+    ErrorResponse,
+    ModelAnswer,
+)
 from generation.service import AnswerService, ModelOutputError, parse_model_answer
 
 
@@ -87,7 +98,9 @@ class PromptTests(unittest.TestCase):
         self.assertIn("Do not add unrelated details", prompt)
         self.assertNotIn('"answer":"string"', prompt)
 
-    def test_prompt_includes_source_but_excludes_display_and_ranking_metadata(self) -> None:
+    def test_prompt_includes_source_but_excludes_display_and_ranking_metadata(
+        self,
+    ) -> None:
         prompt = build_prompt(sample_request())
         self.assertIn('"context":"8 Wildfire Mitigations', prompt)
         self.assertIn('"source":"WMP.pdf"', prompt)
@@ -110,9 +123,7 @@ class PromptTests(unittest.TestCase):
         prompt = build_prompt(
             AnswerRequest(request_id="req_ranked", question="Question?", chunks=chunks)
         )
-        self.assertIn(
-            '"allowed_citation_ids":["1","2","3","4","5","6","7"]', prompt
-        )
+        self.assertIn('"allowed_citation_ids":["1","2","3","4","5","6","7"]', prompt)
         self.assertIn('"id":"7"', prompt)
 
     def test_prompt_stops_before_exceeding_evidence_token_budget(self) -> None:
@@ -126,7 +137,9 @@ class PromptTests(unittest.TestCase):
             )
             for index in range(1, 4)
         )
-        request = AnswerRequest(request_id="req_budget", question="Question?", chunks=chunks)
+        request = AnswerRequest(
+            request_id="req_budget", question="Question?", chunks=chunks
+        )
         selected = select_prompt_chunks(
             request,
             prompt_token_budget=1000,
@@ -144,7 +157,9 @@ class PromptTests(unittest.TestCase):
             )
             for index, token_count in ((1, 600), (2, 600), (3, 200))
         )
-        request = AnswerRequest(request_id="req_budget", question="Question?", chunks=chunks)
+        request = AnswerRequest(
+            request_id="req_budget", question="Question?", chunks=chunks
+        )
         selected = select_prompt_chunks(
             request,
             prompt_token_budget=1100,
@@ -162,7 +177,9 @@ class PromptTests(unittest.TestCase):
             )
             for index in range(1, 3)
         )
-        request = AnswerRequest(request_id="req_safety", question="Question?", chunks=chunks)
+        request = AnswerRequest(
+            request_id="req_safety", question="Question?", chunks=chunks
+        )
         without_margin = select_prompt_chunks(
             request,
             prompt_token_budget=1000,
@@ -183,7 +200,9 @@ class PromptTests(unittest.TestCase):
             content="x" * 1000,
             metadata=ChunkMetadata(token_count=250),
         )
-        request = AnswerRequest(request_id="req_large", question="Question?", chunks=(original,))
+        request = AnswerRequest(
+            request_id="req_large", question="Question?", chunks=(original,)
+        )
         selected = select_prompt_chunks(request, prompt_token_budget=450)
         self.assertLess(len(selected[0].content), 1000)
         self.assertGreater(len(selected[0].content), 0)
@@ -202,7 +221,9 @@ class ServiceTests(unittest.TestCase):
             )
             for index in range(1, 7)
         )
-        request = AnswerRequest(request_id="req_limit", question="Question?", chunks=chunks)
+        request = AnswerRequest(
+            request_id="req_limit", question="Question?", chunks=chunks
+        )
         provider = RecordingScriptedMockProvider(
             {
                 "answer": "Unsupported by the selected prompt evidence.",
@@ -232,7 +253,48 @@ class ServiceTests(unittest.TestCase):
         self.assertIsNotNone(provider.last_prompt)
         self.assertEqual(
             set(response.to_public_dict()),
-            {"request_id", "answer", "cited_chunk_ids", "citations", "insufficient_context"},
+            {
+                "request_id",
+                "answer",
+                "cited_chunk_ids",
+                "citations",
+                "insufficient_context",
+            },
+        )
+
+    def test_derived_citation_exposes_all_contributing_sources(self) -> None:
+        request = AnswerRequest(
+            request_id="req-derived",
+            question="What is the cumulative result?",
+            chunks=(
+                Chunk(
+                    source_id="derived",
+                    chunk_id="derived-1",
+                    content="Cumulative result",
+                    metadata=ChunkMetadata(
+                        source_file="Derived calculation",
+                        contributing_sources=(
+                            "2023.xlsx, Table 1, row 20",
+                            "2024.xlsx, Table 1, row 22",
+                        ),
+                    ),
+                ),
+            ),
+        )
+        model_answer = ModelAnswer(
+            answer="Result [derived-1]",
+            cited_chunk_ids=("derived-1",),
+            insufficient_context=False,
+        )
+
+        _, citations, _ = validate_and_hydrate_citations(request, model_answer)
+
+        self.assertEqual(
+            citations[0].contributing_sources,
+            (
+                "2023.xlsx, Table 1, row 20",
+                "2024.xlsx, Table 1, row 22",
+            ),
         )
 
     def test_answer_with_no_valid_citation_returns_public_error(self) -> None:
@@ -313,7 +375,9 @@ class ServiceTests(unittest.TestCase):
         with self.assertLogs("generation.service", level="ERROR") as captured:
             response = AnswerService(TimeoutProvider()).answer(sample_request())
         self.assertIsInstance(response, ErrorResponse)
-        self.assertNotIn("private provider timeout detail", json.dumps(response.to_public_dict()))
+        self.assertNotIn(
+            "private provider timeout detail", json.dumps(response.to_public_dict())
+        )
         self.assertIn("private provider timeout detail", "\n".join(captured.output))
 
     def test_markdown_fenced_json_is_accepted(self) -> None:

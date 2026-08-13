@@ -37,6 +37,7 @@ class Citation(BaseModel):
     row_start: int | None = None
     row_end: int | None = None
     breadcrumb: str | None = None
+    contributing_sources: list[str] = Field(default_factory=list)
 
 
 class AskResponse(BaseModel):
