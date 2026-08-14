@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from generation.providers import OllamaProvider, ProviderError, create_provider_from_env
+from generation.providers import GroqProvider, OllamaProvider, ProviderError, create_provider_from_env
 
 
 class ProviderFactoryTests(unittest.TestCase):
@@ -19,6 +19,13 @@ class ProviderFactoryTests(unittest.TestCase):
             environ={"TASK3_PROVIDER": "unknown", "OLLAMA_MODEL": "qwen3:4b"},
         )
         self.assertIsInstance(provider, OllamaProvider)
+
+    def test_selects_groq_from_environment_without_calling_api(self) -> None:
+        provider = create_provider_from_env(
+            environ={"TASK3_PROVIDER": "groq", "GROQ_API_KEY": "test-key"}
+        )
+        self.assertIsInstance(provider, GroqProvider)
+        self.assertEqual(provider.model_id, "groq/openai/gpt-oss-120b")
 
     def test_missing_selection_is_rejected(self) -> None:
         with self.assertRaisesRegex(ProviderError, "TASK3_PROVIDER is required"):

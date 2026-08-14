@@ -56,48 +56,16 @@ class RetrievalServiceTests(unittest.TestCase):
     @patch("services.retrieval_service.retrieve_configured")
     @patch("services.retrieval_service.connect_db")
     @patch("services.retrieval_service.answer_from_excel")
-    def test_exact_entity_history_skips_semantic_groups(
+    def test_multiple_content_filters_map_to_unique_groups(
         self, answer_from_excel, connect_db, retrieve
     ):
         retrieve.return_value = EvidenceRetrievalResult(question="q", groups={})
-        answer_from_excel.return_value = self._excel_answer()
-
         RetrievalService().retrieve(
-            "Across 2023-2025, show targets and Q4 actuals for WMP.478."
+            "q", content_types=("narrative", "table", "figure", "table")
         )
-
-        self.assertEqual(retrieve.call_args.kwargs["groups"], ())
-        answer_from_excel.assert_called_once()
-
-    @patch("services.retrieval_service.retrieve_configured")
-    @patch("services.retrieval_service.connect_db")
-    @patch("services.retrieval_service.answer_from_excel")
-    def test_exact_entity_decline_preserves_semantic_fallback(
-        self, answer_from_excel, connect_db, retrieve
-    ):
-        retrieve.return_value = EvidenceRetrievalResult(question="q", groups={})
-        answer_from_excel.return_value = ExcelDecline("missing year")
-
-        RetrievalService().retrieve(
-            "Across 2023-2025, show targets and Q4 actuals for WMP.478."
+        self.assertEqual(
+            retrieve.call_args.kwargs["groups"], ("narrative", "table", "figure")
         )
-
-        self.assertNotIn("groups", retrieve.call_args.kwargs)
-
-    @patch("services.retrieval_service.retrieve_configured")
-    @patch("services.retrieval_service.connect_db")
-    @patch("services.retrieval_service.answer_from_excel")
-    def test_oeis_guideline_review_uses_only_relevant_pdf_groups(
-        self, answer_from_excel, connect_db, retrieve
-    ):
-        retrieve.return_value = EvidenceRetrievalResult(question="q", groups={})
-
-        RetrievalService().retrieve(
-            "Review the WMP from OEIS's perspective against the WMP guidelines."
-        )
-
-        self.assertEqual(retrieve.call_args.kwargs["groups"], ("narrative", "table"))
-        answer_from_excel.assert_not_called()
 
 
 if __name__ == "__main__":

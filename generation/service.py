@@ -39,13 +39,14 @@ class ModelOutputError(ValueError):
 
 
 def normalize_insufficient_answer(model_answer: ModelAnswer) -> ModelAnswer:
-    """Make insufficient-context output deterministic and citation-free.
+    """Keep cited partial findings; normalize a citation-free refusal.
 
-    Providers may explain their reasoning or cite partial evidence even after
-    deciding the full question is unsupported. That text is not a grounded
-    answer, so it must never be exposed through the public response.
+    An incomplete answer may still contain useful grounded findings. Those are
+    public only when the model selected evidence for later validation.
     """
     if not model_answer.insufficient_context:
+        return model_answer
+    if model_answer.cited_chunk_ids:
         return model_answer
     return ModelAnswer(
         answer=INSUFFICIENT_CONTEXT_ANSWER,

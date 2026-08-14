@@ -83,8 +83,8 @@ def _nonempty_bounds(workbook, worksheet) -> tuple[int, int]:
     read-only iterator materializes every missing cell. Reading the worksheet
     XML directly lets us bound iteration by cells that contain actual data.
     """
-    max_row = 0
-    max_column = 0
+    populated_rows: set[int] = set()
+    populated_columns: set[int] = set()
     with workbook._archive.open(worksheet._worksheet_path) as source:
         for _, element in iterparse(source, events=("end",)):
             local_name = element.tag.rsplit("}", 1)[-1]
@@ -104,12 +104,25 @@ def _nonempty_bounds(workbook, worksheet) -> tuple[int, int]:
                 coordinate = element.attrib.get("r")
                 if has_content and coordinate:
                     row, column = coordinate_to_tuple(coordinate)
-                    max_row = max(max_row, row)
-                    max_column = max(max_column, column)
+                    populated_rows.add(row)
+                    populated_columns.add(column)
                 element.clear()
             elif local_name == "row":
                 element.clear()
-    return max_row, max_column
+    return _main_region_end(populated_rows), _main_region_end(populated_columns)
+
+
+def _main_region_end(indices: set[int], *, gap_limit: int = 10_000) -> int:
+    """Ignore isolated cells separated from the main used region by a huge gap."""
+    if not indices:
+        return 0
+    ordered = sorted(indices)
+    end = ordered[0]
+    for value in ordered[1:]:
+        if value - end > gap_limit:
+            break
+        end = value
+    return end
 
 
 def _bounded_text_parts(tokenizer, prefix: str, text: str, max_tokens: int) -> list[str]:

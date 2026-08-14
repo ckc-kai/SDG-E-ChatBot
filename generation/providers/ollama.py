@@ -172,6 +172,9 @@ class OllamaProvider:
             raise ProviderError("Invalid Ollama configuration") from exc
 
     def generate(self, prompt: str) -> str:
+        return self.generate_structured(prompt, ANSWER_SCHEMA)
+
+    def generate_structured(self, prompt: str, schema: Mapping[str, Any]) -> str:
         if not prompt.strip():
             raise ProviderError("Ollama prompt must not be empty")
         self.last_usage = None
@@ -182,7 +185,7 @@ class OllamaProvider:
             "stream": False,
             "think": False,
             "keep_alive": self.keep_alive,
-            "format": ANSWER_SCHEMA,
+            "format": dict(schema),
             "options": {
                 "num_predict": self.max_tokens,
                 "num_ctx": self.context_tokens,

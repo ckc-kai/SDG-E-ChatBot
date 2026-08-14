@@ -7,9 +7,10 @@ from retrieval.query.excel.query import RECORDS, ExcelQueryPlan
 from retrieval.query.pdf import EvidenceGroup, EvidenceRetrievalResult
 from services.generation_service import (
     GenerationService,
-    _verified_excel_chunks,
+    deduplicate_chunks,
     interleave_grouped_results,
 )
+from generation.schemas import Chunk, ChunkMetadata
 from services.retrieval_service import RetrievalBundle
 
 
@@ -42,6 +43,15 @@ def group(name: str, results: list):
 
 
 class GenerationServiceTests(unittest.TestCase):
+    def test_deduplicates_equivalent_evidence_and_keeps_first_metadata(self):
+        chunks = [
+            Chunk("source-a", "1", "Same  evidence", ChunkMetadata(source_file="a.pdf")),
+            Chunk("source-b", "2", " same evidence ", ChunkMetadata(source_file="b.pdf")),
+            Chunk("source-c", "3", "Different", ChunkMetadata(source_file="c.pdf")),
+        ]
+        unique = deduplicate_chunks(chunks)
+        self.assertEqual([chunk.chunk_id for chunk in unique], ["1", "3"])
+
     def test_interleaves_group_ranks(self):
         evidence = EvidenceRetrievalResult(
             question="q",

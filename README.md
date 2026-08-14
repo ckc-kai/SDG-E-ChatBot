@@ -4,7 +4,7 @@ regulatory filings.
 
 Task 2 retrieval code is in `retrieval/`. Task 3's framework-neutral generation
 core is in `generation/`; it supports deterministic mocks, a local Ollama
-provider, and an Amazon Bedrock Converse provider. Live Bedrock calls remain
+provider, Groq, and an Amazon Bedrock Converse provider. Live Bedrock calls remain
 disabled until account access and credentials are available. See
 `docs/task3-contract.md` for the Task 2/Task 4 contract and
 `docs/task3-ollama.md` for local end-to-end testing.
@@ -417,3 +417,21 @@ eval/
 ├── pdf/                       PDF evaluation data and historical results
 └── excel/                     Excel evaluation data
 ```
+### Use Groq after creating a Free-plan account
+
+Create an API key in the Groq console, keep the account on the **Free** plan,
+and put the following values in your local `.env` (never commit the real key):
+
+```dotenv
+TASK3_PROVIDER=groq
+GROQ_API_KEY=gsk_your_local_key
+GROQ_MODEL=openai/gpt-oss-120b
+MODEL_WARMUP_ENABLED=false
+```
+
+Then start the backend and frontend using the quick-start commands above. No Groq SDK
+is required. The prompt requests JSON; Task 3 validates its schema and cited chunk IDs, and copies
+citation metadata from the retrieved chunks. A free-tier `429` is returned as a
+controlled provider error and is not automatically retried. The application
+cannot control the account's billing plan, so verify that the Groq console says
+**Free** and do not add/upgrade to a paid plan if zero cost is required.
