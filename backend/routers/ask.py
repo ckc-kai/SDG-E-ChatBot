@@ -12,6 +12,8 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from generation.planning import needs_planning
+from generation.features import feature_enabled
+from generation.routing import RouteDecision
 from generation.schemas import ErrorResponse as GenerationErrorResponse
 from models.schemas import AskRequest, AskResponse
 from retrieval.query.excel.channel import is_entity_history_question
@@ -67,16 +69,35 @@ def ask(
                 content_types=multiple_types,
                 **retrieval_kwargs,
             )
-        elif is_entity_history_question(payload.question) or payload.rewrite_mode == "off" or (
+        elif is_entity_history_question(payload.question):
+            # Preserve the exact, validated Excel fast path.
+            bundle = retrieval_service.retrieve(payload.question, **retrieval_kwargs)
+        elif payload.rewrite_mode == "off" or (
             payload.rewrite_mode != "always"
             and not needs_planning(payload.question)
         ):
-            bundle = retrieval_service.retrieve(payload.question, **retrieval_kwargs)
+            if feature_enabled("two_resource_router"):
+                route = generation_service.route_retrieval(payload.question)
+            else:
+                route = None
+            if isinstance(route, RouteDecision):
+                bundle = retrieval_service.retrieve(
+                    payload.question,
+                    content_types=route.content_types,
+                    **retrieval_kwargs,
+                )
+            else:
+                bundle = retrieval_service.retrieve(payload.question, **retrieval_kwargs)
         else:
-            plan = generation_service.plan_retrieval(payload.question)
-            bundle = retrieval_service.retrieve_plan(
-                payload.question, plan, **retrieval_kwargs
-            )
+            if feature_enabled("typed_planner"):
+                plan = generation_service.plan_retrieval(payload.question)
+                bundle = retrieval_service.retrieve_plan(
+                    payload.question, plan, **retrieval_kwargs
+                )
+            else:
+                bundle = retrieval_service.retrieve(
+                    payload.question, **retrieval_kwargs
+                )
     except Exception:
         logger.exception(
             "Task 2 retrieval failed for request_id=%s total_ms=%d",

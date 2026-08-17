@@ -37,6 +37,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from eval.environment import evaluation_environment
 from retrieval.query.lanes import ALL_LANES
 from retrieval.query.pdf.query import (
     CAPTION_RERANK_WEIGHT,
@@ -723,6 +724,7 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.out:
         payload = {
+            "environment": evaluation_environment(batch_or_concurrency=1),
             "summary": summary,
             "skipped": skipped,
             "api_rewrite_usage": {

@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 
 from generation.schemas import AnswerResponse, Citation, ErrorResponse
+from generation.routing import RouteDecision
 from main import app
 from routers.ask import get_generation_service, get_retrieval_service
 
@@ -110,6 +111,30 @@ class AskRouterTests(unittest.TestCase):
         self.retrieval.retrieve.assert_called_once()
         self.retrieval.retrieve_plan.assert_not_called()
         self.generation.plan_retrieval.assert_not_called()
+
+    def test_simple_question_uses_two_resource_route(self):
+        bundle = MagicMock()
+        self.generation.route_retrieval.return_value = RouteDecision(
+            need_pdf=True,
+            need_excel=False,
+            need_narrative=True,
+        )
+        self.retrieval.retrieve.return_value = bundle
+        self.generation.generate.return_value = AnswerResponse(
+            request_id="req_route", answer="ok", cited_chunk_ids=(), citations=(),
+            insufficient_context=False, model_id="fake", latency_ms=1,
+        )
+
+        response = self.client.post("/api/ask", json={
+            "request_id": "req_route",
+            "question": "How does SDG&E define wildfire risk?",
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            self.retrieval.retrieve.call_args.kwargs["content_types"],
+            ("narrative",),
+        )
 
 
 if __name__ == "__main__":

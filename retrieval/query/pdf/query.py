@@ -16,12 +16,14 @@ execution lives in ``retrieval.query.excel``.
 """
 
 import argparse
+import functools
 import json
 import logging
 import math
 import re
 from dataclasses import dataclass, field, replace
 
+from generation.features import feature_enabled
 from retrieval.query.calibration import Calibrator
 from retrieval.contextual_embeddings import CONTEXTUAL_EMBEDDING_RECIPE
 from retrieval.failure_log import get_failure_logger
@@ -34,6 +36,7 @@ from retrieval.query.lanes import (
     lane_confidence,
 )
 from retrieval.object_storage import get_object_storage
+from retrieval.source_manifest import SourceManifest
 from retrieval.utils import (
     connect_db,
     embedding_config,
@@ -304,6 +307,27 @@ class SourceRole:
     filename_patterns: tuple[str, ...]
 
 
+@functools.lru_cache(maxsize=1)
+def _source_manifest() -> SourceManifest:
+    return SourceManifest.load()
+
+
+def _filenames_for_role(role: str, fallback: tuple[str, ...]) -> tuple[str, ...]:
+    """Resolve stable role metadata to current corpus filenames.
+
+    The fallback keeps an existing deployment operational if its checked-out
+    manifest is unavailable during a rolling release.
+    """
+    if not feature_enabled("metadata_routing"):
+        return fallback
+    try:
+        resolved = _source_manifest().filenames_for_role(role)
+    except (OSError, ValueError, json.JSONDecodeError):
+        logger.exception("Could not load source-role manifest; using compatibility path")
+        return fallback
+    return resolved or fallback
+
+
 def required_source_roles(question: str) -> tuple[SourceRole, ...]:
     """Route explicit WMP/guideline comparisons without a model call."""
     normalized = " ".join(question.strip().split())
@@ -319,7 +343,10 @@ def required_source_roles(question: str) -> tuple[SourceRole, ...]:
                     "methodology mitigation selection prioritization"
                 ),
                 filename_patterns=(
-                    "FINAL_SDGE_20232025_WMP_Decision_and_Cover_Letter.pdf",
+                    *_filenames_for_role(
+                        "oeis_decision_2023",
+                        ("FINAL_SDGE_20232025_WMP_Decision_and_Cover_Letter.pdf",),
+                    ),
                 ),
             ),
             SourceRole(
@@ -329,7 +356,10 @@ def required_source_roles(question: str) -> tuple[SourceRole, ...]:
                     "selection prioritization scheduling risk reduction"
                 ),
                 filename_patterns=(
-                    "FINAL 2026-2028_Wildfire_Mitigation_Plan_Guidelines.pdf",
+                    *_filenames_for_role(
+                        "wmp_guidelines_2026_2028",
+                        ("FINAL 2026-2028_Wildfire_Mitigation_Plan_Guidelines.pdf",),
+                    ),
                 ),
             ),
         )
@@ -345,14 +375,20 @@ def required_source_roles(question: str) -> tuple[SourceRole, ...]:
                     name="2023_wmp",
                     query=f"{normalized} Evidence from the 2023-2025 WMP.",
                     filename_patterns=(
-                        "SDG&E_2023-2023_Base-WMP_R5-redacted.pdf",
+                        *_filenames_for_role(
+                            "wmp_2023_2025",
+                            ("SDG&E_2023-2023_Base-WMP_R5-redacted.pdf",),
+                        ),
                     ),
                 ),
                 SourceRole(
                     name="2023_guidelines",
                     query=f"{normalized} Requirements from the 2023-2025 guidelines.",
                     filename_patterns=(
-                        "2023-2025_WMP_TECHNICAL_GUIDELINES.pdf",
+                        *_filenames_for_role(
+                            "wmp_guidelines_2023_2025",
+                            ("2023-2025_WMP_TECHNICAL_GUIDELINES.pdf",),
+                        ),
                     ),
                 ),
             )
@@ -363,13 +399,18 @@ def required_source_roles(question: str) -> tuple[SourceRole, ...]:
                 SourceRole(
                     name="2026_wmp",
                     query=f"{normalized} Evidence from the 2026-2028 WMP.",
-                    filename_patterns=("SDG&E_2026-2028_Base-WMP_R2.pdf",),
+                    filename_patterns=_filenames_for_role(
+                        "wmp_2026_2028", ("SDG&E_2026-2028_Base-WMP_R2.pdf",)
+                    ),
                 ),
                 SourceRole(
                     name="2026_guidelines",
                     query=f"{normalized} Requirements from the 2026-2028 guidelines.",
                     filename_patterns=(
-                        "FINAL 2026-2028_Wildfire_Mitigation_Plan_Guidelines.pdf",
+                        *_filenames_for_role(
+                            "wmp_guidelines_2026_2028",
+                            ("FINAL 2026-2028_Wildfire_Mitigation_Plan_Guidelines.pdf",),
+                        ),
                     ),
                 ),
             )

@@ -1,4 +1,5 @@
 import unittest
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -12,6 +13,7 @@ from services.generation_service import (
     interleave_grouped_results,
 )
 from generation.schemas import Chunk, ChunkMetadata
+from generation.computation import CalculationResult
 from services.retrieval_service import RetrievalBundle
 
 
@@ -93,6 +95,37 @@ class GenerationServiceTests(unittest.TestCase):
         self.assertIs(actual, expected)
         request = answer_service.answer.call_args.args[0]
         self.assertEqual(request.chunks[0].content, "evidence 1")
+
+    def test_cross_resource_calculation_enters_prompt_with_operand_provenance(self):
+        answer_service = MagicMock()
+        answer_service.answer.return_value = AnswerResponse(
+            request_id="req_calc",
+            answer="75%",
+            cited_chunk_ids=("calculation-1",),
+            citations=(),
+            insufficient_context=False,
+            model_id="fake",
+            latency_ms=1,
+        )
+        calculation = CalculationResult(
+            value=Decimal("75.00"),
+            unit="percent",
+            expression="(75 / 100) * 100",
+            contributing_sources=("qdr.xlsx#R9", "wmp.pdf#p42"),
+        )
+        evidence = EvidenceRetrievalResult(question="q", groups={})
+
+        GenerationService(answer_service).generate(
+            "req_calc", "q", RetrievalBundle(evidence, calculations=(calculation,))
+        )
+
+        request = answer_service.answer.call_args.args[0]
+        self.assertEqual(request.chunks[0].chunk_id, "calculation-1")
+        self.assertIn("result=75.00 percent", request.chunks[0].content)
+        self.assertEqual(
+            request.chunks[0].metadata.contributing_sources,
+            ("qdr.xlsx#R9", "wmp.pdf#p42"),
+        )
 
     def test_verified_excel_history_has_row_citations_and_calculations(self):
         answer = SimpleNamespace(

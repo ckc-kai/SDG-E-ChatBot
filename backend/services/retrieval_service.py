@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
+from generation.coverage import assess_plan_coverage
+from generation.computation import CalculationResult
+from generation.features import feature_enabled
 from generation.planning import RetrievalPlan
 from retrieval.query.excel.channel import (
     ExcelAnswer,
@@ -39,6 +43,7 @@ class RetrievalBundle:
     verified_excels: tuple[ExcelAnswer, ...] = ()
     timings: RetrievalTimings = RetrievalTimings()
     plan_diagnostics: dict | None = None
+    calculations: tuple[CalculationResult, ...] = ()
 
 
 def _groups_for_types(content_types) -> tuple[str, ...]:
@@ -154,14 +159,50 @@ class RetrievalService:
     ) -> RetrievalBundle:
         """Retrieve each planned subquestion and preserve per-step coverage."""
         started = time.perf_counter()
-        step_bundles = [
-            self.retrieve(
+        def retrieve_step(step):
+            return self.retrieve(
                 _scoped_step_question(question, step.question),
                 content_types=step.content_types,
                 **kwargs,
             )
-            for step in plan.steps
-        ]
+
+        resource_groups: dict[str, list[tuple[int, object]]] = {}
+        for index, step in enumerate(plan.steps):
+            resource_groups.setdefault(step.source, []).append((index, step))
+        if feature_enabled("parallel_retrieval") and len(resource_groups) > 1:
+            # Parallelize the independent PDF and Excel resources while keeping
+            # same-resource tasks sequential and shared-model pressure bounded.
+            def retrieve_group(indexed_steps):
+                return [
+                    (index, retrieve_step(step)) for index, step in indexed_steps
+                ]
+
+            indexed_bundles = [None] * len(plan.steps)
+            with ThreadPoolExecutor(max_workers=min(2, len(resource_groups))) as executor:
+                for completed in executor.map(
+                    retrieve_group, resource_groups.values()
+                ):
+                    for index, bundle in completed:
+                        indexed_bundles[index] = bundle
+            step_bundles = indexed_bundles
+        else:
+            step_bundles = [retrieve_step(step) for step in plan.steps]
+
+        initial_coverage = assess_plan_coverage(plan, tuple(step_bundles))
+        retry_count = 0
+        retry_step_index = None
+        if (
+            initial_coverage.missing_step_indexes
+            and feature_enabled("coverage_retry")
+        ):
+            # One precise retry for the first uncovered atomic task. There is
+            # intentionally no loop and no second planner/model call.
+            retry_step_index = initial_coverage.missing_step_indexes[0]
+            step_bundles[retry_step_index] = retrieve_step(
+                plan.steps[retry_step_index]
+            )
+            retry_count = 1
+        coverage = assess_plan_coverage(plan, tuple(step_bundles))
         merged: dict[str, EvidenceGroup] = {}
         group_names = tuple(
             dict.fromkeys(
@@ -226,6 +267,11 @@ class RetrievalService:
                 "source": plan.source,
                 "trigger_reason": plan.trigger_reason,
                 "subquestion_count": len(plan.steps),
+                "atomic_task_count": plan.atomic_task_count,
+                "dropped_task_count": plan.dropped_task_count,
+                "retry_count": retry_count,
+                "retry_step_index": retry_step_index,
+                "coverage": coverage.to_dict(),
                 "steps": [
                     {
                         "question": step.question,

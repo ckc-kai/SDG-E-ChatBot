@@ -9,8 +9,11 @@ from dataclasses import replace
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from generation.adapters import adapt_ranked_results
+from generation.computation import CalculationResult
+from generation.features import feature_enabled
 from generation.planning import RetrievalPlan, build_retrieval_plan
 from generation.providers import create_provider_from_env
+from generation.routing import RouteDecision, route_question
 from generation.schemas import (
     AnswerRequest,
     AnswerResponse,
@@ -74,6 +77,11 @@ class GenerationService:
         adapter_started = time.perf_counter()
         ranked_results = interleave_grouped_results(bundle.evidence)
         chunks = list(adapt_ranked_results(ranked_results))
+        if feature_enabled("cross_resource_computation"):
+            for index, calculation in reversed(
+                tuple(enumerate(bundle.calculations, start=1))
+            ):
+                chunks.insert(0, _calculation_chunk(calculation, index))
         verified_items = bundle.verified_excels or (
             (bundle.verified_excel,) if bundle.verified_excel is not None else ()
         )
@@ -106,6 +114,15 @@ class GenerationService:
             self._planner_provider = _create_planner_provider()
         return build_retrieval_plan(question, self._planner_provider)
 
+    def route_retrieval(self, question: str) -> RouteDecision:
+        """Apply deterministic routing and consult one local judge only if needed."""
+        route = route_question(question, judge_enabled=False)
+        if not route.uncertain or not feature_enabled("support_evidence_judge"):
+            return route
+        if self._planner_provider is None:
+            self._planner_provider = _create_planner_provider()
+        return route_question(question, judge=self._planner_provider)
+
     def warmup(self) -> None:
         """Warm providers that expose a no-answer local preload hook."""
         warmup = getattr(self._answer_service.provider, "warmup", None)
@@ -118,6 +135,25 @@ def _int_or_none(value) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _calculation_chunk(result: CalculationResult, index: int) -> Chunk:
+    rendered_unit = f" {result.unit}" if result.unit else ""
+    return Chunk(
+        source_id="Derived calculation",
+        chunk_id=f"calculation-{index}",
+        content=(
+            "Deterministic calculation from validated evidence operands:\n"
+            f"expression={result.expression}\n"
+            f"result={result.value}{rendered_unit}"
+        ),
+        metadata=ChunkMetadata(
+            source_file="Derived calculation",
+            breadcrumb="Cross-resource deterministic calculation",
+            content_type="calculation",
+            contributing_sources=result.contributing_sources,
+        ),
+    )
 
 
 def _create_planner_provider():

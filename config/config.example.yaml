@@ -89,3 +89,15 @@ object_storage:
     bucket: replace-me
     prefix: sdge-chatbot/figures
     region: us-west-2
+
+# Runtime overrides use SDGE_FEATURE_<UPPERCASE_NAME>=true|false. Each
+# architecture experiment remains independently reversible.
+architecture_features:
+  two_resource_router: true
+  support_evidence_judge: true
+  typed_planner: true
+  parallel_retrieval: true
+  coverage_retry: true
+  metadata_routing: true
+  cross_resource_computation: true
+  parent_child_expansion: false

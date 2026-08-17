@@ -1,0 +1,1777 @@
+{
+  "dataset_name": "SDG&E release beta golden questions",
+  "schema_version": "release-beta-v3",
+  "created_date": "2026-08-17",
+  "generator": "deterministic_local_no_external_api",
+  "gold_visibility": "private_gold_do_not_send_to_answering_model",
+  "composition": {
+    "user_questions": 15,
+    "pdf_visual_support": 5,
+    "excel_multi_sheet": 5,
+    "cross_resource_limitations": 2,
+    "total": 27
+  },
+  "selection_method": "User questions 1-15 retained verbatim; five manually audited PDF table/figure cases; five source-verified multi-sheet Excel cases; two hardest nontrivial cross-resource rows retained as explicit limitation tests after evidence audit invalidated their numeric labels.",
+  "questions": [
+    {
+      "id": "beta_user_001",
+      "category": "pdf",
+      "origin": {
+        "method": "included_all_non_qdr",
+        "user_question_id": "user_question_001",
+        "original_number": "1",
+        "question_status": "selected_from_user_questions",
+        "existing_problem_set_status": "checked",
+        "source_path": "user_questions/user_questions.json",
+        "source_index": 1
+      },
+      "question": "Between the 2023-2025 WMP and the 2026-2028 WMP, how did our risk ranking and grid hardening mitigation prioritization framework evolve? How did it impact how mitigations were selected and prioritized for circuit segments? (e.g. overall utility risk, risk per mile, benefit cost ratio, etc.)",
+      "expected_response_behavior": "answer_with_qualification",
+      "golden_answer": "The governing concepts did not begin in 2026. The 2023-2025 Technical Guidelines already required a prioritization list based on Overall Utility Risk, geographic granularity down to circuit/segment/span/asset, multiple locally relevant alternatives for each risk driver, and comparison of expected risk reduction, cost, uncertainty, and schedule. SDG&E's 2023-2025 WMP implemented this through increasingly granular WiNGS-Planning versions, moved from partial locations toward full circuit-segment hardening, and used Risk Spend Efficiency (RSE) and risk reduction to inform covered-conductor and undergrounding choices. The 2026-2028 WMP makes that framework more explicit and auditable. WiNGS-Planning v4.0 reports Wildfire Risk, Outage Program Risk, and Overall Utility Risk by feeder segment; it provides both total-Overall-Utility-Risk rankings and a separate Overall Utility Risk-per-mile ranking; and it renames the selection metric Cost-Benefit Ratio (CBR), formerly RSE. CBR measures monetized risk reduction per unit of lifecycle cost and compares Strategic Undergrounding with Combined Covered Conductor while considering residual wildfire and PSPS risk. The result is a three-stage decision: risk scores identify high-risk segments; CBR and lifecycle/residual-risk analysis inform the mitigation type; then engineering feasibility, funding, permitting, schedule, resource efficiency, and constructability determine sequence. Therefore, the highest total-risk or highest risk-per-mile segment is not automatically built first, and the highest-ranked activity is not automatically selected. Adjacent segments may be bundled, inherited scopes from older WiNGS versions may remain, and lower-ranked work may proceed when it improves circuit-wide risk reduction or construction efficiency. Overall Utility Risk, risk per mile, and CBR answer different questions and should not be collapsed into one ranking.",
+      "retrieval_information": {
+        "required_lane": "pdf",
+        "sources": [
+          {
+            "path": "resources/wmp/pdf/2023-2025_WMP_TECHNICAL_GUIDELINES.pdf",
+            "physical_pages": [
+              70,
+              73,
+              80,
+              81
+            ],
+            "sections": [
+              "7.1.3 Risk-Informed Prioritization",
+              "7.1.4 Mitigation Selection Process",
+              "7.2.2 Risk Impact of Mitigation Initiatives"
+            ],
+            "supports": "The earlier cycle already required Overall Utility Risk prioritization, alternatives, costs, uncertainties, schedules, and circuit-level risk reduction."
+          },
+          {
+            "path": "resources/wmp/pdf/SDG&E_2023-2023_Base-WMP_R5-redacted.pdf",
+            "physical_pages": [
+              51,
+              52,
+              53,
+              88,
+              89,
+              90,
+              91,
+              92,
+              93
+            ],
+            "sections": [
+              "4.4.2 Risk Strategy",
+              "6.2.1 Risk and Risk Component Identification"
+            ],
+            "supports": "Circuit-segment granularity, full-segment hardening, WiNGS version evolution, and RSE use in the 2023-2025 WMP."
+          },
+          {
+            "path": "resources/wmp/pdf/SDG&E_2026-2028_Base-WMP_R2.pdf",
+            "physical_pages": [
+              87,
+              88,
+              111,
+              112,
+              119,
+              120,
+              121,
+              124,
+              125,
+              164,
+              165,
+              166,
+              167,
+              168,
+              169,
+              170,
+              171
+            ],
+            "sections": [
+              "OEIS Table 5-5",
+              "6.1.1 Approach",
+              "6.1.3 Activity Selection Process",
+              "6.2.1.3 Projected Risk Reduction on Highest-Risk Circuits"
+            ],
+            "supports": "Separate total-risk and risk-per-mile rankings, CBR terminology and use, lifecycle/residual-risk comparison, and non-risk sequencing constraints."
+          }
+        ],
+        "retrieval_quality": "Updated live retrieval ranked 2026-2028 circuit-risk evidence first and returned the new 2023-2025 guideline requirement in the narrative top 10.",
+        "pipeline_answer_quality": "The bounded end-to-end local-model audit returned insufficient context because prompt selection retained strong 2026 evidence but not enough 2023 evidence. The golden answer was therefore verified from direct evidence review, not accepted from the generated answer."
+      },
+      "verification": {
+        "method": "The updated local grouped-retrieval pipeline was run after ingesting the 2023-2025 Technical Guidelines. Relevant guideline and WMP pages were also inspected directly, including rendered guideline pages.",
+        "verified": true
+      },
+      "suite": "user_questions"
+    },
+    {
+      "id": "beta_user_002",
+      "category": "pdf",
+      "origin": {
+        "method": "included_all_non_qdr",
+        "user_question_id": "user_question_002",
+        "original_number": "2",
+        "question_status": "selected_from_user_questions",
+        "existing_problem_set_status": "checked",
+        "source_path": "user_questions/user_questions.json",
+        "source_index": 2
+      },
+      "question": "How would you evaluate our risk reduction strategy given the operational and grid hardening mitigations we have planned and established targets for across both WMP cycles? At a high-level this would be an exercise to quantify anticipated risk reduction across the various mitigations. (we have the waterfall chart in 26-28 WMP but it may not be as clear or straightforward in 23-25 WMP).",
+      "expected_response_behavior": "answer_with_scope_limitation",
+      "golden_answer": "The strategy is directionally coherent: sustained grid hardening reduces structural wildfire and PSPS risk, while operational measures manage residual risk before long-lead construction is complete. The 2026-2028 WMP's Figure 1-1 reports a common 2007 baseline of 100% wildfire risk, followed by 51.0% reduction attributed to system hardening, inspection, and vegetation management through 2025; another 2.5% from those activities during 2026-2028; 6.1% from SRP/FCP/EFD through 2028; 38.2% from PSPS plus situational awareness in 2028; and 2.2% unmitigated risk in 2028. These values sum to 100%, but they are not a clean comparison of the 2023-2025 and 2026-2028 WMP cycles: the 51.0% block covers 2007-2025, SRP/FCP/EFD spans 2012-2028, and PSPS/situational awareness is a 2028 residual-risk layer. The 2023-2025 plan reports annual initiative-level expected risk impacts and circuit-level planned mitigation, but the available evidence does not provide a single, reconciled 2023-2025 waterfall on the same basis. Therefore a defensible cross-cycle total cannot be calculated by adding plan target percentages or comparing the 51.0% and 2.5% blocks as if they represented equal three-year windows. A sound evaluation would use one frozen baseline and model version, avoid double-counting overlapping activities, separate wildfire from PSPS/PEDS effects, distinguish activity effectiveness from portfolio risk reduction, and report planned versus realized reduction at service-territory, activity, and circuit-segment levels. On the available evidence, the portfolio logic is strong, but cross-cycle numerical comparability remains incomplete.",
+      "retrieval_information": {
+        "required_lane": "pdf",
+        "sources": [
+          {
+            "path": "resources/wmp/pdf/SDG&E_2026-2028_Base-WMP_R2.pdf",
+            "physical_pages": [
+              24,
+              25,
+              156,
+              157,
+              158,
+              159,
+              160,
+              161,
+              162,
+              163,
+              164
+            ],
+            "sections": [
+              "Figure 1-1 2026-2028 Expected Risk Reduction",
+              "6.2.1 Anticipated Risk Reduction",
+              "OEIS Table 6-3"
+            ],
+            "supports": "Waterfall percentages, portfolio logic, activity effectiveness, CBR, and expected activity-level risk reduction."
+          },
+          {
+            "path": "resources/wmp/pdf/2023-2025_WMP_TECHNICAL_GUIDELINES.pdf",
+            "physical_pages": [
+              79,
+              80,
+              81
+            ],
+            "sections": [
+              "7.2.2.1 Projected Overall Risk Reduction",
+              "7.2.2.2 Risk Impact of Mitigation Initiatives",
+              "7.2.2.3 Projected Risk Reduction on Highest-Risk Circuits"
+            ],
+            "supports": "Defines annual x-percent risk impact and required circuit-level before/after reporting for the earlier cycle."
+          },
+          {
+            "path": "resources/wmp/pdf/SDG&E_2023-2023_Base-WMP_R5-redacted.pdf",
+            "physical_pages": [
+              176,
+              177,
+              178,
+              179,
+              180
+            ],
+            "sections": [
+              "8.1.1.2 Targets"
+            ],
+            "supports": "Annual targets and expected risk-impact fields for 2023-2025 activities."
+          }
+        ],
+        "minimum_evidence_expectation": "Do not treat the waterfall categories as mutually comparable WMP-cycle totals or add overlapping activity reductions without a common baseline."
+      },
+      "verification": {
+        "method": "Updated grouped retrieval was reviewed and Figure 1-1 was rendered and visually inspected. Percentages and time ranges were transcribed from the figure and reconciled to 100%.",
+        "verified": true
+      },
+      "suite": "user_questions"
+    },
+    {
+      "id": "beta_user_003",
+      "category": "pdf",
+      "origin": {
+        "method": "included_all_non_qdr",
+        "user_question_id": "user_question_003",
+        "original_number": "3",
+        "question_status": "selected_from_user_questions",
+        "existing_problem_set_status": "checked",
+        "source_path": "user_questions/user_questions.json",
+        "source_index": 3
+      },
+      "question": "Comparing the 2023-2025 WMP, 2026-2028 WMP, and corresponding guidelines, what are opportunities for improvement in how we explain our risk methodology and assessment as well as our mitigation selection and prioritization?",
+      "expected_response_behavior": "answer",
+      "golden_answer": "The largest opportunity is not to add more terminology, but to make the chain from inputs to construction sequence reproducible. First, publish a concise crosswalk for each cycle from guideline requirement to WMP section, table, model output, and owner. Second, explain model inputs, assumptions, limitations, uncertainty propagation, validation, version changes, and any use of conservative or maximum consequence values; distinguish Overall Utility Risk, Wildfire Risk, Outage Program Risk, total risk, risk per mile, activity effectiveness, expected portfolio risk reduction, and CBR/RSE. Third, for each prioritized area show at least two locally feasible mitigations with risk-driver effects, pre/post risk, lifecycle cost, CBR/RSE, uncertainty, schedule, and residual risk. Fourth, separate the three decisions: which locations rank highest, which mitigation is selected, and when it is constructed. Document every qualitative override, engineering constraint, funding limitation, bundling decision, and subject-matter judgment that changes the quantitative rank order. Fifth, show wildfire-versus-PSPS/PEDS trade-offs and the time value of risk during long construction lead times, including interim mitigations. Sixth, reconcile every narrative commitment with the applicable target table and QDR tracking ID. These improvements directly join requirements already present in the 2023-2025 guidelines with OEIS's findings on maximum-consequence aggregation, PSPS trade-off transparency, undergrounding alternatives and time value of risk, third-party model recommendations, and omitted measurable targets. The 2026-2028 WMP provides substantially more explicit CBR, risk-per-mile, activity-effectiveness, and circuit-level risk tables, but it should still disclose data/model lineage and explain why actual selection or sequencing differs from any displayed ranking.",
+      "retrieval_information": {
+        "required_lane": "pdf",
+        "sources": [
+          {
+            "path": "resources/wmp/pdf/2023-2025_WMP_TECHNICAL_GUIDELINES.pdf",
+            "physical_pages": [
+              19,
+              20,
+              21,
+              22,
+              23,
+              64,
+              65,
+              66,
+              67,
+              69,
+              70,
+              71,
+              72,
+              73,
+              79,
+              80,
+              81,
+              257,
+              258,
+              259,
+              260,
+              261,
+              262
+            ],
+            "sections": [
+              "4.4 Risk-Informed Framework",
+              "6.7 Risk Assessment Improvement Plan",
+              "7.1.3 Risk-Informed Prioritization",
+              "7.1.4 Mitigation Selection Process",
+              "Appendix B Supporting Documentation"
+            ],
+            "supports": "Earlier-cycle requirements for transparency, uncertainty, alternatives, prioritization, and model documentation."
+          },
+          {
+            "path": "resources/wmp/pdf/FINAL_SDGE_20232025_WMP_Decision_and_Cover_Letter.pdf",
+            "physical_pages": [
+              31,
+              32,
+              33,
+              37,
+              40,
+              41,
+              73,
+              97,
+              98,
+              99,
+              100,
+              101,
+              102
+            ],
+            "sections": [
+              "6.5 Areas for Continued Improvement",
+              "11 Required Areas for Continued Improvement"
+            ],
+            "supports": "OEIS findings and required progress."
+          },
+          {
+            "path": "resources/wmp/pdf/SDG&E_2026-2028_Base-WMP_R2.pdf",
+            "physical_pages": [
+              87,
+              88,
+              114,
+              115,
+              116,
+              117,
+              118,
+              119,
+              120,
+              121,
+              124,
+              125,
+              136,
+              164,
+              165,
+              166,
+              167,
+              168,
+              169,
+              170,
+              171
+            ],
+            "sections": [
+              "OEIS Table 5-5",
+              "6.1.2 Risk-Informed Prioritization",
+              "6.1.3 Activity Selection Process",
+              "6.2.1.3 Projected Risk Reduction"
+            ],
+            "supports": "Current-cycle implementation and remaining distinction between ranking, selection, and scheduling."
+          }
+        ]
+      },
+      "verification": {
+        "method": "The new guideline, both WMP cycles, and OEIS decision evidence were independently compared after rerunning retrieval. Recommendations are tied to explicit requirements or findings rather than retrieval scores.",
+        "verified": true
+      },
+      "suite": "user_questions"
+    },
+    {
+      "id": "beta_user_004",
+      "category": "pdf",
+      "origin": {
+        "method": "included_all_non_qdr",
+        "user_question_id": "user_question_004",
+        "original_number": "4",
+        "question_status": "selected_from_user_questions",
+        "existing_problem_set_status": "checked",
+        "source_path": "user_questions/user_questions.json",
+        "source_index": 4
+      },
+      "question": "What WMP unit targets did SDG&E repeatedly not meet during the 2023-2025 WMP cycle? (2023-2025 SDG&E’s AIR and the independent evaluator report are references for this, as well as the OEIS report for SDG&E’s 2023 performance)\n4.1 What are the primary reasons those unit targets were not met?\n4.2 Were they within SDG&E’s control or due to external factors (i.e. easements, permitting, etc.)?",
+      "expected_response_behavior": "answer_with_scope_limitation",
+      "golden_answer": "The cited AIR and independent-evaluator reports are not in the corpus, so this is a Table 1 proxy rather than a regulatory finding. Defining 'repeatedly' conservatively as a Q4 reported actual below the annual quantitative target in all three years, four tracking IDs qualify: WMP.463 Advanced Protection/System Automation (4 of 5 circuits in 2023, 5 of 8 in 2024, 7 of 8 in 2025); WMP.488 Distribution Overhead Patrol Inspections (85,857 of 86,880 structures; 86,140 of 86,197; 86,040 of 86,535); WMP.549 Distribution Communications Reliability Improvements/System Automation (11 of 35 base stations; 3 of 60; 4 of 5); and WMP.555 Transmission 69kV Tier 3 Visual Inspections (1,602 of 1,632 structures; 1,605 of 1,632; 1,601 of 1,632). The source explicitly marks WMP.463 and WMP.549 delayed. WMP.463 reasons changed by year: a circuit was held because substantial undergrounding was planned, crews were reallocated to undergrounding and covered conductor, and permits were not issued until January 2026. WMP.549 cites engineering-design delay during telecom-team onboarding, a program revision following the 2024 GRC, and a field change order after unknown subsurface facilities were discovered. These are mixed-control causes: staffing, onboarding, sequencing, and resource allocation are substantially internal; GRC funding, permit issuance, and unknown field conditions are external or shared. WMP.488 and WMP.555 are marked Complete/Completed despite small numeric shortfalls, and Table 1 gives no corrective-action reason; it is unsafe to infer a cause or call them compliance failures without the AIR/evaluator methodology. Other activities missed in two years, but this answer uses the stricter all-three-years definition to avoid an arbitrary threshold.",
+      "golden_answer_table": [
+        {
+          "tracking_id": "WMP.463",
+          "unit": "Circuits",
+          "2023_target_actual": "5 / 4",
+          "2024_target_actual": "8 / 5",
+          "2025_target_actual": "8 / 7",
+          "source_status": "Delayed in all three years"
+        },
+        {
+          "tracking_id": "WMP.488",
+          "unit": "Structures",
+          "2023_target_actual": "86880 / 85857",
+          "2024_target_actual": "86197 / 86140",
+          "2025_target_actual": "86535 / 86040",
+          "source_status": "Complete/Completed"
+        },
+        {
+          "tracking_id": "WMP.549",
+          "unit": "Base Stations",
+          "2023_target_actual": "35 / 11",
+          "2024_target_actual": "60 / 3",
+          "2025_target_actual": "5 / 4",
+          "source_status": "Delayed in all three years"
+        },
+        {
+          "tracking_id": "WMP.555",
+          "unit": "Structures",
+          "2023_target_actual": "1632 / 1602",
+          "2024_target_actual": "1632 / 1605",
+          "2025_target_actual": "1632 / 1601",
+          "source_status": "Complete/Completed"
+        }
+      ],
+      "retrieval_information": {
+        "required_lane": "combined",
+        "source": {
+          "path": "excel_cleaning/cleaned_csv_rag_ready/sdge_table01_rag_ready.csv",
+          "logical_sheet": "Table 1",
+          "selection_rule": "Q4 actual < annual quantitative target in 2023, 2024, and 2025 for the same tracking ID",
+          "fields_checked": [
+            "activity_tracking_id",
+            "annual_quant_target",
+            "quant_actual_progress_q1_4",
+            "status",
+            "corrective_actions_if_delayed",
+            "reporting_year",
+            "source_row"
+          ]
+        },
+        "missing_information": [
+          "SDG&E 2023-2025 AIR",
+          "Independent evaluator report",
+          "OEIS 2023 performance report",
+          "Authoritative rule for what counts as repeatedly not met"
+        ],
+        "pipeline_answer_quality": "The bounded end-to-end local-model audit correctly declined for insufficient context. Current broad retrieval does not assemble the multi-year Table 1 comparison and the cited AIR/evaluator evidence is absent; the golden proxy was computed directly from Table 1."
+      },
+      "verification": {
+        "method": "All Table 1 rows were grouped by tracking ID and year; targets and Q4 actuals were compared numerically, then statuses and stated corrective-action reasons were reviewed. Updated retrieval was also checked and did not retrieve the missing AIR/evaluator evidence.",
+        "verified": true
+      },
+      "suite": "user_questions"
+    },
+    {
+      "id": "beta_user_005",
+      "category": "combined",
+      "origin": {
+        "method": "included_all_non_qdr",
+        "user_question_id": "user_question_005",
+        "original_number": "5",
+        "question_status": "selected_from_user_questions",
+        "existing_problem_set_status": "checked",
+        "source_path": "user_questions/user_questions.json",
+        "source_index": 5
+      },
+      "question": "How do SDG&E target completion rates for 2023-2025 compare to the PG&E’s and SCE’s target completion? Present this information in a table.",
+      "expected_response_behavior": "insufficient_context",
+      "golden_answer": "A defensible three-utility comparison cannot be produced from the available corpus. The tabular corpus contains SDG&E records only, and no PG&E or SCE target-performance workbooks or normalized records are available. The available PDFs are also SDG&E-focused or general guidelines and do not supply comparable 2023-2025 PG&E and SCE target-completion results. In addition, 'target completion rate' must be defined before calculation: it could mean the percentage of initiatives that met their annual targets, the percentage of target units delivered for each initiative, or another OEIS-defined measure. Aggregating raw actual-to-target units across initiatives is invalid when units differ (for example, miles, structures, inspections, and percentages). The system should therefore report insufficient context and request (1) PG&E and SCE annual or Q4 Table 1/QDR data or AIR/independent-evaluator performance reports for 2023-2025 and (2) the intended completion-rate definition. It should not fabricate a comparison.",
+      "golden_answer_table": [
+        {
+          "utility": "SDG&E",
+          "2023_2025_completion_rate": null,
+          "status": "Source records available, but metric definition is ambiguous"
+        },
+        {
+          "utility": "PG&E",
+          "2023_2025_completion_rate": null,
+          "status": "Required source data absent from corpus"
+        },
+        {
+          "utility": "SCE",
+          "2023_2025_completion_rate": null,
+          "status": "Required source data absent from corpus"
+        }
+      ],
+      "retrieval_information": {
+        "required_lane": "combined",
+        "corpus_checks": [
+          {
+            "scope": "excel_cleaning/cleaned_csv_rag_ready/*.csv",
+            "result": "Fourteen cleaned CSV files were checked; no PG&E, Pacific Gas, SCE, or Southern California Edison records were found."
+          },
+          {
+            "scope": "resources/wmp/pdf/*.pdf",
+            "result": "The available PDFs are SDG&E filings/decisions or general guidelines; no source provides comparable 2023-2025 target-completion results for all three utilities."
+          }
+        ],
+        "missing_information": [
+          "PG&E 2023-2025 target and actual performance data",
+          "SCE 2023-2025 target and actual performance data",
+          "A single auditable definition of target completion rate",
+          "A normalization rule that does not combine incompatible target units"
+        ],
+        "minimum_evidence_expectation": "A valid answer requires both comparable tabular records and narrative/regulatory evidence defining the metric and explaining target changes or exceptions."
+      },
+      "verification": {
+        "method": "Raw PDF and cleaned CSV inventories were checked directly, all PDFs including the newly ingested 2023-2025 Technical Guidelines were scanned for a three-utility comparison, and updated grouped retrieval was reviewed. No comparable PG&E/SCE results were found.",
+        "verified": true
+      },
+      "suite": "user_questions",
+      "missing_information": [
+        "PG&E target results for the same 2023-2025 scope and metric definitions",
+        "SCE target results for the same 2023-2025 scope and metric definitions"
+      ]
+    },
+    {
+      "id": "beta_user_006",
+      "category": "pdf",
+      "origin": {
+        "method": "included_all_non_qdr",
+        "user_question_id": "user_question_006",
+        "original_number": "6",
+        "question_status": "selected_from_user_questions",
+        "existing_problem_set_status": "checked",
+        "source_path": "user_questions/user_questions.json",
+        "source_index": 6
+      },
+      "question": "Compare the WMP to the WMP guidelines. Flag any areas that need additional information to meet the guideline requirements.",
+      "expected_response_behavior": "answer_with_scope_limitation",
+      "golden_answer": "The question does not identify a WMP cycle, and the corpus contains both 2023-2025 and 2026-2028 plans and guidelines. A formal line-by-line compliance determination therefore requires a cycle-specific crosswalk. For the 2023-2025 cycle, the strongest evidence-backed gaps are those confirmed by OEIS: insufficient explanation of maximum-consequence aggregation and future probability-distribution work; inadequate transparency into wildfire-versus-PSPS trade-offs and how risk rank/risk buy-down affected selection; insufficient comparison and justification of undergrounding alternatives, including time value of risk; incomplete reporting of third-party model recommendations and disposition; and measurable situational-awareness commitments described in narrative but omitted from the target table. These map directly to guideline requirements for model assumptions/limitations/validation, multiple alternatives per risk driver with risk reduction/cost/uncertainty/schedule, transparent prioritization, circuit-level pre/post risk, and auditable target tables. For 2026-2028, the WMP supplies substantially more of this information through Overall Utility Risk and risk-per-mile tables, CBR comparisons, activity-effectiveness and expected-risk-reduction tables, circuit-level annual risk, schedules, constraints, and interim mitigations. Remaining items to flag for review include fields explicitly reported as n/a (especially outage-program effectiveness or CBR for many activities), assumptions based on subject-matter judgment or limited historical data, the reconciliation of changing baselines/model versions with target risk reduction, and exact explanations whenever construction order differs from displayed risk rank. This is a prioritized gap assessment, not certification that every guideline row is satisfied.",
+      "retrieval_information": {
+        "required_lane": "pdf",
+        "sources": [
+          {
+            "path": "resources/wmp/pdf/2023-2025_WMP_TECHNICAL_GUIDELINES.pdf",
+            "physical_pages": [
+              19,
+              20,
+              21,
+              22,
+              23,
+              69,
+              70,
+              71,
+              72,
+              73,
+              79,
+              80,
+              81,
+              86,
+              87,
+              88,
+              253,
+              254,
+              255,
+              256,
+              257,
+              258,
+              259,
+              260,
+              261,
+              262
+            ],
+            "supports": "Applicable 2023-2025 requirements."
+          },
+          {
+            "path": "resources/wmp/pdf/FINAL_SDGE_20232025_WMP_Decision_and_Cover_Letter.pdf",
+            "physical_pages": [
+              31,
+              32,
+              33,
+              37,
+              40,
+              41,
+              73,
+              97,
+              98,
+              99,
+              100,
+              101,
+              102
+            ],
+            "supports": "OEIS-confirmed gaps and required progress."
+          },
+          {
+            "path": "resources/wmp/pdf/FINAL 2026-2028_Wildfire_Mitigation_Plan_Guidelines.pdf",
+            "physical_pages": [
+              76,
+              77,
+              78,
+              79,
+              80,
+              81,
+              84,
+              88,
+              89,
+              90,
+              91,
+              95,
+              235
+            ],
+            "supports": "Applicable current-cycle requirements."
+          },
+          {
+            "path": "resources/wmp/pdf/SDG&E_2026-2028_Base-WMP_R2.pdf",
+            "physical_pages": [
+              70,
+              71,
+              87,
+              88,
+              119,
+              120,
+              121,
+              124,
+              125,
+              126,
+              127,
+              128,
+              129,
+              130,
+              131,
+              158,
+              159,
+              160,
+              161,
+              162,
+              163,
+              164,
+              168,
+              169,
+              170,
+              171
+            ],
+            "supports": "Current-cycle disclosures and explicit n/a limitations."
+          }
+        ],
+        "retrieval_quality": "The new guideline ranked fourth in narrative and first in figure retrieval for the broad guideline-comparison prompt, but the prompt remains too broad for a complete automated compliance matrix."
+      },
+      "verification": {
+        "method": "Both guideline versions were compared with their corresponding WMP/decision evidence. Findings are limited to explicit requirements, explicit WMP disclosures, and OEIS-confirmed deficiencies.",
+        "verified": true
+      },
+      "suite": "user_questions"
+    },
+    {
+      "id": "beta_user_007",
+      "category": "pdf",
+      "origin": {
+        "method": "included_all_non_qdr",
+        "user_question_id": "user_question_007",
+        "original_number": "7",
+        "question_status": "selected_from_user_questions",
+        "existing_problem_set_status": "checked",
+        "source_path": "user_questions/user_questions.json",
+        "source_index": 7
+      },
+      "question": "Review the WMP from OEIS’s perspective and provide suggestions for how to present or and adjust the plan to satisfy what OEIS and the WMP guidelines are looking for. This could be done for past cycles to develop the AI agent, but would be help for evaluating the 2028-2031 WMP as we develop it.",
+      "expected_response_behavior": "answer_with_scope_limitation",
+      "golden_answer": "A formal compliance finding on the 2028-2031 WMP is not possible because a 2028-2031 draft is not present in the corpus. Based on OEIS's decision on SDG&E's 2023-2025 WMP and the 2026-2028 WMP Guidelines, SDG&E should make the next plan auditable from risk inputs through location-level project selection and measurable results. First, document the risk calculations, assumptions, uncertainties, validation, and model governance. In particular, address OEIS's concern that aggregating maximum consequence values can overstate territory risk: transition to probability distributions or validate and explain any alternative, and disclose which third-party model recommendations are adopted, rejected, and scheduled. Second, make mitigation selection reproducible. For each prioritized circuit or segment, identify the local risk drivers, compare at least two feasible activity portfolios, and show expected reductions in overall utility, wildfire, and outage-program risk; implementation cost; RSE or CBR; uncertainty; schedule; constraints; and the reason for the selected portfolio. Explain any case where a lower risk-buy-down activity is selected over a higher-ranked one. Third, explicitly show wildfire-versus-PSPS trade-offs, the role of subject-matter judgment, and any overrides of quantitative rankings. Fourth, compare undergrounding with combinations such as covered conductor, inspections, vegetation management, and protective-device settings; incorporate deployment time, cumulative risk exposure, and interim mitigations into the comparison. Fifth, connect the portfolio to required tables: show pre- and post-mitigation overall utility risk for high-risk circuits, activities by implementation year, and consistent measurable targets. Every measurable commitment described in narrative text should also appear in the applicable target table. Finally, include an OEIS issue-closure matrix that maps each prior Area for Continued Improvement to the corrective action, owner, milestone, evidence, current status, and exact WMP location. These changes would directly address OEIS's prior concerns about risk-ranking transparency, justification of undergrounding, time value of risk, model improvements, and incomplete target tables while aligning the plan with the newer activity-selection and prioritization requirements.",
+      "retrieval_information": {
+        "required_lane": "pdf",
+        "sources": [
+          {
+            "source_id": "PDF-DECISION",
+            "path": "resources/wmp/pdf/FINAL_SDGE_20232025_WMP_Decision_and_Cover_Letter.pdf",
+            "physical_pages": [
+              32,
+              33,
+              37,
+              40,
+              41,
+              73
+            ],
+            "printed_pages": [
+              24,
+              25,
+              29,
+              32,
+              33,
+              65
+            ],
+            "sections": [
+              "6.5.2 Calculating Risk Scores Using Maximum Consequence Values",
+              "6.5.3 PSPS and Wildfire Risk Trade-Off Transparency",
+              "7.1.2 Areas for Continued Improvement",
+              "7.3.3.1 Demonstration of Proper Decision Making for Selection of Undergrounding Projects",
+              "7.3.3.2 Third-Party Recommendations for Model Improvements",
+              "8.3.4 Areas for Continued Improvement"
+            ],
+            "supports": "OEIS's specific findings concerning maximum-consequence aggregation, inadequate transparency into risk ranking and risk buy-down, unexplained prioritization overrides, undergrounding alternatives and time value of risk, third-party model recommendations, and measurable targets omitted from target tables."
+          },
+          {
+            "source_id": "PDF-GUIDELINES",
+            "path": "resources/wmp/pdf/FINAL 2026-2028_Wildfire_Mitigation_Plan_Guidelines.pdf",
+            "physical_pages": [
+              76,
+              77,
+              78,
+              79,
+              80,
+              81,
+              88,
+              89,
+              90,
+              91
+            ],
+            "printed_pages": [
+              63,
+              64,
+              65,
+              66,
+              67,
+              68,
+              75,
+              76,
+              77,
+              78
+            ],
+            "sections": [
+              "6.1.3 Activity Selection Process",
+              "6.1.3.1 Identifying and Evaluating Activities",
+              "6.1.3.2 Activity Prioritization",
+              "6.1.3.3 Activity Scheduling",
+              "Table 6-3 Example of Risk Impact of Activities",
+              "6.2.1.3 Projected Risk Reduction on Highest-Risk Circuits Over the Three-Year WMP Cycle",
+              "Table 6-4 Example of Summary of Risk Reduction for Top-Risk Circuits",
+              "6.2.2 Interim Activities"
+            ],
+            "supports": "Requirements for local activity alternatives, portfolio comparisons, expected risk reduction, costs, CBA/RSE, uncertainty, location-specific prioritization, resource optimization, scheduling, cumulative risk exposure, circuit-level before/after risk, and interim activities."
+          }
+        ],
+        "minimum_evidence_expectation": "The answer should cite both the OEIS decision and the guidelines and should distinguish past findings from forward-looking recommendations."
+      },
+      "verification": {
+        "method": "Relevant pages were independently extracted and rendered for visual review. After the 2023-2025 Technical Guidelines were ingested, the original question was also rerun through updated grouped retrieval; the decision and 2026-2028 guideline remained the decisive evidence for this forward-looking answer.",
+        "verified": true
+      },
+      "suite": "user_questions"
+    },
+    {
+      "category": "qdr",
+      "expected_response_behavior": "insufficient_context",
+      "golden_answer": "Insufficient context for a valid compliance comparison. The corpus contains SDG&E QDR metric workbooks, but the source manifest does not contain the year-specific performance and data guideline documents that governed each QDR. The system should identify the QDR year and quarter, request the exact applicable guideline version (including effective date or revision), and abstain from declaring a field compliant, missing, or noncompliant until both sides of the comparison are available. It must not treat a retrieval miss as proof that a required field is absent.",
+      "retrieval_information": {
+        "required_lane": "combined",
+        "available_source": "config/source_manifest.json contains QDR metric tables 1-15 (except table 12).",
+        "missing_source": "Applicable year- and quarter-specific performance and data guideline documents.",
+        "minimum_evidence_expectation": "Cite both the QDR and its governing guideline version before making compliance findings."
+      },
+      "verification": {
+        "method": "Compared the requested source roles with config/source_manifest.json; no performance/data guideline role is present.",
+        "verified": true
+      },
+      "id": "beta_user_008",
+      "suite": "user_questions",
+      "question": "Compare the QDRs against the applicable performance and data guidelines. Performance and data guidelines are typically updated each year, so be sure to compare each QDR against the applicable version. Flag areas where information is missing or does not meet the guideline requirements. This can be done for prior years to develop the agent, which can be applied prior to submitting the QDR each quarter.",
+      "origin": {
+        "source_path": "user_questions/user_questions.json",
+        "user_question_id": "user_question_008",
+        "source_index": 8,
+        "original_number": "8"
+      },
+      "missing_information": [
+        "The applicable performance and data guideline version for each QDR year and quarter"
+      ]
+    },
+    {
+      "id": "beta_user_009",
+      "category": "combined",
+      "origin": {
+        "method": "included_all_non_qdr",
+        "user_question_id": "user_question_009",
+        "original_number": "9",
+        "question_status": "selected_from_user_questions",
+        "existing_problem_set_status": "checked",
+        "source_path": "user_questions/user_questions.json",
+        "source_index": 9
+      },
+      "question": "For example, \"what numbers we have reported from 2022-2025 regarding detailed inspection and show the line chart, how does SDGE perform detailed inspection, at what frequency, are there any changes or enhancement after 2025 (this requires WMP 2026-2028).\"",
+      "expected_response_behavior": "answer_with_scope_limitation",
+      "golden_answer": "For Distribution Overhead Detailed Inspections (WMP.478), the available Table 1 data begin in 2023; no authoritative 2022 inspection-count actual was found, so a 2022 point must be shown as unavailable rather than inferred. Reported year-end Q4 actuals were 11,755 structures in 2023, 16,503 in 2024, and 17,950 in 2025, against annual targets of 11,100, 15,450, and 13,275. SDG&E describes a thorough visual ground assessment of poles, attachments, conductors, cables, and relevant equipment; equipment may be opened, tested, or operated, and tools such as infrared, drones, binoculars, or measurement devices may be used when warranted. Findings are recorded in work orders, repairs are assigned severity under GO 95 Rule 18, and corrective work is tracked. GO 165 sets a five-year cycle for overhead structures and sub-equipment, including the HFTD. After 2025, the 2026-2028 WMP states that no change was made to program scope or frequency and lists no planned program improvements. It does describe operational responses: drones/helicopters for difficult terrain, a six-month Qualified Line Inspector training program to relieve labor pressure, and planned engagement with the CPUC on whether GO 165 could permit more proactive risk-informed timing. Targets rise to 21,924 inspections in 2026, then decline to 17,779 in 2027 and 11,537 in 2028, totaling 51,240; those are targets, not actuals and should not be joined to the historical actual line as observed performance.",
+      "golden_answer_table": [
+        {
+          "year": 2022,
+          "actual_structures": null,
+          "annual_target_structures": null,
+          "series_type": "unavailable"
+        },
+        {
+          "year": 2023,
+          "actual_structures": 11755,
+          "annual_target_structures": 11100,
+          "series_type": "reported Q4 actual"
+        },
+        {
+          "year": 2024,
+          "actual_structures": 16503,
+          "annual_target_structures": 15450,
+          "series_type": "reported Q4 actual"
+        },
+        {
+          "year": 2025,
+          "actual_structures": 17950,
+          "annual_target_structures": 13275,
+          "series_type": "reported Q4 actual"
+        },
+        {
+          "year": 2026,
+          "actual_structures": null,
+          "annual_target_structures": 21924,
+          "series_type": "WMP target"
+        },
+        {
+          "year": 2027,
+          "actual_structures": null,
+          "annual_target_structures": 17779,
+          "series_type": "WMP target"
+        },
+        {
+          "year": 2028,
+          "actual_structures": null,
+          "annual_target_structures": 11537,
+          "series_type": "WMP target"
+        }
+      ],
+      "retrieval_information": {
+        "required_lane": "combined",
+        "sources": [
+          {
+            "path": "excel_cleaning/cleaned_csv_rag_ready/sdge_table01_rag_ready.csv",
+            "records": [
+              "2023 WMP.478 source row 20",
+              "2024 WMP.478 source row 63",
+              "2025 WMP.478 source row 108"
+            ],
+            "supports": "2023-2025 targets and Q4 actuals."
+          },
+          {
+            "path": "resources/wmp/pdf/SDG&E_2023-2023_Base-WMP_R5-redacted.pdf",
+            "physical_pages": [
+              178,
+              179,
+              217,
+              218,
+              219,
+              220
+            ],
+            "sections": [
+              "OEIS Table 8-6",
+              "8.1.3.1 Distribution Overhead Detailed Inspections"
+            ],
+            "supports": "Five-year frequency and 2023-2025 method."
+          },
+          {
+            "path": "resources/wmp/pdf/SDG&E_2026-2028_Base-WMP_R2.pdf",
+            "physical_pages": [
+              185,
+              186,
+              207,
+              208,
+              209,
+              210,
+              211
+            ],
+            "sections": [
+              "OEIS Table 8-1",
+              "OEIS Table 8-2",
+              "8.3.1 Distribution Overhead Detailed Inspections"
+            ],
+            "supports": "2026-2028 targets, process, frequency, and post-2025 update statements."
+          }
+        ],
+        "missing_information": [
+          "Authoritative 2022 WMP.478 count"
+        ]
+      },
+      "verification": {
+        "method": "The three Table 1 records were recalculated directly; updated grouped retrieval was reviewed; the 2026-2028 inspection table and process page were rendered and visually inspected; the corpus was searched explicitly for a 2022 WMP.478 actual.",
+        "verified": true
+      },
+      "suite": "user_questions"
+    },
+    {
+      "id": "beta_user_010",
+      "category": "pdf",
+      "origin": {
+        "method": "included_all_non_qdr",
+        "user_question_id": "user_question_010",
+        "original_number": "10",
+        "question_status": "selected_from_user_questions",
+        "canonical_duplicate_of": "beta_user_004",
+        "existing_problem_set_status": "checked",
+        "source_path": "user_questions/user_questions.json",
+        "source_index": 10
+      },
+      "question": "What WMP unit targets did SDG&E repeatedly not meet during the 2023-2025 WMP cycle? (2023-2025 SDG&E’s AIR and the independent evaluator report are references for this, as well as the OEIS report for SDG&E’s 2023 performance)\n10.1 What are the primary reasons those unit targets were not met?\n10.2 Were they within SDG&E’s control or due to external factors (i.e. easements, permitting, etc.)?",
+      "expected_response_behavior": "answer_with_scope_limitation",
+      "golden_answer": "The cited AIR and independent-evaluator reports are absent, so this is a Table 1 proxy, not a regulatory finding. Defining 'repeatedly' as Q4 actual below the annual target in all three years identifies WMP.463 (Advanced Protection/System Automation: 4/5 circuits in 2023, 5/8 in 2024, 7/8 in 2025), WMP.488 (Distribution Overhead Patrol Inspections: 85,857/86,880 structures, 86,140/86,197, 86,040/86,535), WMP.549 (Distribution Communications Reliability Improvements/System Automation: 11/35 base stations, 3/60, 4/5), and WMP.555 (Transmission 69kV Tier 3 Visual Inspections: 1,602/1,632 structures, 1,605/1,632, 1,601/1,632). WMP.463 cites planned undergrounding, crew reallocation, and delayed permits; WMP.549 cites engineering/onboarding delay, a GRC-driven revision, and unknown subsurface facilities. The causes are mixed: staffing, sequencing, and resource allocation are substantially internal, while regulatory funding, permit issuance, and unknown field conditions are external or shared. WMP.488 and WMP.555 are marked Complete/Completed and give no corrective-action reason, so their small numeric shortfalls should not be labeled compliance failures without the missing AIR/evaluator methodology.",
+      "retrieval_information": {
+        "required_lane": "combined",
+        "canonical_golden_id": "beta_pdf_005",
+        "source": "excel_cleaning/cleaned_csv_rag_ready/sdge_table01_rag_ready.csv",
+        "selection_rule": "Q4 actual < annual quantitative target in all three years for the same tracking ID",
+        "missing_information": [
+          "SDG&E 2023-2025 AIR",
+          "Independent evaluator report",
+          "OEIS 2023 performance report"
+        ]
+      },
+      "verification": {
+        "method": "Exact duplicate intent of user_question_004; the same Table 1 grouping, numeric comparison, reason review, and updated retrieval checks were applied independently to this retained source record.",
+        "verified": true
+      },
+      "suite": "user_questions"
+    },
+    {
+      "id": "beta_user_011",
+      "category": "combined",
+      "origin": {
+        "method": "included_all_non_qdr",
+        "user_question_id": "user_question_011",
+        "original_number": "11",
+        "question_status": "selected_from_user_questions",
+        "canonical_duplicate_of": "beta_user_005",
+        "existing_problem_set_status": "checked",
+        "source_path": "user_questions/user_questions.json",
+        "source_index": 11
+      },
+      "question": "How do SDG&E target completion rates for 2023-2025 compare to the PG&E’s and SCE’s target completion? Present this information in a table.",
+      "expected_response_behavior": "insufficient_context",
+      "golden_answer": "A defensible three-utility comparison cannot be produced from the available corpus. The tabular corpus contains SDG&E records only, and no PG&E or SCE target-performance workbooks or normalized records are available. The PDFs, including the newly added 2023-2025 Technical Guidelines, do not provide comparable 2023-2025 completion results for all three utilities. 'Target completion rate' is also ambiguous: it could mean the percentage of initiatives meeting target, actual units divided by target for each initiative, or another defined metric. Raw units cannot be aggregated across miles, structures, inspections, percentages, and other measures. The answer must request PG&E and SCE annual/Q4 data or performance reports and a single auditable metric definition; it must not fabricate a comparison.",
+      "golden_answer_table": [
+        {
+          "utility": "SDG&E",
+          "2023_2025_completion_rate": null,
+          "status": "Source records available; metric definition ambiguous"
+        },
+        {
+          "utility": "PG&E",
+          "2023_2025_completion_rate": null,
+          "status": "Required source data absent"
+        },
+        {
+          "utility": "SCE",
+          "2023_2025_completion_rate": null,
+          "status": "Required source data absent"
+        }
+      ],
+      "retrieval_information": {
+        "required_lane": "combined",
+        "canonical_golden_id": "beta_combined_001",
+        "corpus_checks": [
+          "All cleaned CSVs contain SDG&E data only",
+          "No PDF provides comparable three-utility 2023-2025 completion results",
+          "The new technical guideline defines reporting requirements but does not supply peer results"
+        ]
+      },
+      "verification": {
+        "method": "Exact duplicate of user_question_005 retained as a separate source record; CSV/PDF inventories and updated retrieval were rechecked after the new guideline ingest.",
+        "verified": true
+      },
+      "suite": "user_questions",
+      "missing_information": [
+        "PG&E target results for the same 2023-2025 scope and metric definitions",
+        "SCE target results for the same 2023-2025 scope and metric definitions"
+      ]
+    },
+    {
+      "id": "beta_user_012",
+      "category": "pdf",
+      "origin": {
+        "method": "included_all_non_qdr",
+        "user_question_id": "user_question_012",
+        "original_number": "12",
+        "question_status": "selected_from_user_questions",
+        "canonical_duplicate_of": "beta_user_006",
+        "existing_problem_set_status": "checked",
+        "source_path": "user_questions/user_questions.json",
+        "source_index": 12
+      },
+      "question": "Compare the WMP to the WMP guidelines. Flag any areas that need additional information to meet the guideline requirements.",
+      "expected_response_behavior": "answer_with_scope_limitation",
+      "golden_answer": "The WMP cycle is unspecified, so a formal compliance result requires a cycle-specific crosswalk. For 2023-2025, OEIS-confirmed gaps map directly to the technical guidelines: explain maximum-consequence aggregation and probability-distribution work; make wildfire-versus-PSPS trade-offs and risk-rank/risk-buy-down decisions transparent; compare undergrounding alternatives and time value of risk; disclose third-party model recommendations and their disposition; and reconcile measurable narrative commitments with target tables. For 2026-2028, SDG&E provides more explicit Overall Utility Risk and risk-per-mile tables, CBR comparisons, activity-effectiveness/risk-reduction tables, circuit-level annual risk, schedules, constraints, and interim mitigations. Review should still flag fields reported as n/a, subject-matter assumptions with limited data, changing model/baseline reconciliation, and explanations for construction order that differs from risk rank. This is a prioritized evidence-backed gap assessment, not a complete compliance certification.",
+      "retrieval_information": {
+        "required_lane": "pdf",
+        "canonical_golden_id": "beta_pdf_006",
+        "sources": [
+          "resources/wmp/pdf/2023-2025_WMP_TECHNICAL_GUIDELINES.pdf",
+          "resources/wmp/pdf/FINAL_SDGE_20232025_WMP_Decision_and_Cover_Letter.pdf",
+          "resources/wmp/pdf/FINAL 2026-2028_Wildfire_Mitigation_Plan_Guidelines.pdf",
+          "resources/wmp/pdf/SDG&E_2026-2028_Base-WMP_R2.pdf"
+        ]
+      },
+      "verification": {
+        "method": "Exact duplicate of user_question_006; the corresponding guideline/WMP pairs and updated retrieval results were rechecked for this retained source record.",
+        "verified": true
+      },
+      "suite": "user_questions"
+    },
+    {
+      "id": "beta_user_013",
+      "category": "pdf",
+      "origin": {
+        "method": "included_all_non_qdr",
+        "user_question_id": "user_question_013",
+        "original_number": "13",
+        "question_status": "selected_from_user_questions",
+        "canonical_duplicate_of": "beta_user_007",
+        "existing_problem_set_status": "checked",
+        "source_path": "user_questions/user_questions.json",
+        "source_index": 13
+      },
+      "question": "Review the WMP from OEIS’s perspective and provide suggestions for how to present or and adjust the plan to satisfy what OEIS and the WMP guidelines are looking for. This could be done for past cycles to develop the AI agent, but would be help for evaluating the 2028-2031 WMP as we develop it.",
+      "expected_response_behavior": "answer_with_scope_limitation",
+      "golden_answer": "A formal finding on a 2028-2031 WMP is impossible because no such draft is in the corpus. Based on OEIS's 2023-2025 decision and both guideline generations, the next plan should make every step auditable from model input to location-level selection and measurable outcome. Document calculations, assumptions, uncertainty, validation, version governance, and disposition of third-party recommendations. For every prioritized circuit or segment, identify risk drivers; compare at least two feasible portfolios; show pre/post Overall Utility, Wildfire, and Outage Program risk, lifecycle cost, CBR/RSE, uncertainty, schedule, constraints, and residual risk; and explain the selected portfolio and every override of quantitative rank. Show wildfire/PSPS/PEDS trade-offs and time value of risk, including interim measures during long construction schedules. Reconcile all narrative commitments with target tables and QDR tracking IDs. Finally, include an OEIS issue-closure matrix mapping each prior Area for Continued Improvement to action, owner, milestone, evidence, status, and exact WMP location. These steps address OEIS's concerns about maximum-consequence aggregation, risk-ranking transparency, undergrounding alternatives, model improvements, and incomplete target tables while satisfying the guidelines' alternative-analysis and circuit-risk requirements.",
+      "retrieval_information": {
+        "required_lane": "pdf",
+        "canonical_golden_id": "beta_pdf_001",
+        "sources": [
+          "resources/wmp/pdf/FINAL_SDGE_20232025_WMP_Decision_and_Cover_Letter.pdf",
+          "resources/wmp/pdf/2023-2025_WMP_TECHNICAL_GUIDELINES.pdf",
+          "resources/wmp/pdf/FINAL 2026-2028_Wildfire_Mitigation_Plan_Guidelines.pdf"
+        ]
+      },
+      "verification": {
+        "method": "Exact duplicate intent of user_question_007; updated retrieval and direct guideline/decision page checks were applied after the new ingest.",
+        "verified": true
+      },
+      "suite": "user_questions"
+    },
+    {
+      "category": "qdr",
+      "expected_response_behavior": "insufficient_context",
+      "golden_answer": "Insufficient context for a valid compliance comparison. The corpus contains SDG&E QDR metric workbooks, but the source manifest does not contain the year-specific performance and data guideline documents that governed each QDR. The system should identify the QDR year and quarter, request the exact applicable guideline version (including effective date or revision), and abstain from declaring a field compliant, missing, or noncompliant until both sides of the comparison are available. It must not treat a retrieval miss as proof that a required field is absent.",
+      "retrieval_information": {
+        "required_lane": "combined",
+        "available_source": "config/source_manifest.json contains QDR metric tables 1-15 (except table 12).",
+        "missing_source": "Applicable year- and quarter-specific performance and data guideline documents.",
+        "minimum_evidence_expectation": "Cite both the QDR and its governing guideline version before making compliance findings."
+      },
+      "verification": {
+        "method": "Compared the requested source roles with config/source_manifest.json; no performance/data guideline role is present.",
+        "verified": true
+      },
+      "id": "beta_user_014",
+      "suite": "user_questions",
+      "question": "Compare the QDRs against the applicable performance and data guidelines. Performance and data guidelines are typically updated each year, so be sure to compare each QDR against the applicable version. Flag areas where information is missing or does not meet the guideline requirements. This can be done for prior years to develop the agent, which can be applied prior to submitting the QDR each quarter.",
+      "origin": {
+        "source_path": "user_questions/user_questions.json",
+        "user_question_id": "user_question_014",
+        "source_index": 14,
+        "original_number": "14",
+        "canonical_duplicate_of": "beta_user_008"
+      },
+      "missing_information": [
+        "The applicable performance and data guideline version for each QDR year and quarter"
+      ]
+    },
+    {
+      "id": "beta_user_015",
+      "category": "combined",
+      "origin": {
+        "method": "included_all_non_qdr",
+        "user_question_id": "user_question_015",
+        "original_number": "15",
+        "question_status": "selected_from_user_questions",
+        "canonical_duplicate_of": "beta_user_009",
+        "existing_problem_set_status": "checked",
+        "source_path": "user_questions/user_questions.json",
+        "source_index": 15
+      },
+      "question": "For example, \"what numbers we have reported from 2022-2025 regarding detailed inspection and show the line chart, how does SDGE perform detailed inspection, at what frequency, are there any changes or enhancement after 2025 (this requires WMP 2026-2028).\"",
+      "expected_response_behavior": "answer_with_scope_limitation",
+      "golden_answer": "For Distribution Overhead Detailed Inspections (WMP.478), no authoritative 2022 count was found. Q4 actuals were 11,755 structures in 2023, 16,503 in 2024, and 17,950 in 2025, versus targets of 11,100, 15,450, and 13,275. SDG&E uses a thorough ground-based visual assessment of poles, attachments, conductors, cables, and equipment; tools such as infrared, drones, binoculars, and measurement devices may supplement it. Findings and repairs are recorded in work orders and prioritized under GO 95 Rule 18. GO 165 requires a five-year overhead inspection cycle. The 2026-2028 WMP says scope and frequency have not changed and identifies no planned program improvements, although it describes drones/helicopters for difficult terrain, a six-month Qualified Line Inspector training program, and possible work with the CPUC on more risk-informed timing. Future targets are 21,924 in 2026, 17,779 in 2027, and 11,537 in 2028; these are planned targets, not observed actuals.",
+      "golden_answer_table": [
+        {
+          "year": 2022,
+          "actual_structures": null,
+          "target_structures": null,
+          "series_type": "unavailable"
+        },
+        {
+          "year": 2023,
+          "actual_structures": 11755,
+          "target_structures": 11100,
+          "series_type": "reported actual"
+        },
+        {
+          "year": 2024,
+          "actual_structures": 16503,
+          "target_structures": 15450,
+          "series_type": "reported actual"
+        },
+        {
+          "year": 2025,
+          "actual_structures": 17950,
+          "target_structures": 13275,
+          "series_type": "reported actual"
+        },
+        {
+          "year": 2026,
+          "actual_structures": null,
+          "target_structures": 21924,
+          "series_type": "WMP target"
+        },
+        {
+          "year": 2027,
+          "actual_structures": null,
+          "target_structures": 17779,
+          "series_type": "WMP target"
+        },
+        {
+          "year": 2028,
+          "actual_structures": null,
+          "target_structures": 11537,
+          "series_type": "WMP target"
+        }
+      ],
+      "retrieval_information": {
+        "required_lane": "combined",
+        "canonical_golden_id": "beta_combined_002",
+        "sources": [
+          "excel_cleaning/cleaned_csv_rag_ready/sdge_table01_rag_ready.csv",
+          "resources/wmp/pdf/SDG&E_2023-2023_Base-WMP_R5-redacted.pdf",
+          "resources/wmp/pdf/SDG&E_2026-2028_Base-WMP_R2.pdf"
+        ],
+        "missing_information": [
+          "Authoritative 2022 WMP.478 actual"
+        ]
+      },
+      "verification": {
+        "method": "Exact duplicate of user_question_009; the same tabular calculations, updated retrieval, corpus search, and visual PDF checks were applied.",
+        "verified": true
+      },
+      "suite": "user_questions"
+    },
+    {
+      "id": "beta_pdf_visual_001",
+      "suite": "pdf_visual_support",
+      "category": "pdf",
+      "difficulty": "hard",
+      "support_modality": "table",
+      "visual_subtype": "table",
+      "origin": {
+        "source_path": "eval/pdf/evaluation_structured.jsonl",
+        "source_case_id": "structured_eval_0016"
+      },
+      "question": "What 2024 target updates did SDG&E request for covered-conductor hardening, strategic pole replacement, and distribution infrared inspections?",
+      "expected_response_behavior": "answer_with_visual_support",
+      "golden_answer": "Covered-conductor hardening was reduced from 60 miles to 40 miles; strategic pole replacement increased from 200 poles to 267 poles; distribution infrared inspections decreased from 9,500 inspections to 300 inspections.",
+      "retrieval_information": {
+        "required_lane": "pdf",
+        "sources": [
+          {
+            "chunk_id": 44,
+            "source_pdf": "2023-12-19_SDGE_2023_Change Order Report_R1.pdf",
+            "content_type": "table",
+            "page_start_db": 4,
+            "chunk_index": 0,
+            "breadcrumb": "2. Changes for 2024 Initiatives > Strategic Pole Replacement (WMP.1189); pg 174, SDG&E 2023-2025 Wildfire Mitigation Plan",
+            "caption": "",
+            "content_excerpt": "Covered Conductor 60 miles to 40 miles; Strategic Pole Replacement 200 to 267 poles; Distribution Infrared Inspections 9,500 to 300",
+            "source_pdf_path": "resources/wmp/pdf/2023-12-19_SDGE_2023_Change Order Report_R1.pdf",
+            "support_access": "render cited source PDF page"
+          }
+        ],
+        "minimum_evidence_expectation": "Use the cited stored table content or render the cited PDF figure page as supporting evidence; narrative-only evidence is insufficient for this case."
+      },
+      "verification": {
+        "method": "Copied from the manually audited structured PDF evaluation set and cross-checked by source case ID.",
+        "verified": true
+      }
+    },
+    {
+      "id": "beta_pdf_visual_002",
+      "suite": "pdf_visual_support",
+      "category": "pdf",
+      "difficulty": "medium",
+      "support_modality": "table",
+      "visual_subtype": "table",
+      "origin": {
+        "source_path": "eval/pdf/evaluation_structured.jsonl",
+        "source_case_id": "structured_eval_0023"
+      },
+      "question": "How did CAL FIRE-approved fuses and expulsion fuses compare in operations, ignitions, and ignition rate from 2015 through 2021?",
+      "expected_response_behavior": "answer_with_visual_support",
+      "golden_answer": "CAL FIRE-approved fuses had 760 operations, 0 ignitions, and a 0% ignition rate; expulsion fuses had 2,477 operations, 3 ignitions, and a 0.12% ignition rate.",
+      "retrieval_information": {
+        "required_lane": "pdf",
+        "sources": [
+          {
+            "chunk_id": 464,
+            "source_pdf": "SDG&E_2023-2023_Base-WMP_R5-redacted.pdf",
+            "content_type": "table",
+            "page_start_db": 253,
+            "chunk_index": 0,
+            "breadcrumb": "2023-2025 WMP R5 redacted.pdf > 8 Wildfire Mitigations > 8.1 Grid Design, Operations, and Maintenance > 8.1.4 Equipment Maintenance and Repair (WMP.1130) > 8.1.4.5 Hotline Clamp Replacement Program (WMP.464) > 8.1.4.5.2 Overview of the Activity",
+            "caption": "SDG&E Table 8-25: CAL FIRE and Expulsion Fuse Operation 2015-2021",
+            "content_excerpt": "CAL FIRE-Approved: 760, 0, 0%; Expulsion: 2,477, 3, 0.12%",
+            "source_pdf_path": "resources/wmp/pdf/SDG&E_2023-2023_Base-WMP_R5-redacted.pdf",
+            "support_access": "render cited source PDF page"
+          }
+        ],
+        "minimum_evidence_expectation": "Use the cited stored table content or render the cited PDF figure page as supporting evidence; narrative-only evidence is insufficient for this case."
+      },
+      "verification": {
+        "method": "Copied from the manually audited structured PDF evaluation set and cross-checked by source case ID.",
+        "verified": true
+      }
+    },
+    {
+      "id": "beta_pdf_visual_003",
+      "suite": "pdf_visual_support",
+      "category": "pdf",
+      "difficulty": "medium",
+      "support_modality": "figure",
+      "visual_subtype": "chart",
+      "origin": {
+        "source_path": "eval/pdf/evaluation_structured.jsonl",
+        "source_case_id": "structured_eval_0036"
+      },
+      "question": "By 2031, how many fewer customers does SDG&E project will be affected by PSPS if it pairs strategic undergrounding with covered conductor instead of using covered conductor alone?",
+      "expected_response_behavior": "answer_with_visual_support",
+      "golden_answer": "About 6,000 fewer: roughly 48,000 customers impacted with strategic undergrounding plus covered conductor, versus about 54,000 with covered conductor alone.",
+      "retrieval_information": {
+        "required_lane": "pdf",
+        "sources": [
+          {
+            "chunk_id": 418,
+            "source_pdf": "SDG&E_2023-2023_Base-WMP_R5-redacted.pdf",
+            "content_type": "figure",
+            "page_start_db": 189,
+            "chunk_index": 0,
+            "breadcrumb": "2023-2025 WMP R5 redacted.pdf > 8 Wildfire Mitigations > 8.1 Grid Design, Operations, and Maintenance > 8.1.2 Grid Design and System Hardening > 8.1.2.2 Undergrounding of Electric Lines and/or Equipment (WMP.473) > 8.1.2.2.5 Updates to the Activity",
+            "caption": "Figure 8-6: Projected PSPS Impact Reduction",
+            "content_excerpt": "2031: Customers Impacted - SUG and CC is about 48,000; CC only is about 54,000",
+            "source_pdf_path": "resources/wmp/pdf/SDG&E_2023-2023_Base-WMP_R5-redacted.pdf",
+            "support_access": "render cited source PDF page"
+          }
+        ],
+        "minimum_evidence_expectation": "Use the cited stored table content or render the cited PDF figure page as supporting evidence; narrative-only evidence is insufficient for this case."
+      },
+      "verification": {
+        "method": "Copied from the manually audited structured PDF evaluation set and cross-checked by source case ID.",
+        "verified": true
+      }
+    },
+    {
+      "id": "beta_pdf_visual_004",
+      "suite": "pdf_visual_support",
+      "category": "pdf",
+      "difficulty": "hard",
+      "support_modality": "figure",
+      "visual_subtype": "chart",
+      "origin": {
+        "source_path": "eval/pdf/evaluation_structured.jsonl",
+        "source_case_id": "structured_eval_0049"
+      },
+      "question": "How does SCE's average asset-maintenance and repair maturity change from 2023 through 2026?",
+      "expected_response_behavior": "answer_with_visual_support",
+      "golden_answer": "It is 1.50 in 2023 and 2024, then increases to 2.50 in 2025 and remains 2.50 in 2026.",
+      "retrieval_information": {
+        "required_lane": "pdf",
+        "sources": [
+          {
+            "chunk_id": 177,
+            "source_pdf": "FINAL_SDGE_20232025_WMP_Decision_and_Cover_Letter.pdf",
+            "content_type": "figure",
+            "page_start_db": 55,
+            "chunk_index": 0,
+            "breadcrumb": "SDG&E 2023-2025 WMP Decision > 8. Wildfire Mitigation Initiatives > 8.1 Grid Design, Operations, Maintenance > 8.1.4 Equipment Maintenance and Repair > 8.1.4.1 Maturity Survey Results",
+            "caption": "Figure 8.1-6. Cross-Utility Maturity for Asset Maintenance and Repair (Average Values)",
+            "content_excerpt": "SCE: 1.50, 1.50, 2.50, 2.50 for 2023-2026.",
+            "source_pdf_path": "resources/wmp/pdf/FINAL_SDGE_20232025_WMP_Decision_and_Cover_Letter.pdf",
+            "support_access": "render cited source PDF page"
+          }
+        ],
+        "minimum_evidence_expectation": "Use the cited stored table content or render the cited PDF figure page as supporting evidence; narrative-only evidence is insufficient for this case."
+      },
+      "verification": {
+        "method": "Copied from the manually audited structured PDF evaluation set and cross-checked by source case ID.",
+        "verified": true
+      }
+    },
+    {
+      "id": "beta_pdf_visual_005",
+      "suite": "pdf_visual_support",
+      "category": "pdf",
+      "difficulty": "medium",
+      "support_modality": "figure",
+      "visual_subtype": "diagram",
+      "origin": {
+        "source_path": "eval/pdf/evaluation_structured.jsonl",
+        "source_case_id": "structured_eval_0055"
+      },
+      "question": "In the distribution detailed overhead inspection process, what happens when an inspection finds that repairs are required?",
+      "expected_response_behavior": "answer_with_visual_support",
+      "golden_answer": "A severity level (1-3 per GO 95 Rule 18) is assigned, the inspection work order is completed, and a corrective work order is generated that becomes an open work order.",
+      "retrieval_information": {
+        "required_lane": "pdf",
+        "sources": [
+          {
+            "chunk_id": 436,
+            "source_pdf": "SDG&E_2023-2023_Base-WMP_R5-redacted.pdf",
+            "content_type": "figure",
+            "page_start_db": 219,
+            "chunk_index": 0,
+            "breadcrumb": "2023-2025 WMP R5 redacted.pdf > 8 Wildfire Mitigations > 8.1 Grid Design, Operations, and Maintenance > 8.1.3 Asset Inspections > 8.1.3.1 Distribution Overhead Detailed Inspections (WMP.478)",
+            "caption": "Figure 8-8: Distribution Detailed Overhead Inspections Process Flow",
+            "content_excerpt": "Repairs required? YES -> Assign severity level -> Complete WO -> Generate corrective WO -> Open Work Orders",
+            "source_pdf_path": "resources/wmp/pdf/SDG&E_2023-2023_Base-WMP_R5-redacted.pdf",
+            "support_access": "render cited source PDF page"
+          }
+        ],
+        "minimum_evidence_expectation": "Use the cited stored table content or render the cited PDF figure page as supporting evidence; narrative-only evidence is insufficient for this case."
+      },
+      "verification": {
+        "method": "Copied from the manually audited structured PDF evaluation set and cross-checked by source case ID.",
+        "verified": true
+      }
+    },
+    {
+      "id": "beta_excel_multi_001",
+      "suite": "excel_multi_sheet",
+      "category": "excel",
+      "difficulty": "hard",
+      "required_sheet_count": 2,
+      "question": "For Strategic Undergrounding (WMP.473) in 2023, compare the annual target with the Q4 actual and status, calculate percent complete, and report Territory CAPEX, Territory OPEX, and their combined spend in both $ thousands and $ millions. Do not count the duplicate HFTD spend columns or claim that spend caused performance.",
+      "expected_response_behavior": "answer_with_computation",
+      "golden_answer": "The 2023 target was 84.43 miles, the Q4 actual was 70.26 miles, and status was Delayed. Percent complete was 83.22% (70.26 / 84.43 x 100). Territory CAPEX was $174,778.4583 thousand and Territory OPEX was $428.602 thousand, totaling $175,207.0603 thousand ($175.2070603 million). The HFTD columns repeat the same amounts and are not added again; the two tables do not establish that spending caused the delivery result.",
+      "golden_answer_table": {
+        "target_miles": 84.43,
+        "q4_actual_miles": 70.26,
+        "percent_complete": 83.22,
+        "status": "Delayed",
+        "territory_capex_thousand_usd": 174778.4583,
+        "territory_opex_thousand_usd": 428.602,
+        "combined_thousand_usd": 175207.0603,
+        "combined_million_usd": 175.2070603
+      },
+      "retrieval_information": {
+        "required_lane": "excel",
+        "sources": [
+          {
+            "path": "excel_cleaning/cleaned_csv_rag_ready/sdge_table01_rag_ready.csv",
+            "logical_sheet": "Table 1",
+            "records": [
+              {
+                "record_id": "SDG&E_2023_Q4_TABLE1_WMP.473_ROW3",
+                "value_field": "annual_quant_target",
+                "expected_value": "84.43",
+                "filters": {}
+              },
+              {
+                "record_id": "SDG&E_2023_Q4_TABLE1_WMP.473_ROW3",
+                "value_field": "quant_actual_progress_q1_4",
+                "expected_value": "70.26",
+                "filters": {}
+              },
+              {
+                "record_id": "SDG&E_2023_Q4_TABLE1_WMP.473_ROW3",
+                "value_field": "status",
+                "expected_value": "Delayed",
+                "filters": {}
+              }
+            ]
+          },
+          {
+            "path": "excel_cleaning/cleaned_csv_rag_ready/sdge_table11_rag_ready.csv",
+            "logical_sheet": "Table 11",
+            "records": [
+              {
+                "record_id": "T11R-b081f910d2833075",
+                "value_field": "actual_value_canonical",
+                "expected_value": "174778.4583",
+                "filters": {}
+              },
+              {
+                "record_id": "T11R-b19097035a2439a5",
+                "value_field": "actual_value_canonical",
+                "expected_value": "428.602",
+                "filters": {}
+              }
+            ]
+          }
+        ]
+      },
+      "verification": {
+        "method": "CSV record IDs and values verified; calculations recomputed with decimal arithmetic.",
+        "verified": true
+      },
+      "origin": {
+        "source_path": "local/architecture/dev/excel_execution.jsonl",
+        "method": "constructed multi-sheet challenge verified against cleaned execution CSVs"
+      }
+    },
+    {
+      "id": "beta_excel_multi_002",
+      "suite": "excel_multi_sheet",
+      "category": "excel",
+      "difficulty": "hard",
+      "required_sheet_count": 2,
+      "question": "For 2023, report SDG&E's HFTD Tier 3 Distribution overall utility, wildfire, and PSPS risk from Table 14 alongside the rank-1 segment 237-30R values from Table 15. Explain why the tier aggregate and segment score must not be treated as the same granularity.",
+      "expected_response_behavior": "answer_with_qualification",
+      "golden_answer": "Table 14 reports HFTD Tier 3 Distribution overall utility risk 0.149265514, wildfire risk 0.131191852, and PSPS risk 0.018073663. Table 15's rank-1 segment 237-30R reports overall utility risk 0.007080829, wildfire risk 0.007012364, and PSPS risk 0.0000685. Table 14 is a tier-and-line-type aggregate, while Table 15 is one circuit segment; their magnitudes should not be directly equated or used as a part-to-whole percentage without an explicit aggregation contract.",
+      "retrieval_information": {
+        "required_lane": "excel",
+        "sources": [
+          {
+            "path": "excel_cleaning/cleaned_csv_rag_ready/sdge_table14_rag_ready.csv",
+            "logical_sheet": "Table 14",
+            "records": [
+              {
+                "record_id": "T14R-d027642fceb66a7c",
+                "value_field": "overall_utility_risk",
+                "expected_value": "0.149265514",
+                "filters": {}
+              },
+              {
+                "record_id": "T14R-d027642fceb66a7c",
+                "value_field": "wildfire_risk",
+                "expected_value": "0.131191852",
+                "filters": {}
+              },
+              {
+                "record_id": "T14R-d027642fceb66a7c",
+                "value_field": "psps_risk",
+                "expected_value": "0.018073663",
+                "filters": {}
+              }
+            ]
+          },
+          {
+            "path": "excel_cleaning/cleaned_csv_rag_ready/sdge_table15_rag_ready.csv",
+            "logical_sheet": "Table 15",
+            "records": [
+              {
+                "record_id": "T15R-2b66f561a256b569",
+                "value_field": "overall_utility_risk",
+                "expected_value": "0.007080829",
+                "filters": {}
+              },
+              {
+                "record_id": "T15R-2b66f561a256b569",
+                "value_field": "wildfire_risk",
+                "expected_value": "0.007012364",
+                "filters": {}
+              },
+              {
+                "record_id": "T15R-2b66f561a256b569",
+                "value_field": "psps_risk",
+                "expected_value": "6.85e-05",
+                "filters": {}
+              }
+            ]
+          }
+        ]
+      },
+      "verification": {
+        "method": "CSV record IDs, reporting year, risk dimensions, and values verified.",
+        "verified": true
+      },
+      "origin": {
+        "source_path": "local/architecture/dev/excel_execution.jsonl",
+        "method": "constructed multi-sheet challenge verified against cleaned execution CSVs"
+      }
+    },
+    {
+      "id": "beta_excel_multi_003",
+      "suite": "excel_multi_sheet",
+      "category": "excel",
+      "difficulty": "hard",
+      "required_sheet_count": 3,
+      "question": "For 2025 Q4 Distribution facilities in HFTD Tier 3, Rural WUI, report overhead and underground circuit-mile inventory from Table 7, the corresponding net additions/removals from Table 8, and overhead miles upgraded from Table 9. Keep stock, net change, and upgraded measures separate rather than summing them.",
+      "expected_response_behavior": "answer_with_qualification",
+      "golden_answer": "Table 7 reports 541.39862777667 overhead circuit miles and 315.732561677512 underground circuit miles. Table 8 reports 0 overhead and 0 underground net additions/removals. Table 9 reports 8.90901021566241 overhead circuit miles upgraded. Inventory is a stock, net addition/removal is a change, and upgraded miles is an activity measure, so they must be reported separately and not summed into one total.",
+      "retrieval_information": {
+        "required_lane": "excel",
+        "sources": [
+          {
+            "path": "excel_cleaning/cleaned_csv_rag_ready/sdge_table07_rag_ready.csv",
+            "logical_sheet": "Table 7",
+            "records": [
+              {
+                "record_id": "T7R-6220e1a7b72e2da5",
+                "value_field": "actual_value",
+                "expected_value": "541.39862777667",
+                "filters": {}
+              },
+              {
+                "record_id": "T7R-463cd768e48b4ead",
+                "value_field": "actual_value",
+                "expected_value": "315.732561677512",
+                "filters": {}
+              }
+            ]
+          },
+          {
+            "path": "excel_cleaning/cleaned_csv_rag_ready/sdge_table08_rag_ready.csv",
+            "logical_sheet": "Table 8",
+            "records": [
+              {
+                "record_id": "T8R-3930a09d5bd75d7a",
+                "value_field": "actual_value",
+                "expected_value": "0",
+                "filters": {}
+              },
+              {
+                "record_id": "T8R-8012e389b6a31239",
+                "value_field": "actual_value",
+                "expected_value": "0",
+                "filters": {}
+              }
+            ]
+          },
+          {
+            "path": "excel_cleaning/cleaned_csv_rag_ready/sdge_table09_rag_ready.csv",
+            "logical_sheet": "Table 9",
+            "records": [
+              {
+                "record_id": "T9R-52ae42aad9e145dc",
+                "value_field": "actual_value",
+                "expected_value": "8.90901021566241",
+                "filters": {}
+              }
+            ]
+          }
+        ]
+      },
+      "verification": {
+        "method": "CSV record IDs, dimensions, units, and Q4 values verified.",
+        "verified": true
+      },
+      "origin": {
+        "source_path": "local/architecture/dev/excel_execution.jsonl",
+        "method": "constructed multi-sheet challenge verified against cleaned execution CSVs"
+      }
+    },
+    {
+      "id": "beta_excel_multi_004",
+      "suite": "excel_multi_sheet",
+      "category": "excel",
+      "difficulty": "hard",
+      "required_sheet_count": 3,
+      "question": "For 2024 Q4, place these three reported metrics side by side: all ignition-probability events during RFW-only conditions in HFTD Tier 3 (Table 2), High FPI days (Table 3), and total PSPS events during RFW-only conditions (Table 10). Explain why these values do not support a causal claim or a rate calculation.",
+      "expected_response_behavior": "answer_with_qualification",
+      "golden_answer": "The reported values are 6 ignition-probability events for RFW-only/HFTD Tier 3, 77 High FPI days, and 2 total PSPS events during RFW-only conditions. These are different metrics with different scopes and denominators: the ignition-event value is restricted by HFTD tier, the day count is an exposure-like calendar measure, and the PSPS count is an event measure. They can be shown side by side, but no causal conclusion or valid rate follows without a defined linkage and denominator.",
+      "retrieval_information": {
+        "required_lane": "excel",
+        "sources": [
+          {
+            "path": "excel_cleaning/cleaned_csv_rag_ready/sdge_table02_rag_ready.csv",
+            "logical_sheet": "Table 2",
+            "records": [
+              {
+                "record_id": "T2-f318dbbe503d72",
+                "value_field": "actual_value_canonical",
+                "expected_value": "6",
+                "filters": {
+                  "source_file": "SDGE_2024_Q4_Tables1-15_R1.xlsx",
+                  "source_row": "14",
+                  "reporting_quarter": "4"
+                }
+              }
+            ]
+          },
+          {
+            "path": "excel_cleaning/cleaned_csv_rag_ready/sdge_table03_rag_ready.csv",
+            "logical_sheet": "Table 3",
+            "records": [
+              {
+                "record_id": "1030000000",
+                "value_field": "actual_value_canonical",
+                "expected_value": "77",
+                "filters": {
+                  "source_file": "SDGE_2024_Q4_Tables1-15_R1.xlsx",
+                  "source_row": "10",
+                  "reporting_quarter": "4"
+                }
+              }
+            ]
+          },
+          {
+            "path": "excel_cleaning/cleaned_csv_rag_ready/sdge_table10_rag_ready.csv",
+            "logical_sheet": "Table 10",
+            "records": [
+              {
+                "record_id": "T10R-1ed03c51ee6e7a32",
+                "value_field": "actual_value",
+                "expected_value": "2",
+                "filters": {}
+              }
+            ]
+          }
+        ]
+      },
+      "verification": {
+        "method": "CSV rows, Q4 period, warning status, scope, and units verified.",
+        "verified": true
+      },
+      "origin": {
+        "source_path": "local/architecture/dev/excel_execution.jsonl",
+        "method": "constructed multi-sheet challenge verified against cleaned execution CSVs"
+      }
+    },
+    {
+      "id": "beta_excel_multi_005",
+      "suite": "excel_multi_sheet",
+      "category": "excel",
+      "difficulty": "very_hard",
+      "required_sheet_count": 4,
+      "question": "Using the latest available records, report 2025 Strategic Undergrounding (WMP.473) target, Q4 actual, percent complete, status, and Territory CAPEX/OPEX/combined spend; then report the HFTD Tier 3 Distribution aggregate risk and rank-1 segment risk from the 2025 submission-vintage Tables 14 and 15. Explicitly distinguish 2025 activity/spend reporting from the 2026 risk year and do not infer causality.",
+      "expected_response_behavior": "answer_with_temporal_qualification",
+      "golden_answer": "For 2025 WMP.473, the target was 28 miles, Q4 actual was 32.56 miles, percent complete was 116.29%, and status was Completed. Territory CAPEX was $86,113.61457243848 thousand and OPEX was $2,637.3652300000003 thousand, totaling $88,750.97980243848 thousand ($88.75097980243848 million). The 2025 submission-vintage Table 14 record reports 2026 HFTD Tier 3 Distribution overall utility risk 1,911,755,775.90838, wildfire risk 1,870,251,871.48508, and outage-program risk 41,503,904.4233018. Table 15's 2026 rank-1 segment 222-1986R reports 79,194,348.7939316, 78,602,169.7569032, and 592,179.037028436 respectively. The activity and spend are 2025 reports, while the risk records describe the 2026 risk year; no causal effect can be inferred from juxtaposition.",
+      "retrieval_information": {
+        "required_lane": "excel",
+        "sources": [
+          {
+            "path": "excel_cleaning/cleaned_csv_rag_ready/sdge_table01_rag_ready.csv",
+            "logical_sheet": "Table 1",
+            "records": [
+              {
+                "record_id": "SDG&E_2025_Q4_TABLE1_WMP.473_ROW3",
+                "value_field": "annual_quant_target",
+                "expected_value": "28",
+                "filters": {}
+              },
+              {
+                "record_id": "SDG&E_2025_Q4_TABLE1_WMP.473_ROW3",
+                "value_field": "quant_actual_progress_q1_4",
+                "expected_value": "32.56",
+                "filters": {}
+              },
+              {
+                "record_id": "SDG&E_2025_Q4_TABLE1_WMP.473_ROW3",
+                "value_field": "status",
+                "expected_value": "Completed",
+                "filters": {}
+              }
+            ]
+          },
+          {
+            "path": "excel_cleaning/cleaned_csv_rag_ready/sdge_table11_rag_ready.csv",
+            "logical_sheet": "Table 11",
+            "records": [
+              {
+                "record_id": "T11R-8a464b3b729fc63a",
+                "value_field": "actual_value_canonical",
+                "expected_value": "86113.61457243848",
+                "filters": {}
+              },
+              {
+                "record_id": "T11R-dda1d7d186210cb3",
+                "value_field": "actual_value_canonical",
+                "expected_value": "2637.3652300000003",
+                "filters": {}
+              }
+            ]
+          },
+          {
+            "path": "excel_cleaning/cleaned_csv_rag_ready/sdge_table14_rag_ready.csv",
+            "logical_sheet": "Table 14",
+            "records": [
+              {
+                "record_id": "T14R-29d493e22731d03c",
+                "value_field": "overall_utility_risk",
+                "expected_value": "1911755775.90838",
+                "filters": {}
+              },
+              {
+                "record_id": "T14R-29d493e22731d03c",
+                "value_field": "wildfire_risk",
+                "expected_value": "1870251871.48508",
+                "filters": {}
+              },
+              {
+                "record_id": "T14R-29d493e22731d03c",
+                "value_field": "outage_program_risk",
+                "expected_value": "41503904.4233018",
+                "filters": {}
+              }
+            ]
+          },
+          {
+            "path": "excel_cleaning/cleaned_csv_rag_ready/sdge_table15_rag_ready.csv",
+            "logical_sheet": "Table 15",
+            "records": [
+              {
+                "record_id": "T15R-16cd219d4b65184b",
+                "value_field": "overall_utility_risk",
+                "expected_value": "79194348.7939316",
+                "filters": {}
+              },
+              {
+                "record_id": "T15R-16cd219d4b65184b",
+                "value_field": "wildfire_risk",
+                "expected_value": "78602169.7569032",
+                "filters": {}
+              },
+              {
+                "record_id": "T15R-16cd219d4b65184b",
+                "value_field": "outage_program_risk",
+                "expected_value": "592179.037028436",
+                "filters": {}
+              }
+            ]
+          }
+        ]
+      },
+      "verification": {
+        "method": "CSV records, temporal bases, values, units, and decimal calculations verified.",
+        "verified": true
+      },
+      "origin": {
+        "source_path": "local/architecture/dev/excel_execution.jsonl",
+        "method": "constructed multi-sheet challenge verified against cleaned execution CSVs"
+      }
+    },
+    {
+      "id": "beta_cross_limit_001",
+      "suite": "cross_resource_limitations",
+      "category": "cross_resource",
+      "difficulty": "very_hard",
+      "origin": {
+        "source_path": "local/architecture/dev/cross_resource_computation.jsonl",
+        "source_case_id": "cross_resource_0005",
+        "original_numeric_label": "0.13"
+      },
+      "question": "What percentage is operand A of operand B? Operand A must use the cleaned QDR workbook fact: In SDG&E's cleaned quarterly activity workbook, what 2024 annual target is listed for Quality assurance / quality control of substation inspections? Operand B must use the WMP filing fact: In SDG&E's cleaned quarterly activity workbook, what 2024 annual target is listed for Quality assurance / quality control of distribution drone assessments?",
+      "expected_response_behavior": "insufficient_context",
+      "golden_answer": "Insufficient reliable evidence to compute the requested percentage. The frozen case's source instructions are internally inconsistent, and its cited PDF excerpt does not establish the named PDF operand. The correct behavior is to identify the unsupported operand, request or retrieve evidence that directly states it, and abstain from calculating; the legacy numeric label must not be treated as valid gold.",
+      "missing_information": [
+        "A PDF excerpt that directly supports the named PDF operand",
+        "Consistent source assignment for operand A and operand B"
+      ],
+      "retrieval_information": {
+        "required_lane": "combined",
+        "sources": [
+          {
+            "expected_value": "18.0",
+            "id": "operand_a",
+            "metric": "WMP.1194",
+            "period": "2024",
+            "provenance": [
+              {
+                "annual_target_source_file": "SDGE_2024_Q4_Tables1-15_R1.xlsx",
+                "annual_target_source_row": "37",
+                "annual_target_source_sheet": "Table 1",
+                "source_file": "SDGE_2024_Q4_Tables1-15_R1.xlsx",
+                "source_revision": "1",
+                "source_row": "37",
+                "source_schema": "v3.x_2023_2024",
+                "source_sheet": "Table 1"
+              }
+            ],
+            "source": "excel",
+            "unit": "Structures"
+          },
+          {
+            "expected_value": "13500.0",
+            "id": "operand_b",
+            "metric": "WMP.1192",
+            "period": "2024",
+            "provenance": [
+              {
+                "chunk_id": 605,
+                "content_excerpt": "(8.1.3.4) 0 0 6,179 0.1848% 0 0 6,179 0.1848% 0 0 7,331 0.1848% Asset management system Distribution Wood Pole Intrusive Inspections WMP.483 (8.1.3.5) 0 50 50 0.0049% 0 0 0 0% 0 344 344 0.03% Asset management system 2023-2025 Wildfire Mitigation Plan 150 Initiative Activity Tracking ID Target End of Q2 2023 & Unit Target End of Q3 2023 & Unit End of Year Target 2023 & Unit % Risk Impact 2023 Target End of Q2 2024 & Unit Target End of Q3 2024 & Unit End of Year Target 2024 & Unit x% Risk Impact 2",
+                "content_type": "narrative",
+                "page_start_db": 176,
+                "source_pdf": "SDG&E_2023-2023_Base-WMP_R5-redacted.pdf"
+              }
+            ],
+            "source": "pdf",
+            "unit": "Structures"
+          }
+        ],
+        "audit_finding": "Source-cue contradiction and unsupported PDF operand make the original numeric label invalid."
+      },
+      "verification": {
+        "method": "Audited question source cues against each operand's provenance and cited PDF excerpt.",
+        "verified": true
+      }
+    },
+    {
+      "id": "beta_cross_limit_002",
+      "suite": "cross_resource_limitations",
+      "category": "cross_resource",
+      "difficulty": "very_hard",
+      "origin": {
+        "source_path": "local/architecture/dev/cross_resource_computation.jsonl",
+        "source_case_id": "cross_resource_0007",
+        "original_numeric_label": "75000.00"
+      },
+      "question": "What percentage is operand A of operand B? Operand A must use the cleaned QDR workbook fact: According to SDG&E's WMP filing, what was the 2024 annual target for Quality assurance / quality control of distribution drone assessments? Operand B must use the WMP filing fact: According to SDG&E's WMP filing, what was the 2024 annual target for Quality assurance / quality control of substation inspections?",
+      "expected_response_behavior": "insufficient_context",
+      "golden_answer": "Insufficient reliable evidence to compute the requested percentage. The frozen case's source instructions are internally inconsistent, and its cited PDF excerpt does not establish the named PDF operand. The correct behavior is to identify the unsupported operand, request or retrieve evidence that directly states it, and abstain from calculating; the legacy numeric label must not be treated as valid gold.",
+      "missing_information": [
+        "A PDF excerpt that directly supports the named PDF operand",
+        "Consistent source assignment for operand A and operand B"
+      ],
+      "retrieval_information": {
+        "required_lane": "combined",
+        "sources": [
+          {
+            "expected_value": "13500.0",
+            "id": "operand_a",
+            "metric": "WMP.1192",
+            "period": "2024",
+            "provenance": [
+              {
+                "annual_target_source_file": "SDGE_2024_Q4_Tables1-15_R1.xlsx",
+                "annual_target_source_row": "35",
+                "annual_target_source_sheet": "Table 1",
+                "source_file": "SDGE_2024_Q4_Tables1-15_R1.xlsx",
+                "source_revision": "1",
+                "source_row": "35",
+                "source_schema": "v3.x_2023_2024",
+                "source_sheet": "Table 1"
+              }
+            ],
+            "source": "excel",
+            "unit": "Structures"
+          },
+          {
+            "expected_value": "18.0",
+            "id": "operand_b",
+            "metric": "WMP.1194",
+            "period": "2024",
+            "provenance": [
+              {
+                "chunk_id": 12,
+                "content_excerpt": "| 2024 Target Update Requested | 2024 Original Target | 2024 Updated Target | | --- | --- | --- | | Distribution OH Hardening - Covered Conductor | 60 miles | 40 miles | | Strategic Pole Replacement Program | 200 poles | 267 poles | | Distribution Infrared Inspections | 9,500 inspections | 300 inspections | | Wireless Fault Indicators (WFIs) | 300 WFIs | 0 WFIs | | Distribution Communications Reliability Improvements | 60 base stations | 15 base stations | | Air Quality Index | 18 sensors | 0 se",
+                "content_type": "table",
+                "page_start_db": 4,
+                "source_pdf": "2023-12-19_SDGE_2023_Change Order Report_R1.pdf"
+              }
+            ],
+            "source": "pdf",
+            "unit": "Structures"
+          }
+        ],
+        "audit_finding": "Source-cue contradiction and unsupported PDF operand make the original numeric label invalid."
+      },
+      "verification": {
+        "method": "Audited question source cues against each operand's provenance and cited PDF excerpt.",
+        "verified": true
+      }
+    }
+  ]
+}
