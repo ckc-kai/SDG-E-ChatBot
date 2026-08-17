@@ -305,33 +305,76 @@ class SourceRole:
 
 
 def required_source_roles(question: str) -> tuple[SourceRole, ...]:
-    """Route explicit OEIS/guideline comparisons without a model call."""
+    """Route explicit WMP/guideline comparisons without a model call."""
     normalized = " ".join(question.strip().split())
     lowered = normalized.casefold()
-    if "oeis" not in lowered or "guideline" not in lowered:
+    if "wmp" not in lowered or "guideline" not in lowered:
         return ()
-    return (
-        SourceRole(
-            name="oeis_decision",
-            query=(
-                "2023-2025 OEIS decision areas for continued improvement risk "
-                "methodology mitigation selection prioritization"
+    if "oeis" in lowered:
+        return (
+            SourceRole(
+                name="oeis_decision",
+                query=(
+                    "2023-2025 OEIS decision areas for continued improvement risk "
+                    "methodology mitigation selection prioritization"
+                ),
+                filename_patterns=(
+                    "FINAL_SDGE_20232025_WMP_Decision_and_Cover_Letter.pdf",
+                ),
             ),
-            filename_patterns=(
-                "FINAL_SDGE_20232025_WMP_Decision_and_Cover_Letter.pdf",
+            SourceRole(
+                name="wmp_guidelines",
+                query=(
+                    "2026-2028 WMP guidelines requirements risk methodology activity "
+                    "selection prioritization scheduling risk reduction"
+                ),
+                filename_patterns=(
+                    "FINAL 2026-2028_Wildfire_Mitigation_Plan_Guidelines.pdf",
+                ),
             ),
-        ),
-        SourceRole(
-            name="wmp_guidelines",
-            query=(
-                "2026-2028 WMP guidelines requirements risk methodology activity "
-                "selection prioritization scheduling risk reduction"
-            ),
-            filename_patterns=(
-                "FINAL 2026-2028_Wildfire_Mitigation_Plan_Guidelines.pdf",
-            ),
-        ),
-    )
+        )
+
+    mentions_2023 = "2023" in lowered or "2023-2025" in lowered
+    mentions_2026 = "2026" in lowered or "2026-2028" in lowered
+    include_both = not mentions_2023 and not mentions_2026
+    roles: list[SourceRole] = []
+    if mentions_2023 or include_both:
+        roles.extend(
+            (
+                SourceRole(
+                    name="2023_wmp",
+                    query=f"{normalized} Evidence from the 2023-2025 WMP.",
+                    filename_patterns=(
+                        "SDG&E_2023-2023_Base-WMP_R5-redacted.pdf",
+                    ),
+                ),
+                SourceRole(
+                    name="2023_guidelines",
+                    query=f"{normalized} Requirements from the 2023-2025 guidelines.",
+                    filename_patterns=(
+                        "2023-2025_WMP_TECHNICAL_GUIDELINES.pdf",
+                    ),
+                ),
+            )
+        )
+    if mentions_2026 or include_both:
+        roles.extend(
+            (
+                SourceRole(
+                    name="2026_wmp",
+                    query=f"{normalized} Evidence from the 2026-2028 WMP.",
+                    filename_patterns=("SDG&E_2026-2028_Base-WMP_R2.pdf",),
+                ),
+                SourceRole(
+                    name="2026_guidelines",
+                    query=f"{normalized} Requirements from the 2026-2028 guidelines.",
+                    filename_patterns=(
+                        "FINAL 2026-2028_Wildfire_Mitigation_Plan_Guidelines.pdf",
+                    ),
+                ),
+            )
+        )
+    return tuple(roles)
 
 
 def _deduplicate_subquestions(question: str, sub_questions: list[str]) -> list[str]:

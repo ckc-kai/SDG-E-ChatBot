@@ -90,6 +90,27 @@ class AskRouterTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["error"], "invalid_filters")
 
+    def test_exact_entity_history_bypasses_planner_for_verified_execution(self):
+        bundle = MagicMock()
+        self.retrieval.retrieve.return_value = bundle
+        self.generation.generate.return_value = AnswerResponse(
+            request_id="req_history", answer="ok", cited_chunk_ids=(), citations=(),
+            insufficient_context=False, model_id="fake", latency_ms=1,
+        )
+
+        response = self.client.post("/api/ask", json={
+            "request_id": "req_history",
+            "question": (
+                "Across the 2023-2025 WMP cycle, show WMP.478 targets, "
+                "actuals, and percent complete."
+            ),
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.retrieval.retrieve.assert_called_once()
+        self.retrieval.retrieve_plan.assert_not_called()
+        self.generation.plan_retrieval.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

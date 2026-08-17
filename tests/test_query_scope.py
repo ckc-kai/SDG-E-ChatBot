@@ -82,6 +82,40 @@ class QueryScopeTests(unittest.TestCase):
 
         self.assertEqual(required_source_roles(question), ())
 
+    def test_required_source_roles_cover_both_wmp_cycles_and_guidelines(self):
+        question = (
+            "Comparing the 2023-2025 WMP, 2026-2028 WMP, and corresponding "
+            "guidelines, what are opportunities to improve risk methodology?"
+        )
+
+        roles = required_source_roles(question)
+
+        self.assertEqual(
+            [role.name for role in roles],
+            [
+                "2023_wmp",
+                "2023_guidelines",
+                "2026_wmp",
+                "2026_guidelines",
+            ],
+        )
+
+    def test_unspecified_wmp_guideline_comparison_covers_both_cycles(self):
+        roles = required_source_roles(
+            "Compare the WMP to the WMP guidelines and flag missing information."
+        )
+
+        self.assertEqual(len(roles), 4)
+        self.assertEqual(
+            {pattern for role in roles for pattern in role.filename_patterns},
+            {
+                "SDG&E_2023-2023_Base-WMP_R5-redacted.pdf",
+                "2023-2025_WMP_TECHNICAL_GUIDELINES.pdf",
+                "SDG&E_2026-2028_Base-WMP_R2.pdf",
+                "FINAL 2026-2028_Wildfire_Mitigation_Plan_Guidelines.pdf",
+            },
+        )
+
     def test_focused_lexical_query_keeps_years_and_distinctive_terms(self):
         expression = pdf_query._focused_lexical_query(
             "How did grid hardening prioritization evolve from 2023 to 2025?"

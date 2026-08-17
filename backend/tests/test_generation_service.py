@@ -7,6 +7,7 @@ from retrieval.query.excel.query import RECORDS, ExcelQueryPlan
 from retrieval.query.pdf import EvidenceGroup, EvidenceRetrievalResult
 from services.generation_service import (
     GenerationService,
+    _verified_excel_chunks,
     deduplicate_chunks,
     interleave_grouped_results,
 )
