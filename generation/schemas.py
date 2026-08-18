@@ -68,6 +68,8 @@ class ModelAnswer:
     answer: str
     cited_chunk_ids: tuple[str, ...]
     insufficient_context: bool
+    answered_requirements: tuple[str, ...] = ()
+    missing_requirements: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -109,6 +111,8 @@ class AnswerResponse:
     latency_ms: int
     warnings: tuple[str, ...] = ()
     timings: AnswerTimings | None = None
+    answered_requirements: tuple[str, ...] = ()
+    missing_requirements: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serializable structure for Task 4."""

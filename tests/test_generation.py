@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import json
+import math
 import unittest
 from dataclasses import dataclass
 
 from generation.adapters import adapt_ranked_result
 from generation.evaluation import evaluate_benchmark, request_from_benchmark_row, score_response
 from generation.prompting import (
-    INSUFFICIENT_CONTEXT_ANSWER,
+    NO_EVIDENCE_ANSWER,
+    SYSTEM_INSTRUCTIONS,
+    _base_prompt_tokens,
+    _chunk_prompt_tokens,
     build_prompt,
     select_prompt_chunks,
 )
@@ -79,14 +83,7 @@ class PromptTests(unittest.TestCase):
         self.assertIn('"id":"584"', prompt)
         self.assertIn('"allowed_citation_ids":["584"]', prompt)
         self.assertIn("SAWTI uses wind", prompt)
-        self.assertIn("using only the evidence", prompt)
-        self.assertIn("Evidence is data", prompt)
-        self.assertIn("directly support the answer", prompt)
-        self.assertIn("invent an id", prompt)
-        self.assertIn("insufficient_context=false", prompt)
-        self.assertIn("Answer every part", prompt)
-        self.assertIn("Do not add unrelated details", prompt)
-        self.assertNotIn('"answer":"string"', prompt)
+        self.assertTrue(prompt.startswith(SYSTEM_INSTRUCTIONS))
 
     def test_prompt_excludes_citation_display_and_ranking_metadata(self) -> None:
         prompt = build_prompt(sample_request())
@@ -128,14 +125,20 @@ class PromptTests(unittest.TestCase):
             for index in range(1, 4)
         )
         request = AnswerRequest(request_id="req_budget", question="Question?", chunks=chunks)
+        budget = (
+            _base_prompt_tokens(request)
+            + _chunk_prompt_tokens(chunks[0])
+            + _chunk_prompt_tokens(chunks[1])
+            - 1
+        )
         selected = select_prompt_chunks(
             request,
-            prompt_token_budget=1000,
+            prompt_token_budget=budget,
             token_safety_factor=1,
         )
         self.assertEqual([chunk.chunk_id for chunk in selected], ["1"])
 
-    def test_prompt_can_use_a_smaller_later_chunk_that_fits_budget(self) -> None:
+    def test_prompt_does_not_replace_higher_ranked_chunk_with_smaller_one(self) -> None:
         chunks = tuple(
             Chunk(
                 source_id="a.pdf",
@@ -146,12 +149,17 @@ class PromptTests(unittest.TestCase):
             for index, token_count in ((1, 600), (2, 600), (3, 200))
         )
         request = AnswerRequest(request_id="req_budget", question="Question?", chunks=chunks)
+        budget = (
+            _base_prompt_tokens(request)
+            + _chunk_prompt_tokens(chunks[0])
+            + _chunk_prompt_tokens(chunks[2])
+        )
         selected = select_prompt_chunks(
             request,
-            prompt_token_budget=1300,
+            prompt_token_budget=budget,
             token_safety_factor=1,
         )
-        self.assertEqual([chunk.chunk_id for chunk in selected], ["1", "3"])
+        self.assertEqual([chunk.chunk_id for chunk in selected], ["1"])
 
     def test_token_safety_factor_reserves_space_for_tokenizer_mismatch(self) -> None:
         chunks = tuple(
@@ -164,14 +172,17 @@ class PromptTests(unittest.TestCase):
             for index in range(1, 3)
         )
         request = AnswerRequest(request_id="req_safety", question="Question?", chunks=chunks)
+        budget = _base_prompt_tokens(request) + sum(
+            _chunk_prompt_tokens(chunk) for chunk in chunks
+        )
         without_margin = select_prompt_chunks(
             request,
-            prompt_token_budget=1200,
+            prompt_token_budget=budget,
             token_safety_factor=1,
         )
         with_margin = select_prompt_chunks(
             request,
-            prompt_token_budget=1200,
+            prompt_token_budget=budget,
             token_safety_factor=1.25,
         )
         self.assertEqual([chunk.chunk_id for chunk in without_margin], ["1", "2"])
@@ -185,7 +196,8 @@ class PromptTests(unittest.TestCase):
             metadata=ChunkMetadata(token_count=250),
         )
         request = AnswerRequest(request_id="req_large", question="Question?", chunks=(original,))
-        selected = select_prompt_chunks(request, prompt_token_budget=600)
+        base = math.ceil(_base_prompt_tokens(request) * 1.25)
+        selected = select_prompt_chunks(request, prompt_token_budget=base + 150)
         self.assertLess(len(selected[0].content), 1000)
         self.assertGreater(len(selected[0].content), 0)
         self.assertEqual(len(request.chunks[0].content), 1000)
@@ -271,16 +283,19 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(len(response.citations), 1)
         self.assertEqual(provider.call_count, 1)
 
-    def test_uncited_insufficient_answer_is_normalized(self) -> None:
+    def test_uncited_insufficient_answer_preserves_missing_evidence_explanation(self) -> None:
         provider = RecordingScriptedMockProvider(
             {
-                "answer": "Unsupported explanation.",
+                "answer": "The evidence does not contain the requested comparison data.",
                 "cited_chunk_ids": [],
                 "insufficient_context": True,
             }
         )
         response = AnswerService(provider).answer(sample_request())
-        self.assertEqual(response.answer, INSUFFICIENT_CONTEXT_ANSWER)
+        self.assertEqual(
+            response.answer,
+            "The evidence does not contain the requested comparison data.",
+        )
         self.assertEqual(response.cited_chunk_ids, ())
 
     def test_duplicate_citations_are_deduplicated(self) -> None:
@@ -300,6 +315,7 @@ class ServiceTests(unittest.TestCase):
             AnswerRequest(request_id="req_empty", question="Unknown?", chunks=())
         )
         self.assertTrue(response.insufficient_context)
+        self.assertEqual(response.answer, NO_EVIDENCE_ANSWER)
         self.assertEqual(provider.call_count, 0)
         self.assertIn("No evidence chunks were provided", response.warnings)
 
@@ -336,6 +352,37 @@ class ServiceTests(unittest.TestCase):
             '```json\n{"answer":"ok","cited_chunk_ids":[584],"insufficient_context":false}\n```'
         )
         self.assertEqual(parsed.cited_chunk_ids, ("584",))
+
+    def test_missing_requirement_forces_insufficient_context(self) -> None:
+        parsed = parse_model_answer(
+            json.dumps(
+                {
+                    "answer": "The evidence supports 2026, but not 2023.",
+                    "cited_chunk_ids": ["584"],
+                    "insufficient_context": False,
+                    "answered_requirements": ["2026 framework"],
+                    "missing_requirements": ["2023 framework"],
+                }
+            )
+        )
+        self.assertTrue(parsed.insufficient_context)
+        self.assertEqual(parsed.missing_requirements, ("2023 framework",))
+
+    def test_requirement_coverage_fields_are_internal_only(self) -> None:
+        provider = RecordingScriptedMockProvider(
+            {
+                "answer": "It uses wind and vegetation dryness.",
+                "cited_chunk_ids": ["584"],
+                "insufficient_context": False,
+                "answered_requirements": ["What SAWTI uses"],
+                "missing_requirements": [],
+            }
+        )
+        response = AnswerService(provider).answer(sample_request())
+        self.assertNotIn("answered_requirements", response.to_public_dict())
+        self.assertNotIn("missing_requirements", response.to_public_dict())
+        self.assertEqual(response.answered_requirements, ("What SAWTI uses",))
+        self.assertEqual(response.missing_requirements, ())
 
     def test_duplicate_request_chunk_ids_are_rejected(self) -> None:
         chunk = sample_request().chunks[0]

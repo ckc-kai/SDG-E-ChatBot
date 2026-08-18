@@ -14,7 +14,7 @@ from generation.prompting import (
     DEFAULT_CONTEXT_WINDOW_TOKENS,
     DEFAULT_OUTPUT_TOKEN_RESERVE,
     DEFAULT_TOKEN_SAFETY_FACTOR,
-    INSUFFICIENT_CONTEXT_ANSWER,
+    NO_EVIDENCE_ANSWER,
     PromptBudgetError,
     prepare_prompt,
 )
@@ -38,23 +38,6 @@ class ModelOutputError(ValueError):
     """Raised when a provider does not honor the structured-output contract."""
 
 
-def normalize_insufficient_answer(model_answer: ModelAnswer) -> ModelAnswer:
-    """Keep cited partial findings; normalize a citation-free refusal.
-
-    An incomplete answer may still contain useful grounded findings. Those are
-    public only when the model selected evidence for later validation.
-    """
-    if not model_answer.insufficient_context:
-        return model_answer
-    if model_answer.cited_chunk_ids:
-        return model_answer
-    return ModelAnswer(
-        answer=INSUFFICIENT_CONTEXT_ANSWER,
-        cited_chunk_ids=(),
-        insufficient_context=True,
-    )
-
-
 def parse_model_answer(raw: str) -> ModelAnswer:
     cleaned = _FENCE_RE.sub("", raw.strip()).strip()
     try:
@@ -67,16 +50,28 @@ def parse_model_answer(raw: str) -> ModelAnswer:
     answer = payload.get("answer")
     cited_ids = payload.get("cited_chunk_ids")
     insufficient = payload.get("insufficient_context")
+    answered_requirements = payload.get("answered_requirements", [])
+    missing_requirements = payload.get("missing_requirements", [])
     if not isinstance(answer, str) or not answer.strip():
         raise ModelOutputError("Model field 'answer' must be a non-empty string")
     if not isinstance(cited_ids, list) or not all(isinstance(item, (str, int)) for item in cited_ids):
         raise ModelOutputError("Model field 'cited_chunk_ids' must be a list of strings")
     if not isinstance(insufficient, bool):
         raise ModelOutputError("Model field 'insufficient_context' must be boolean")
+    if not isinstance(answered_requirements, list) or not all(
+        isinstance(item, str) and item.strip() for item in answered_requirements
+    ):
+        raise ModelOutputError("Model field 'answered_requirements' must be a string array")
+    if not isinstance(missing_requirements, list) or not all(
+        isinstance(item, str) and item.strip() for item in missing_requirements
+    ):
+        raise ModelOutputError("Model field 'missing_requirements' must be a string array")
     return ModelAnswer(
         answer=answer.strip(),
         cited_chunk_ids=tuple(str(item) for item in cited_ids),
-        insufficient_context=insufficient,
+        insufficient_context=insufficient or bool(missing_requirements),
+        answered_requirements=tuple(item.strip() for item in answered_requirements),
+        missing_requirements=tuple(item.strip() for item in missing_requirements),
     )
 
 
@@ -89,13 +84,21 @@ class AnswerService:
         token_safety_factor: float | None = None,
     ) -> None:
         self.provider = provider
+        self._prompt_token_budget_override = prompt_token_budget
+        capabilities = getattr(provider, "capabilities", None)
         context_tokens = getattr(
-            provider, "context_tokens", DEFAULT_CONTEXT_WINDOW_TOKENS
+            capabilities,
+            "context_window",
+            getattr(provider, "context_tokens", DEFAULT_CONTEXT_WINDOW_TOKENS),
         )
         output_reserve = getattr(
             provider, "max_tokens", DEFAULT_OUTPUT_TOKEN_RESERVE
         )
-        calculated_budget = context_tokens - output_reserve
+        calculated_budget = getattr(
+            capabilities or provider,
+            "prompt_token_budget",
+            context_tokens - output_reserve,
+        )
         self.prompt_token_budget = (
             calculated_budget if prompt_token_budget is None else prompt_token_budget
         )
@@ -119,11 +122,24 @@ class AnswerService:
         parse_ms = 0
         citation_validation_ms = 0
         usage = None
+        refresh_capabilities = getattr(self.provider, "refresh_capabilities", None)
+        if callable(refresh_capabilities):
+            refresh_capabilities()
+        capability_budget = getattr(
+            getattr(self.provider, "capabilities", None),
+            "prompt_token_budget",
+            self.prompt_token_budget,
+        )
+        active_prompt_budget = (
+            capability_budget
+            if self._prompt_token_budget_override is None
+            else min(self._prompt_token_budget_override, capability_budget)
+        )
         if not request.chunks:
             latency_ms = round((time.perf_counter() - started) * 1000)
             return AnswerResponse(
                 request_id=request.request_id,
-                answer="The provided evidence is insufficient to answer the question.",
+                answer=NO_EVIDENCE_ANSWER,
                 cited_chunk_ids=(),
                 citations=(),
                 insufficient_context=True,
@@ -137,9 +153,23 @@ class AnswerService:
             prompt_started = time.perf_counter()
             prepared_prompt = prepare_prompt(
                 request,
-                prompt_token_budget=self.prompt_token_budget,
+                prompt_token_budget=active_prompt_budget,
                 token_safety_factor=self.token_safety_factor,
             )
+            acquire_prompt_budget = getattr(
+                self.provider, "acquire_prompt_token_budget", None
+            )
+            if callable(acquire_prompt_budget):
+                quota_budget = acquire_prompt_budget(
+                    prepared_prompt.safety_adjusted_tokens
+                )
+                final_budget = min(active_prompt_budget, quota_budget)
+                if final_budget < active_prompt_budget:
+                    prepared_prompt = prepare_prompt(
+                        request,
+                        prompt_token_budget=final_budget,
+                        token_safety_factor=self.token_safety_factor,
+                    )
             prompt_build_ms = round((time.perf_counter() - prompt_started) * 1000)
             prompt_request = AnswerRequest(
                 request_id=request.request_id,
@@ -155,7 +185,7 @@ class AnswerService:
             actual_input_tokens = getattr(usage, "input_tokens", None)
             if (
                 isinstance(actual_input_tokens, int)
-                and actual_input_tokens > self.prompt_token_budget
+                and actual_input_tokens > active_prompt_budget
             ):
                 logger.warning(
                     "Provider input tokens exceeded Task 3 prompt budget for "
@@ -163,14 +193,12 @@ class AnswerService:
                     "safety_adjusted=%d",
                     request.request_id,
                     actual_input_tokens,
-                    self.prompt_token_budget,
+                    active_prompt_budget,
                     prepared_prompt.estimated_tokens,
                     prepared_prompt.safety_adjusted_tokens,
                 )
             parse_started = time.perf_counter()
-            model_answer = normalize_insufficient_answer(
-                parse_model_answer(raw_model_answer)
-            )
+            model_answer = parse_model_answer(raw_model_answer)
             parse_ms = round((time.perf_counter() - parse_started) * 1000)
             validation_started = time.perf_counter()
             valid_ids, citations, warnings = validate_and_hydrate_citations(
@@ -220,6 +248,8 @@ class AnswerService:
                 citation_validation_ms=citation_validation_ms,
                 total_ms=latency_ms,
             ),
+            answered_requirements=model_answer.answered_requirements,
+            missing_requirements=model_answer.missing_requirements,
         )
 
 

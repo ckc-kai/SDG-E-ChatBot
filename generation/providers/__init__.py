@@ -1,6 +1,7 @@
 """Model provider interfaces and local test doubles."""
 
 from generation.providers.base import ModelProvider, ProviderError
+from generation.providers.capabilities import ModelCapabilities, RateLimitState
 from generation.providers.bedrock import BedrockProvider, BedrockUsage
 from generation.providers.factory import create_provider_from_env
 from generation.providers.groq import GroqProvider, GroqUsage
@@ -11,6 +12,8 @@ __all__ = [
     "BedrockProvider",
     "BedrockUsage",
     "ModelProvider",
+    "ModelCapabilities",
+    "RateLimitState",
     "OllamaProvider",
     "OllamaUsage",
     "GroqProvider",
