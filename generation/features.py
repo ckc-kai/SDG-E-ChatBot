@@ -14,6 +14,7 @@ DEFAULTS = {
     "metadata_routing": True,
     "cross_resource_computation": True,
     "parent_child_expansion": False,
+    "model_excel_planner": True,
 }
 
 

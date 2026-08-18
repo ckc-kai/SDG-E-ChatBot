@@ -69,8 +69,12 @@ def ask(
                 content_types=multiple_types,
                 **retrieval_kwargs,
             )
-        elif is_entity_history_question(payload.question):
-            # Preserve the exact, validated Excel fast path.
+        elif is_entity_history_question(payload.question) and not needs_planning(
+            payload.question
+        ):
+            # Preserve the exact, validated Excel fast path for single-intent
+            # history questions; multi-part questions still decompose so their
+            # non-history parts retrieve evidence too.
             bundle = retrieval_service.retrieve(payload.question, **retrieval_kwargs)
         elif payload.rewrite_mode == "off" or (
             payload.rewrite_mode != "always"

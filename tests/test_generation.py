@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import unittest
 from dataclasses import dataclass
 
@@ -13,6 +14,7 @@ from generation.evaluation import (
 )
 from generation.prompting import (
     INSUFFICIENT_CONTEXT_ANSWER,
+    _base_prompt_tokens,
     build_prompt,
     select_prompt_chunks,
 )
@@ -101,7 +103,9 @@ class PromptTests(unittest.TestCase):
 
     def test_prompt_excludes_citation_display_and_ranking_metadata(self) -> None:
         prompt = build_prompt(sample_request())
-        self.assertIn('"context":"8 Wildfire Mitigations', prompt)
+        # Context labels the source document so cross-document questions can
+        # attribute every excerpt to its filing.
+        self.assertIn('"context":"WMP.pdf | 8 Wildfire Mitigations', prompt)
         self.assertNotIn('"source":"WMP.pdf"', prompt)
         self.assertNotIn("page_start", prompt)
         self.assertNotIn("page_end", prompt)
@@ -141,7 +145,7 @@ class PromptTests(unittest.TestCase):
         )
         selected = select_prompt_chunks(
             request,
-            prompt_token_budget=1000,
+            prompt_token_budget=_base_prompt_tokens(request) + 600,
             token_safety_factor=1,
         )
         self.assertEqual([chunk.chunk_id for chunk in selected], ["1"])
@@ -159,9 +163,11 @@ class PromptTests(unittest.TestCase):
         request = AnswerRequest(
             request_id="req_budget", question="Question?", chunks=chunks
         )
+        # Budgets are relative to the instruction size so instruction edits do
+        # not silently change what this test exercises.
         selected = select_prompt_chunks(
             request,
-            prompt_token_budget=1300,
+            prompt_token_budget=_base_prompt_tokens(request) + 850,
             token_safety_factor=1,
         )
         self.assertEqual([chunk.chunk_id for chunk in selected], ["1", "3"])
@@ -179,14 +185,15 @@ class PromptTests(unittest.TestCase):
         request = AnswerRequest(
             request_id="req_safety", question="Question?", chunks=chunks
         )
+        budget = math.ceil(_base_prompt_tokens(request) * 1.25) + 600
         without_margin = select_prompt_chunks(
             request,
-            prompt_token_budget=1200,
+            prompt_token_budget=budget,
             token_safety_factor=1,
         )
         with_margin = select_prompt_chunks(
             request,
-            prompt_token_budget=1200,
+            prompt_token_budget=budget,
             token_safety_factor=1.25,
         )
         self.assertEqual([chunk.chunk_id for chunk in without_margin], ["1", "2"])
@@ -200,7 +207,8 @@ class PromptTests(unittest.TestCase):
             metadata=ChunkMetadata(token_count=250),
         )
         request = AnswerRequest(request_id="req_large", question="Question?", chunks=(original,))
-        selected = select_prompt_chunks(request, prompt_token_budget=600)
+        budget = math.ceil(_base_prompt_tokens(request) * 1.25) + 150
+        selected = select_prompt_chunks(request, prompt_token_budget=budget)
         self.assertLess(len(selected[0].content), 1000)
         self.assertGreater(len(selected[0].content), 0)
         self.assertEqual(len(request.chunks[0].content), 1000)

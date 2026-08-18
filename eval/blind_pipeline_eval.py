@@ -216,7 +216,6 @@ def capture_answers(
         if backend_path not in sys.path:
             sys.path.insert(0, backend_path)
         from generation.planning import needs_planning
-        from retrieval.query.excel.channel import is_entity_history_question
         from services.generation_service import (
             GenerationService,
             interleave_grouped_results,
@@ -262,10 +261,7 @@ def capture_answers(
                 ]
                 evidence_count = len(ranked_results)
             else:
-                if (
-                    needs_planning(case["question"])
-                    and not is_entity_history_question(case["question"])
-                ):
+                if needs_planning(case["question"]):
                     plan = generation_service.plan_retrieval(case["question"])
                     bundle = retrieval_service.retrieve_plan(
                         case["question"],

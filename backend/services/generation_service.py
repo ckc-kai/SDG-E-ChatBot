@@ -78,6 +78,10 @@ class GenerationService:
         ranked_results = interleave_grouped_results(bundle.evidence)
         chunks = list(adapt_ranked_results(ranked_results))
         if feature_enabled("cross_resource_computation"):
+            for index, note in reversed(
+                tuple(enumerate(getattr(bundle, "computation_notes", ()), start=1))
+            ):
+                chunks.insert(0, _computation_note_chunk(note, index))
             for index, calculation in reversed(
                 tuple(enumerate(bundle.calculations, start=1))
             ):
@@ -88,6 +92,21 @@ class GenerationService:
         for answer in reversed(verified_items):
             chunks[0:0] = _verified_excel_chunks(answer)
         chunks = deduplicate_chunks(chunks)
+        # Two verified executions of one card (different plan shapes) share a
+        # card id; keep every distinct result citable under a unique id.
+        seen_ids: dict[str, int] = {}
+        unique_chunks: list[Chunk] = []
+        for chunk in chunks:
+            count = seen_ids.get(chunk.chunk_id)
+            if count is None:
+                seen_ids[chunk.chunk_id] = 0
+            else:
+                seen_ids[chunk.chunk_id] = count + 1
+                chunk = replace(
+                    chunk, chunk_id=f"{chunk.chunk_id}-v{count + 1}"
+                )
+            unique_chunks.append(chunk)
+        chunks = unique_chunks
         request = AnswerRequest(
             request_id=request_id,
             question=question,
@@ -112,7 +131,40 @@ class GenerationService:
     def plan_retrieval(self, question: str) -> RetrievalPlan:
         if self._planner_provider is None:
             self._planner_provider = _create_planner_provider()
-        return build_retrieval_plan(question, self._planner_provider)
+        plan = build_retrieval_plan(question, self._planner_provider)
+        if plan.source != "fallback":
+            return plan
+        # Local planner failure would silently degrade a multi-part question
+        # to one broad step; escalate once to the hosted structured planner.
+        escalation = self._escalation_planner_provider()
+        if escalation is None:
+            return plan
+        escalated = build_retrieval_plan(question, escalation)
+        return escalated if escalated.source == "model" else plan
+
+    _escalation_provider = None
+    _escalation_failed = False
+
+    def _escalation_planner_provider(self):
+        if self._escalation_provider is not None or self._escalation_failed:
+            return self._escalation_provider
+        if not os.getenv("GROQ_API_KEY", "").strip():
+            self._escalation_failed = True
+            return None
+        values = dict(os.environ)
+        values["GROQ_MODEL"] = values.get(
+            "TASK3_PLANNER_ESCALATION_MODEL", "openai/gpt-oss-120b"
+        )
+        values["GROQ_MAX_TOKENS"] = "700"
+        values["GROQ_REASONING_EFFORT"] = "low"
+        try:
+            self._escalation_provider = create_provider_from_env(
+                "groq", environ=values
+            )
+        except Exception:  # noqa: BLE001 - degrade to the local fallback plan
+            self._escalation_failed = True
+            self._escalation_provider = None
+        return self._escalation_provider
 
     def route_retrieval(self, question: str) -> RouteDecision:
         """Apply deterministic routing and consult one local judge only if needed."""
@@ -152,6 +204,19 @@ def _calculation_chunk(result: CalculationResult, index: int) -> Chunk:
             breadcrumb="Cross-resource deterministic calculation",
             content_type="calculation",
             contributing_sources=result.contributing_sources,
+        ),
+    )
+
+
+def _computation_note_chunk(note: str, index: int) -> Chunk:
+    return Chunk(
+        source_id="Computation status",
+        chunk_id=f"computation-note-{index}",
+        content=note,
+        metadata=ChunkMetadata(
+            source_file="Computation status",
+            breadcrumb="Cross-resource computation status",
+            content_type="calculation",
         ),
     )
 
