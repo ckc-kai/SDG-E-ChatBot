@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ from retrieval.query.excel.channel import (
     answer_from_excel,
     is_entity_history_question,
 )
+from retrieval.query.excel.query import bind_entity_key
 from retrieval.query.pdf import EvidenceGroup, EvidenceRetrievalResult, retrieve_configured
 from retrieval.query.pdf.query import required_source_roles
 from retrieval.utils import connect_db
@@ -26,6 +28,11 @@ _CONTENT_TYPE_TO_GROUP = {
     "figure": "figure",
     "excel_card": "excel",
 }
+
+_WORKBOOK_SIGNAL_RE = re.compile(
+    r"\btables?\s+\d+\b|\bQ[1-4]\b|\b(?:QDR|workbook|quarterly data report)\b",
+    re.I,
+)
 
 
 @dataclass(frozen=True)
@@ -46,6 +53,7 @@ class RetrievalBundle:
     calculations: tuple[CalculationResult, ...] = ()
     plan: RetrievalPlan | None = None
     step_bundles: tuple["RetrievalBundle", ...] = ()
+    computation_notes: tuple[str, ...] = ()
 
 
 def _groups_for_types(content_types) -> tuple[str, ...]:
@@ -53,13 +61,27 @@ def _groups_for_types(content_types) -> tuple[str, ...]:
 
 
 def _scoped_step_question(original_question: str, step_question: str) -> str:
-    """Keep explicit document roles if a model planner drops part of the scope."""
+    """Keep explicit document roles and entity ids a model planner may drop.
+
+    A step missing the original question's WMP.### entity id is dangerous
+    specifically for Excel: the channel would search cards without an entity
+    filter and can confidently return a different activity's value instead of
+    declining. Re-append the id whenever a step omits it.
+    """
+    step_question = _reattach_entity_key(original_question, step_question)
     if not required_source_roles(original_question):
         return step_question
     return (
         f"{step_question} Required source scope from the original question: "
         f"{original_question}"
     )
+
+
+def _reattach_entity_key(original_question: str, step_question: str) -> str:
+    original_key = bind_entity_key(original_question)
+    if original_key is None or bind_entity_key(step_question) is not None:
+        return step_question
+    return f"{step_question} ({original_key})"
 
 
 class RetrievalService:
@@ -102,6 +124,16 @@ class RetrievalService:
                 if content_types is None
                 else "excel_card" in content_types
             )
+            # Workbook signals make the question Excel-answerable even when a
+            # planner labeled the step pdf: an exact entity id, a QDR table
+            # reference, or a quarter token (the router's own Excel cue). The
+            # channel is generate-and-verify, so wrong attempts decline
+            # harmlessly.
+            if (
+                bind_entity_key(question) is not None
+                or _WORKBOOK_SIGNAL_RE.search(question)
+            ):
+                excel_requested = True
             should_try_excel = excel_requested and not source_roles
             excel_attempted = False
 
@@ -249,6 +281,30 @@ class RetrievalService:
                 if key not in verified_keys:
                     verified_keys.add(key)
                     verified_list.append(answer)
+
+        calculations: tuple[CalculationResult, ...] = ()
+        computation_notes: tuple[str, ...] = ()
+        if feature_enabled("cross_resource_computation"):
+            from generation.cross_resource import (
+                attempt_cross_resource_calculations,
+                question_requests_computation,
+            )
+
+            if question_requests_computation(question):
+                computation_conn = connect_db()
+                try:
+                    calculations, computation_answers, computation_notes = (
+                        attempt_cross_resource_calculations(
+                            question, computation_conn
+                        )
+                    )
+                finally:
+                    computation_conn.close()
+                for answer in computation_answers:
+                    key = (answer.card_chunk_id, answer.question)
+                    if key not in verified_keys:
+                        verified_keys.add(key)
+                        verified_list.append(answer)
         verified_items = tuple(verified_list)
         timings = RetrievalTimings(
             connection_ms=sum(item.timings.connection_ms for item in step_bundles),
@@ -265,6 +321,8 @@ class RetrievalService:
             verified_excel=verified_items[0] if verified_items else None,
             verified_excels=verified_items,
             timings=timings,
+            calculations=calculations,
+            computation_notes=computation_notes,
             plan_diagnostics={
                 "source": plan.source,
                 "trigger_reason": plan.trigger_reason,

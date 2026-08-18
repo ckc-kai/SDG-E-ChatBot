@@ -59,6 +59,18 @@ _MULTI_SCOPE_RE = re.compile(
     r"\b(across|between)\b.*\b(cycles?|years?|utilities|documents?|guidelines?|WMPs?|QDRs?)\b",
     re.I,
 )
+_SIDE_BY_SIDE_RE = re.compile(
+    r"\b(side by side|alongside)\b|;\s*then\b|\bthen report\b", re.I
+)
+_TABLE_REF_RE = re.compile(r"\btables?\s+(\d+(?:\s*(?:,|and|&)\s*\d+)*)", re.I)
+
+
+def _references_multiple_tables(question: str) -> bool:
+    """Distinct workbook tables are independent evidence tasks."""
+    numbers: set[str] = set()
+    for reference in _TABLE_REF_RE.findall(question):
+        numbers.update(re.findall(r"\d+", reference))
+    return len(numbers) >= 2
 
 
 @dataclass(frozen=True)
@@ -128,6 +140,10 @@ def planning_reason(question: str) -> str | None:
         return "compound_tasks"
     if _MULTI_SCOPE_RE.search(normalized):
         return "multi_document_scope"
+    if _SIDE_BY_SIDE_RE.search(normalized):
+        return "side_by_side_report"
+    if _references_multiple_tables(normalized):
+        return "multiple_workbook_tables"
     return None
 
 
@@ -269,10 +285,16 @@ independent factual requirements. Do not add tasks for facts that merely might
 be useful. Omit optional keys when their value would only be N/A or unknown.
 
 Every task MUST contain the keys "question" and "source". "source" MUST be
-exactly "pdf" or "excel". Use only the keys shown above; never use source_type,
-narrative_needed, calculations, or explanatory text. For PDF, narrative is
-automatic; set need_table or need_figure only when needed. Excel tasks do not
-need PDF support flags. Preserve entities, periods, metrics, document roles,
+exactly "pdf" or "excel". Use "excel" for values reported in SDG&E's cleaned
+quarterly workbook (QDR tables): activity targets, actuals, status (Table 1);
+spend/CAPEX/OPEX (Table 11); circuit-mile inventories and upgrades (Tables
+7-9); ignitions, events, findings, weather days (Tables 2-6, 10); risk by
+tier or segment (Tables 14-15); work orders (Table 13). Use "pdf" for filings,
+guidelines, decisions, and narrative content. Use only the keys shown above;
+never use source_type, narrative_needed, calculations, or explanatory text.
+For PDF, narrative is automatic; set need_table or need_figure only when
+needed. Excel tasks do not need PDF support flags. Preserve entities (keep
+exact ids like WMP.473 in task questions), periods, metrics, document roles,
 and table roles from the question. Do not assume an answer or a cause.
 
 Original question:

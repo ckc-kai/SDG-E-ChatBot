@@ -19,6 +19,7 @@ from generation.prompting import (
     prepare_prompt,
 )
 from generation.providers.base import ModelProvider, ProviderError
+from generation.providers.ollama import ANSWER_SCHEMA
 from generation.schemas import (
     AnswerRequest,
     AnswerResponse,
@@ -178,7 +179,13 @@ class AnswerService:
             )
             model_started = time.perf_counter()
             try:
-                raw_model_answer = self.provider.generate(prepared_prompt.text)
+                structured = getattr(self.provider, "generate_structured", None)
+                if callable(structured):
+                    # Schema-constrained output cannot be cut into invalid
+                    # JSON by a mid-string token limit.
+                    raw_model_answer = structured(prepared_prompt.text, ANSWER_SCHEMA)
+                else:
+                    raw_model_answer = self.provider.generate(prepared_prompt.text)
             finally:
                 model_call_ms = round((time.perf_counter() - model_started) * 1000)
             usage = getattr(self.provider, "last_usage", None)

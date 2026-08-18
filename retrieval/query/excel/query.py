@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from typing import Any, Literal
 
@@ -259,6 +259,43 @@ def compile_plan(
     return sql, params
 
 
+def _resolve_unambiguous_year_basis(plan: ExcelQueryPlan, conn) -> ExcelQueryPlan:
+    """Skip the dual-axis clarification when the requested year is unambiguous.
+
+    Tables 14/15 store 2023/2024 vintages whose reporting year equals the
+    vintage year, and the 2025 vintage reports risk year 2026. A bare
+    reporting-year filter that maps to exactly one active vintage cannot be
+    misread, so it executes; a year with zero or several matching vintages
+    still raises the clarification.
+    """
+    if plan.table_number not in DUAL_YEAR_AXIS_TABLES or not plan.require_year_basis:
+        return plan
+    fields = {flt.field for flt in plan.filters}
+    if "reporting_year" not in fields or {"year_basis", "source_vintage_year"} & fields:
+        return plan
+    years = [
+        flt.value
+        for flt in plan.filters
+        if flt.field == "reporting_year" and flt.operator == "eq"
+    ]
+    if len(years) != 1:
+        return plan
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT DISTINCT f.source_vintage_year
+            FROM excel_facts f
+            JOIN excel_revisions r ON r.id = f.revision_id AND r.state = 'active'
+            WHERE f.table_number = %s AND f.reporting_year = %s
+            """,
+            (plan.table_number, years[0]),
+        )
+        vintages = [row[0] for row in cur.fetchall()]
+    if len(vintages) == 1:
+        return replace(plan, require_year_basis=False)
+    return plan
+
+
 def execute_plan(
     plan: ExcelQueryPlan,
     conn,
@@ -267,6 +304,7 @@ def execute_plan(
 ) -> ExcelExecutionResult:
     contracts = contracts or load_contracts()
     contract = contracts.for_table(plan.table_number)
+    plan = _resolve_unambiguous_year_basis(plan, conn)
     sql, params = compile_plan(plan, contract)
 
     with conn.cursor() as cur:

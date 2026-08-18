@@ -98,7 +98,9 @@ class PromptTests(unittest.TestCase):
 
     def test_prompt_excludes_citation_display_and_ranking_metadata(self) -> None:
         prompt = build_prompt(sample_request())
-        self.assertIn('"context":"8 Wildfire Mitigations', prompt)
+        # Context labels the source document so cross-document questions can
+        # attribute every excerpt to its filing.
+        self.assertIn('"context":"WMP.pdf | 8 Wildfire Mitigations', prompt)
         self.assertNotIn('"source":"WMP.pdf"', prompt)
         self.assertNotIn("page_start", prompt)
         self.assertNotIn("page_end", prompt)
@@ -163,6 +165,8 @@ class PromptTests(unittest.TestCase):
             + _chunk_prompt_tokens(chunks[0])
             + _chunk_prompt_tokens(chunks[2])
         )
+        # Budgets are relative to the instruction size so instruction edits do
+        # not silently change what this test exercises.
         selected = select_prompt_chunks(
             request,
             prompt_token_budget=budget,
@@ -184,6 +188,7 @@ class PromptTests(unittest.TestCase):
         budget = _base_prompt_tokens(request) + sum(
             _chunk_prompt_tokens(chunk) for chunk in chunks
         )
+        budget = math.ceil(_base_prompt_tokens(request) * 1.25) + 600
         without_margin = select_prompt_chunks(
             request,
             prompt_token_budget=budget,

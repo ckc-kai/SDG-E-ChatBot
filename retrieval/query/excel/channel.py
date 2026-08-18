@@ -27,7 +27,12 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from generation.features import feature_enabled
 from retrieval.ingest.excel.contracts import ContractSet, load_contracts
+from retrieval.query.excel.nl_planner import (
+    build_model_plan,
+    question_needs_model_shapes,
+)
 from retrieval.query.excel.query import (
     FACTS,
     RECORDS,
@@ -69,6 +74,31 @@ _TABLE1_HISTORY_FIELDS = (
     "quant_actual_progress_q1_4",
     "quant_target_units",
 )
+_TARGET_ONLY_CUES = ("target",)
+_ACTUAL_ONLY_CUES = ("actual", "progress")
+_FULL_HISTORY_CUES = (
+    "percent",
+    "complete",
+    "completion",
+    "cumulative",
+    "status",
+    "compare",
+    "versus",
+    " vs",
+)
+
+
+def _history_select_keys(question: str) -> tuple[str, ...]:
+    """Narrow the history select to the attribute the question actually asks."""
+    lowered = question.casefold()
+    wants_target = any(cue in lowered for cue in _TARGET_ONLY_CUES)
+    wants_actual = any(cue in lowered for cue in _ACTUAL_ONLY_CUES)
+    wants_full = any(cue in lowered for cue in _FULL_HISTORY_CUES)
+    if wants_full or (wants_target and wants_actual) or not (wants_target or wants_actual):
+        return _TABLE1_HISTORY_FIELDS
+    if wants_target:
+        return ("annual_quant_target",)
+    return ("quant_actual_progress_q1_4",)
 
 
 def is_entity_history_question(question: str) -> bool:
@@ -135,9 +165,11 @@ def _missing_requested_years(
 
 
 def _has_complete_history_values(result: ExcelExecutionResult) -> bool:
-    """The deterministic history renderer requires target, actual, and unit."""
-    required = ("selected_0", "selected_1", "selected_2")
-    if not all(column in result.columns for column in required):
+    """Every selected history attribute must be present for every row."""
+    required = tuple(
+        column for column in result.columns if column.startswith("selected_")
+    )
+    if not required:
         return False
     indexes = tuple(result.columns.index(column) for column in required)
     return bool(result.rows) and all(
@@ -204,7 +236,7 @@ def _plan_for_card(
                 operation="select",
                 filters=tuple(filters),
                 group_by=("reporting_year", "record_id"),
-                select_json_keys=_TABLE1_HISTORY_FIELDS,
+                select_json_keys=_history_select_keys(question),
                 descending=False,
                 limit=max(3, years[-1] - years[0] + 1),
             ),
@@ -244,53 +276,175 @@ def answer_from_excel(
 ) -> ExcelAnswer | ExcelDecline:
     """Attempt an exact Excel answer; decline rather than guess."""
     contracts = contracts or load_contracts()
-    lowered = question.lower()
     entity_key = bind_entity_key(question)
     if entity_key and is_entity_history_question(question):
-        exact_card = _exact_entity_card(conn, entity_key)
-        if exact_card is None:
-            return ExcelDecline(f"no reviewed Excel entity card for {entity_key}")
-        card_chunk_id, card_caption, card_data = exact_card
-        try:
-            plan, bound = _plan_for_card(question, card_data, conn, contracts)
-            result = execute_plan(plan, conn, contracts=contracts)
-        except (PlanError, KeyError, ValueError) as exc:
-            return ExcelDecline(f"exact entity plan refused: {exc}", card_caption, 1.0)
-        _keep_requested_years(bound, result)
-        if not result.is_answer:
-            return ExcelDecline(
-                "exact entity plan returned no usable value", card_caption, 1.0
-            )
-        missing_years = _missing_requested_years(bound, result)
-        if missing_years:
-            return ExcelDecline(
-                "missing requested years: "
-                + ", ".join(str(year) for year in missing_years),
-                card_caption,
-                1.0,
-            )
-        if not _has_complete_history_values(result):
-            return ExcelDecline(
-                "one or more requested years lacks target, actual, or unit data",
-                card_caption,
-                1.0,
-            )
-        return ExcelAnswer(
-            question=question,
-            card_chunk_id=card_chunk_id,
-            card_caption=card_caption,
-            card_score=1.0,
-            table_number=plan.table_number,
-            semantic_metric_key=plan.semantic_metric_key,
-            plan=plan,
-            result=result,
-            bound=bound,
-        )
+        return _exact_history_answer(question, entity_key, conn, contracts)
 
     cards = retrieve(question, conn, rewrite_mode="off", lanes=(EXCEL,))
     if not cards:
         return ExcelDecline("no Excel card retrieved")
 
+    model_allowed = feature_enabled("model_excel_planner")
+    if model_allowed and (
+        question_needs_model_shapes(question)
+        # A question naming an exact activity id without a history intent
+        # needs an entity-scoped fact query the heuristics cannot build.
+        or entity_key is not None
+    ):
+        # Comparisons, trends, and rankings need plan shapes the heuristics
+        # never emit; a validated model plan answers them exactly.
+        answer = _model_plan_answer(question, cards, conn, contracts)
+        if answer is not None:
+            return answer
+
+    outcome = _card_answer(question, cards, conn, contracts, min_card_score)
+    if isinstance(outcome, ExcelAnswer) or not model_allowed:
+        return outcome
+    if outcome.reason.startswith("plan refused"):
+        # Keep the deliberate dual-year-axis clarification deterministic.
+        return outcome
+    answer = _model_plan_answer(question, cards, conn, contracts)
+    return answer if answer is not None else outcome
+
+
+def _model_plan_answer(
+    question: str,
+    cards,
+    conn,
+    contracts: ContractSet,
+) -> ExcelAnswer | None:
+    """Wrap a validated, executed model plan in the channel's answer type."""
+    outcome = build_model_plan(question, cards, conn, contracts)
+    if outcome is None:
+        return None
+    plan, result = outcome
+    card = next(
+        (
+            item
+            for item in cards
+            if (item.query_object.structured_data or {}).get("table_number")
+            == plan.table_number
+        ),
+        cards[0],
+    )
+    return ExcelAnswer(
+        question=question,
+        card_chunk_id=card.query_object.chunk_id,
+        card_caption=card.query_object.caption or "",
+        card_score=card.rerank_score,
+        table_number=plan.table_number,
+        semantic_metric_key=plan.semantic_metric_key,
+        plan=plan,
+        result=result,
+        bound={"model_plan": True},
+    )
+
+
+def _exact_history_answer(
+    question: str,
+    entity_key: str,
+    conn,
+    contracts: ContractSet,
+) -> ExcelAnswer | ExcelDecline:
+    exact_card = _exact_entity_card(conn, entity_key)
+    if exact_card is None:
+        return ExcelDecline(f"no reviewed Excel entity card for {entity_key}")
+    card_chunk_id, card_caption, card_data = exact_card
+    try:
+        plan, bound = _plan_for_card(question, card_data, conn, contracts)
+        result = execute_plan(plan, conn, contracts=contracts)
+    except (PlanError, KeyError, ValueError) as exc:
+        return ExcelDecline(f"exact entity plan refused: {exc}", card_caption, 1.0)
+    _keep_requested_years(bound, result)
+    if not result.is_answer:
+        return ExcelDecline(
+            "exact entity plan returned no usable value", card_caption, 1.0
+        )
+    missing_years = _missing_requested_years(bound, result)
+    if missing_years:
+        return ExcelDecline(
+            "missing requested years: "
+            + ", ".join(str(year) for year in missing_years),
+            card_caption,
+            1.0,
+        )
+    if not _has_complete_history_values(result):
+        return ExcelDecline(
+            "one or more requested years lacks target, actual, or unit data",
+            card_caption,
+            1.0,
+        )
+    return ExcelAnswer(
+        question=question,
+        card_chunk_id=card_chunk_id,
+        card_caption=card_caption,
+        card_score=1.0,
+        table_number=plan.table_number,
+        semantic_metric_key=plan.semantic_metric_key,
+        plan=plan,
+        result=result,
+        bound=bound,
+    )
+
+
+def _card_entity_history_answer(
+    question: str,
+    card,
+    entity_key: str,
+    years: tuple[int, ...],
+    conn,
+    contracts: ContractSet,
+) -> ExcelAnswer | None:
+    """History select for an activity resolved by its retrieved entity card."""
+    filters = [Filter("entity_key", value=entity_key)]
+    if len(years) == 1:
+        filters.append(Filter("reporting_year", value=years[0]))
+    else:
+        filters.extend(
+            [
+                Filter("reporting_year", operator="gte", value=years[0]),
+                Filter("reporting_year", operator="lte", value=years[-1]),
+            ]
+        )
+    plan = ExcelQueryPlan(
+        table_number=1,
+        source=RECORDS,
+        operation="select",
+        filters=tuple(filters),
+        group_by=("reporting_year", "record_id"),
+        select_json_keys=_history_select_keys(question),
+        descending=False,
+        limit=max(3, years[-1] - years[0] + 1),
+    )
+    try:
+        result = execute_plan(plan, conn, contracts=contracts)
+    except PlanError:
+        return None
+    bound = {"entity_key": entity_key, "reporting_years": years}
+    _keep_requested_years(bound, result)
+    if not result.rows or not _has_complete_history_values(result):
+        return None
+    return ExcelAnswer(
+        question=question,
+        card_chunk_id=card.query_object.chunk_id,
+        card_caption=card.query_object.caption or "",
+        card_score=card.rerank_score,
+        table_number=1,
+        semantic_metric_key=None,
+        plan=plan,
+        result=result,
+        bound=bound,
+    )
+
+
+def _card_answer(
+    question: str,
+    cards,
+    conn,
+    contracts: ContractSet,
+    min_card_score: float,
+) -> ExcelAnswer | ExcelDecline:
+    lowered = question.lower()
     best = cards[0]
     card_data = best.query_object.structured_data or {}
     if best.rerank_score < min_card_score:
@@ -312,6 +466,23 @@ def answer_from_excel(
         and bind_entity_key(question) is not None
         and any(cue in lowered for cue in _ENTITY_HISTORY_CUES)
     )
+
+    # The question names an activity without its WMP id; the retrieved entity
+    # card resolves the id, so the same deterministic history select applies.
+    card_entity_key = card_data.get("entity_key")
+    card_years = bind_years(question)
+    if (
+        table_number == 1
+        and not is_entity_history
+        and card_entity_key
+        and card_years
+        and any(cue in lowered for cue in _ENTITY_HISTORY_CUES)
+    ):
+        answer = _card_entity_history_answer(
+            question, best, str(card_entity_key), card_years, conn, contracts
+        )
+        if answer is not None:
+            return answer
     if (
         table_number in ENTITY_TABLES
         and not is_entity_history

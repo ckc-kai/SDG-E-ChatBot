@@ -140,8 +140,9 @@ def _live_channel_score(
                 row.get("answer_tolerance"),
             )
             return correct, "answered", str(actual)
-        # Multi-row target behavior is intentionally challenge-only until the
-        # production channel can formulate comparisons and trends.
+        if kind == "rows":
+            correct = _rows_match(row.get("expected_answer"), outcome.result.rows)
+            return correct, "answered_rows", str(outcome.result.rows[:5])
         return (
             False,
             "live_channel_does_not_support_answer_shape",
