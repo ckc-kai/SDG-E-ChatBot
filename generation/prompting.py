@@ -57,6 +57,8 @@ Do not cite a chunk merely because it discusses the same topic. cited_chunk_ids 
 
 Match the level of detail to the question: be concise for simple factual questions and complete but focused for multi-part questions. When the question asks for multiple items, include every requested item supported by the selected chunks rather than giving only examples.
 
+For every why, reason, or cause requirement, distinguish a general label from the factual explanation behind it. A phrase such as a change in approach is not a complete reason when the evidence also provides a concrete driver, observation, mechanism, or circumstance. Include that most specific directly linked explanation.
+
 Follow all scopes and conditions stated in the question, including time periods, entities, quantities, and comparison groups. Do not make a conclusion about the full requested scope when the selected evidence covers only part of it.
 
 Use terms as they are defined in the question and evidence. Do not assume that different terms or statuses mean the same thing.

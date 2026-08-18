@@ -88,6 +88,13 @@ class AdapterTests(unittest.TestCase):
 
 class PromptTests(unittest.TestCase):
 
+    def test_prompt_requires_specific_causal_detail_when_available(self) -> None:
+        self.assertIn(
+            "distinguish a general label from the factual explanation",
+            SYSTEM_INSTRUCTIONS,
+        )
+        self.assertIn("is not a complete reason", SYSTEM_INSTRUCTIONS)
+
     def test_prompt_contains_question_evidence_ids_and_grounding_rules(self) -> None:
         prompt = build_prompt(sample_request())
         self.assertIn("What does SAWTI use?", prompt)

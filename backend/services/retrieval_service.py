@@ -60,7 +60,9 @@ def _groups_for_types(content_types) -> tuple[str, ...]:
     return tuple(dict.fromkeys(_CONTENT_TYPE_TO_GROUP[value] for value in content_types))
 
 
-def _scoped_step_question(original_question: str, step_question: str) -> str:
+def _scoped_step_question(
+    original_question: str, step_question: str, step=None
+) -> str:
     """Keep explicit document roles and entity ids a model planner may drop.
 
     A step missing the original question's WMP.### entity id is dangerous
@@ -69,12 +71,17 @@ def _scoped_step_question(original_question: str, step_question: str) -> str:
     declining. Re-append the id whenever a step omits it.
     """
     step_question = _reattach_entity_key(original_question, step_question)
-    if not required_source_roles(original_question):
-        return step_question
-    return (
-        f"{step_question} Required source scope from the original question: "
-        f"{original_question}"
-    )
+    scope = []
+    for label, value in (
+        ("document role", getattr(step, "document_role", None)),
+        ("table role", getattr(step, "table_role", None)),
+        ("period", getattr(step, "period", None)),
+    ):
+        if value and str(value).casefold() not in step_question.casefold():
+            scope.append(f"{label}: {value}")
+    if scope:
+        return f"{step_question} Required source scope: {'; '.join(scope)}."
+    return step_question
 
 
 def _reattach_entity_key(original_question: str, step_question: str) -> str:
@@ -195,7 +202,7 @@ class RetrievalService:
         started = time.perf_counter()
         def retrieve_step(step):
             return self.retrieve(
-                _scoped_step_question(question, step.question),
+                _scoped_step_question(question, step.question, step),
                 content_types=step.content_types,
                 **kwargs,
             )

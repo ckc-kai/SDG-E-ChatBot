@@ -38,8 +38,11 @@ def weighted_score_100(scores: dict[str, int]) -> float:
 
 
 def write_packets(answers_path: Path, beta_path: Path, out_path: Path) -> None:
-    answers = {row["case_id"]: row for row in json.loads(answers_path.read_text())}
-    beta = json.loads(beta_path.read_text())
+    answers = {
+        row["case_id"]: row
+        for row in json.loads(answers_path.read_text(encoding="utf-8"))
+    }
+    beta = json.loads(beta_path.read_text(encoding="utf-8"))
     lines: list[str] = []
     for question in beta["questions"]:
         case_id = question["id"]
@@ -77,7 +80,7 @@ def write_packets(answers_path: Path, beta_path: Path, out_path: Path) -> None:
 
 
 def score(reviews_path: Path, out_path: Path) -> None:
-    payload = json.loads(reviews_path.read_text())
+    payload = json.loads(reviews_path.read_text(encoding="utf-8"))
     cases = payload["cases"]
     scored = []
     for case in cases:

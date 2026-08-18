@@ -3,6 +3,7 @@ import unittest
 
 from generation.planning import (
     CONTENT_TYPES,
+    Requirement,
     RetrievalPlan,
     RetrievalStep,
     build_retrieval_plan,
@@ -35,20 +36,21 @@ class FakeProvider:
 class RetrievalPlanningTests(unittest.TestCase):
     def test_multistep_generation_requires_complete_model_plan(self):
         steps = (
-            RetrievalStep("Find requirement A", ("narrative",)),
-            RetrievalStep("Find requirement B", ("narrative",)),
+            RetrievalStep("Find requirement A", ("narrative",), requirement_ids=("R1",)),
+            RetrievalStep("Find requirement B", ("narrative",), requirement_ids=("R2",)),
         )
+        requirements = (Requirement("R1", "A"), Requirement("R2", "B"))
         self.assertTrue(supports_multistep_generation(
-            RetrievalPlan(steps, source="model")
+            RetrievalPlan(steps, source="model", requirements=requirements)
         ))
         self.assertFalse(supports_multistep_generation(
-            RetrievalPlan(steps[:1], source="model")
+            RetrievalPlan(steps[:1], source="model", requirements=requirements[:1])
         ))
         self.assertFalse(supports_multistep_generation(
-            RetrievalPlan(steps, source="fallback")
+            RetrievalPlan(steps, source="fallback", requirements=requirements)
         ))
         self.assertFalse(supports_multistep_generation(
-            RetrievalPlan(steps, source="model", dropped_task_count=1)
+            RetrievalPlan(steps, source="model", dropped_task_count=1, requirements=requirements)
         ))
 
     def test_between_years_single_fact_is_not_complex(self):
@@ -58,6 +60,11 @@ class RetrievalPlanningTests(unittest.TestCase):
 
     def test_short_comparison_is_complex(self):
         self.assertTrue(needs_planning("Compare the two WMP cycles."))
+
+    def test_reported_result_reconciliation_is_complex(self):
+        self.assertTrue(needs_planning(
+            "Did the approved target make it into what SDG&E reported?"
+        ))
 
     def test_simple_question_uses_all_types_without_model_call(self):
         provider = FakeProvider()
@@ -91,6 +98,8 @@ class RetrievalPlanningTests(unittest.TestCase):
         self.assertIn("WMP means Wildfire Mitigation Plan", provider.last_prompt)
         self.assertIn("OEIS means the California Office", provider.last_prompt)
         self.assertIn("not automatically a request for forecast", provider.last_prompt)
+        self.assertIn("For longitudinal performance questions", provider.last_prompt)
+        self.assertIn("one PDF task for the filing or change", provider.last_prompt)
 
     def test_every_subquestion_searches_all_evidence_types(self):
         provider = FakeProvider(json.dumps({"tasks": [{
@@ -106,15 +115,29 @@ class RetrievalPlanningTests(unittest.TestCase):
             plan.steps[0].content_types, ("narrative", "table")
         )
 
-    def test_plan_accepts_six_atomic_tasks_but_caps_initial_branches_at_four(self):
-        provider = FakeProvider(json.dumps({"tasks": [
+    def test_plan_merges_six_tasks_into_four_without_dropping_requirements(self):
+        provider = FakeProvider(json.dumps({
+            "requirements": [
+                {"id": f"R{index}", "text": f"requirement {index}"}
+                for index in range(1, 7)
+            ],
+            "tasks": [
             {"question": str(index), "source": "pdf", "metric": str(index)}
             for index in range(1, 7)
-        ]}))
+            ],
+        }))
+        payload = json.loads(provider.response)
+        for index, task in enumerate(payload["tasks"], start=1):
+            task["requirement_ids"] = [f"R{index}"]
+        provider.response = json.dumps(payload)
         plan = build_retrieval_plan("Compare multiple WMP cycles.", provider)
-        self.assertEqual([step.question for step in plan.steps], ["1", "2", "3", "4"])
+        self.assertEqual(len(plan.steps), 4)
         self.assertEqual(plan.atomic_task_count, 6)
-        self.assertEqual(plan.dropped_task_count, 2)
+        self.assertEqual(plan.dropped_task_count, 0)
+        self.assertEqual(
+            {item for step in plan.steps for item in step.requirement_ids},
+            {f"R{index}" for index in range(1, 7)},
+        )
 
     def test_equivalent_atomic_tasks_are_deduplicated_before_branch_cap(self):
         provider = FakeProvider(json.dumps({"tasks": [

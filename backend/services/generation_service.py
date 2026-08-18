@@ -12,7 +12,11 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from generation.adapters import adapt_ranked_results
 from generation.computation import CalculationResult
 from generation.features import feature_enabled
-from generation.multistep import build_synthesis_prompt, protect_synthesis_coverage
+from generation.multistep import (
+    PlannedSubanswer,
+    build_synthesis_prompt,
+    protect_synthesis_coverage,
+)
 from generation.planning import (
     RetrievalPlan,
     build_retrieval_plan,
@@ -153,14 +157,17 @@ class GenerationService:
             return self.generate(request_id, question, bundle)
 
         subanswers = tuple(
-            ModelAnswer(
-                answer=response.answer,
-                cited_chunk_ids=response.cited_chunk_ids,
-                insufficient_context=response.insufficient_context,
-                answered_requirements=response.answered_requirements,
-                missing_requirements=response.missing_requirements,
+            PlannedSubanswer(
+                requirement_ids=plan.steps[index].requirement_ids,
+                answer=ModelAnswer(
+                    answer=response.answer,
+                    cited_chunk_ids=response.cited_chunk_ids,
+                    insufficient_context=response.insufficient_context,
+                    answered_requirements=response.answered_requirements,
+                    missing_requirements=response.missing_requirements,
+                ),
             )
-            for response in responses
+            for index, response in enumerate(responses)
         )
         synthesis_service = (
             self._answer_service_factory()
@@ -168,7 +175,7 @@ class GenerationService:
             else self._answer_service
         )
         provider = synthesis_service.provider
-        prompt = build_synthesis_prompt(question, subanswers)
+        prompt = build_synthesis_prompt(question, plan.requirements, subanswers)
         try:
             structured = getattr(provider, "generate_structured", None)
             raw = (
@@ -177,14 +184,14 @@ class GenerationService:
                 else provider.generate(prompt)
             )
             synthesized = protect_synthesis_coverage(
-                parse_model_answer(raw), subanswers
+                parse_model_answer(raw), plan.requirements, subanswers
             )
             chunks = _chunks_from_bundle(bundle)
             registry = {chunk.chunk_id: chunk for chunk in chunks}
             allowed_ids = tuple(dict.fromkeys(
                 chunk_id
-                for answer in subanswers
-                for chunk_id in answer.cited_chunk_ids
+                for item in subanswers
+                for chunk_id in item.answer.cited_chunk_ids
                 if chunk_id in registry
             ))
             validation_request = AnswerRequest(

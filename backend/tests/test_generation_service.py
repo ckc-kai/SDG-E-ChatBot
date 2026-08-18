@@ -14,7 +14,7 @@ from services.generation_service import (
 )
 from generation.schemas import Chunk, ChunkMetadata
 from generation.computation import CalculationResult
-from generation.planning import RetrievalPlan, RetrievalStep
+from generation.planning import Requirement, RetrievalPlan, RetrievalStep
 from services.retrieval_service import RetrievalBundle
 
 
@@ -79,18 +79,19 @@ class GenerationServiceTests(unittest.TestCase):
         synthesis.provider.last_usage = None
         synthesis.provider.generate_structured.return_value = (
             '{"answer":"combined","cited_chunk_ids":["1","2"],'
-            '"insufficient_context":false,"answered_requirements":[],'
-            '"missing_requirements":[]}'
+            '"insufficient_context":false,"answered_requirements":["R1"],'
+            '"missing_requirements":["R2"]}'
         )
         services.append(synthesis)
 
         plan = RetrievalPlan(
             steps=(
-                RetrievalStep("first", ("narrative",)),
-                RetrievalStep("second", ("narrative",)),
+                RetrievalStep("first", ("narrative",), requirement_ids=("R1",)),
+                RetrievalStep("second", ("narrative",), requirement_ids=("R2",)),
             ),
             source="model",
             atomic_task_count=2,
+            requirements=(Requirement("R1", "first"), Requirement("R2", "second")),
         )
         step_bundles = (
             RetrievalBundle(EvidenceRetrievalResult(
@@ -120,7 +121,7 @@ class GenerationServiceTests(unittest.TestCase):
         self.assertEqual(response.answer, "combined")
         self.assertEqual(response.cited_chunk_ids, ("1", "2"))
         self.assertTrue(response.insufficient_context)
-        self.assertEqual(response.missing_requirements, ("second missing fact",))
+        self.assertEqual(response.missing_requirements, ("R2",))
         synthesis.provider.generate_structured.assert_called_once()
 
     def test_deduplicates_equivalent_evidence_and_keeps_first_metadata(self):
