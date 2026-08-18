@@ -1,19 +1,22 @@
-"""POST /api/ask orchestration for Task 2 retrieval and Task 3 generation."""
+"""POST /api/ask orchestration for retrieval, planning, and generation."""
 
 from __future__ import annotations
 
 import json
 import logging
-from functools import lru_cache
 import time
+from functools import lru_cache
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
-from generation.schemas import ErrorResponse as GenerationErrorResponse
 from generation.planning import needs_planning
+from generation.features import feature_enabled
+from generation.routing import RouteDecision
+from generation.schemas import ErrorResponse as GenerationErrorResponse
 from models.schemas import AskRequest, AskResponse
+from retrieval.query.excel.channel import is_entity_history_question
 from services.generation_service import GenerationService
 from services.retrieval_service import RetrievalService, RetrievalTimings
 
@@ -43,7 +46,11 @@ def ask(
     try:
         filters = payload.filters
         single_type = filters.content_type if filters else None
-        multiple_types = tuple(filters.content_types) if filters and filters.content_types else None
+        multiple_types = (
+            tuple(filters.content_types)
+            if filters and filters.content_types
+            else None
+        )
         if single_type and multiple_types:
             return JSONResponse(
                 status_code=422,
@@ -51,6 +58,8 @@ def ask(
             )
         retrieval_kwargs = {
             "embedding_mode": payload.embedding_mode,
+            # Planning owns decomposition. Keep Task 2's optional Anthropic
+            # rewrite disabled so one request cannot trigger both planners.
             "rewrite_mode": "off",
         }
         if single_type or multiple_types:
@@ -60,15 +69,35 @@ def ask(
                 content_types=multiple_types,
                 **retrieval_kwargs,
             )
-        elif payload.rewrite_mode == "off" or (
-            payload.rewrite_mode != "always" and not needs_planning(payload.question)
-        ):
+        elif is_entity_history_question(payload.question):
+            # Preserve the exact, validated Excel fast path.
             bundle = retrieval_service.retrieve(payload.question, **retrieval_kwargs)
+        elif payload.rewrite_mode == "off" or (
+            payload.rewrite_mode != "always"
+            and not needs_planning(payload.question)
+        ):
+            if feature_enabled("two_resource_router"):
+                route = generation_service.route_retrieval(payload.question)
+            else:
+                route = None
+            if isinstance(route, RouteDecision):
+                bundle = retrieval_service.retrieve(
+                    payload.question,
+                    content_types=route.content_types,
+                    **retrieval_kwargs,
+                )
+            else:
+                bundle = retrieval_service.retrieve(payload.question, **retrieval_kwargs)
         else:
-            plan = generation_service.plan_retrieval(payload.question)
-            bundle = retrieval_service.retrieve_plan(
-                payload.question, plan, **retrieval_kwargs
-            )
+            if feature_enabled("typed_planner"):
+                plan = generation_service.plan_retrieval(payload.question)
+                bundle = retrieval_service.retrieve_plan(
+                    payload.question, plan, **retrieval_kwargs
+                )
+            else:
+                bundle = retrieval_service.retrieve(
+                    payload.question, **retrieval_kwargs
+                )
     except Exception:
         logger.exception(
             "Task 2 retrieval failed for request_id=%s total_ms=%d",
@@ -85,7 +114,11 @@ def ask(
         logger.info(
             "retrieval_plan request_id=%s diagnostics=%s",
             request_id,
-            json.dumps(bundle.plan_diagnostics, ensure_ascii=False, separators=(",", ":")),
+            json.dumps(
+                bundle.plan_diagnostics,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
         )
     _log_pipeline_timing(
         request_id,

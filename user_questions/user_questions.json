@@ -1,0 +1,110 @@
+[
+  {
+    "id": "user_question_001",
+    "original_number": "1",
+    "question": "Between the 2023-2025 WMP and the 2026-2028 WMP, how did our risk ranking and grid hardening mitigation prioritization framework evolve? How did it impact how mitigations were selected and prioritized for circuit segments? (e.g. overall utility risk, risk per mile, benefit cost ratio, etc.)",
+    "category": "pdf"
+  },
+  {
+    "id": "user_question_002",
+    "original_number": "2",
+    "question": "How would you evaluate our risk reduction strategy given the operational and grid hardening mitigations we have planned and established targets for across both WMP cycles? At a high-level this would be an exercise to quantify anticipated risk reduction across the various mitigations. (we have the waterfall chart in 26-28 WMP but it may not be as clear or straightforward in 23-25 WMP).",
+    "category": "pdf"
+  },
+  {
+    "id": "user_question_003",
+    "original_number": "3",
+    "question": "Comparing the 2023-2025 WMP, 2026-2028 WMP, and corresponding guidelines, what are opportunities for improvement in how we explain our risk methodology and assessment as well as our mitigation selection and prioritization?",
+    "category": "pdf"
+  },
+  {
+    "id": "user_question_004",
+    "original_number": "4",
+    "question": "What WMP unit targets did SDG&E repeatedly not meet during the 2023-2025 WMP cycle? (2023-2025 SDG&E’s AIR and the independent evaluator report are references for this, as well as the OEIS report for SDG&E’s 2023 performance)\n4.1 What are the primary reasons those unit targets were not met?\n4.2 Were they within SDG&E’s control or due to external factors (i.e. easements, permitting, etc.)?",
+    "category": "pdf"
+  },
+  {
+    "id": "user_question_005",
+    "original_number": "5",
+    "question": "How do SDG&E target completion rates for 2023-2025 compare to the PG&E’s and SCE’s target completion? Present this information in a table.",
+    "category": "combined"
+  },
+  {
+    "id": "user_question_006",
+    "original_number": "6",
+    "question": "Compare the WMP to the WMP guidelines. Flag any areas that need additional information to meet the guideline requirements.",
+    "category": "pdf"
+  },
+  {
+    "id": "user_question_007",
+    "original_number": "7",
+    "question": "Review the WMP from OEIS’s perspective and provide suggestions for how to present or and adjust the plan to satisfy what OEIS and the WMP guidelines are looking for. This could be done for past cycles to develop the AI agent, but would be help for evaluating the 2028-2031 WMP as we develop it.",
+    "category": "pdf"
+  },
+  {
+    "id": "user_question_008",
+    "original_number": "8",
+    "question": "Compare the QDRs against the applicable performance and data guidelines. Performance and data guidelines are typically updated each year, so be sure to compare each QDR against the applicable version. Flag areas where information is missing or does not meet the guideline requirements. This can be done for prior years to develop the agent, which can be applied prior to submitting the QDR each quarter.",
+    "category": "qdr"
+  },
+  {
+    "id": "user_question_009",
+    "original_number": "9",
+    "question": "For example, \"what numbers we have reported from 2022-2025 regarding detailed inspection and show the line chart, how does SDGE perform detailed inspection, at what frequency, are there any changes or enhancement after 2025 (this requires WMP 2026-2028).\"",
+    "category": "combined"
+  },
+  {
+    "id": "user_question_010",
+    "original_number": "10",
+    "question": "What WMP unit targets did SDG&E repeatedly not meet during the 2023-2025 WMP cycle? (2023-2025 SDG&E’s AIR and the independent evaluator report are references for this, as well as the OEIS report for SDG&E’s 2023 performance)\n10.1 What are the primary reasons those unit targets were not met?\n10.2 Were they within SDG&E’s control or due to external factors (i.e. easements, permitting, etc.)?",
+    "category": "pdf"
+  },
+  {
+    "id": "user_question_011",
+    "original_number": "11",
+    "question": "How do SDG&E target completion rates for 2023-2025 compare to the PG&E’s and SCE’s target completion? Present this information in a table.",
+    "category": "combined"
+  },
+  {
+    "id": "user_question_012",
+    "original_number": "12",
+    "question": "Compare the WMP to the WMP guidelines. Flag any areas that need additional information to meet the guideline requirements.",
+    "category": "pdf"
+  },
+  {
+    "id": "user_question_013",
+    "original_number": "13",
+    "question": "Review the WMP from OEIS’s perspective and provide suggestions for how to present or and adjust the plan to satisfy what OEIS and the WMP guidelines are looking for. This could be done for past cycles to develop the AI agent, but would be help for evaluating the 2028-2031 WMP as we develop it.",
+    "category": "pdf"
+  },
+  {
+    "id": "user_question_014",
+    "original_number": "14",
+    "question": "Compare the QDRs against the applicable performance and data guidelines. Performance and data guidelines are typically updated each year, so be sure to compare each QDR against the applicable version. Flag areas where information is missing or does not meet the guideline requirements. This can be done for prior years to develop the agent, which can be applied prior to submitting the QDR each quarter.",
+    "category": "qdr"
+  },
+  {
+    "id": "user_question_015",
+    "original_number": "15",
+    "question": "For example, \"what numbers we have reported from 2022-2025 regarding detailed inspection and show the line chart, how does SDGE perform detailed inspection, at what frequency, are there any changes or enhancement after 2025 (this requires WMP 2026-2028).\"",
+    "category": "combined"
+  },
+  {
+    "id": "user_question_016",
+    "original_number": "16",
+    "question": "I would want to be able to pull results in multiple ways, such as cumulative actuals, by quarter, by year, by month, etc. I'd love to be able to ask what grid hardening has been applied to a circuit or a segment and be able to see all the programs that have been applied. (I recommend to use a subset of the spatial data - grid hardening activities)",
+    "category": "qdr"
+  },
+  {
+    "id": "user_question_017",
+    "original_number": "17",
+    "question": "identifying if/what historicals have changed since original submission, if there are data fields that were reported differently or omitted over time (this could be QDR spatial columns or Table template)",
+    "category": "qdr"
+  },
+  {
+    "id": "user_question_018",
+    "original_number": "18",
+    "question": "I would like to be able to ask about cumulative targets over the three year cycle (and associated percent complete) or to date within an open three year cycle.",
+    "category": "excel"
+  }
+]

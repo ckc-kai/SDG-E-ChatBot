@@ -41,12 +41,17 @@ retrieval:
   hybrid_pool_mode: union
   retrieval_top_k: 30
   rerank_top_k: 10
+  # Bounds peak unified memory on Apple Silicon during cross-encoder scoring.
+  rerank_batch_size: 8
   rrf_k: 60
   # Safe with grouped output: it cannot displace narrative evidence.
   # Set to 0.0 when reproducing the former merged-route baseline.
   caption_rerank_weight: 0.25
   lexical_caption_weight: 4.0
   lexical_hint_weight: 0.25
+  # Focused AND terms keep the indexed lexical lane selective. Use "off" for an
+  # ablation; broad_or is rollback-only because it scans most of this corpus.
+  lexical_query_mode: focused
   deduplicate_exact_content: true
   # "off" keeps legacy global ranking. Set to "all" to retrieve/rerank each
   # narrative, structured-PDF, and Excel lane independently before merging.
@@ -84,3 +89,15 @@ object_storage:
     bucket: replace-me
     prefix: sdge-chatbot/figures
     region: us-west-2
+
+# Runtime overrides use SDGE_FEATURE_<UPPERCASE_NAME>=true|false. Each
+# architecture experiment remains independently reversible.
+architecture_features:
+  two_resource_router: true
+  support_evidence_judge: true
+  typed_planner: true
+  parallel_retrieval: true
+  coverage_retry: true
+  metadata_routing: true
+  cross_resource_computation: true
+  parent_child_expansion: false

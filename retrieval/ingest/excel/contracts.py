@@ -17,7 +17,9 @@ from typing import Any
 
 import yaml
 
-DEFAULT_CONTRACT_PATH = "config/excel_contracts.yaml"
+DEFAULT_CONTRACT_PATH = (
+    Path(__file__).resolve().parents[3] / "config" / "excel_contracts.yaml"
+)
 CONTRACT_PATH_ENV = "SDGE_EXCEL_CONTRACTS_PATH"
 
 FAMILIES = {"long_metric", "wide_risk", "entity"}

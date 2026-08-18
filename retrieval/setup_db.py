@@ -8,6 +8,7 @@ import logging
 import psycopg2
 
 from retrieval.utils import database_config, embedding_config
+from retrieval.source_manifest import SOURCE_REGISTRY_SQL
 
 CONTENT_TYPES = ("narrative", "table", "figure")
 logger = logging.getLogger(__name__)
@@ -39,6 +40,7 @@ def setup_database(conn=None) -> None:
                 );
                 """
             )
+            cur.execute(SOURCE_REGISTRY_SQL)
             cur.execute(
                 f"""
                 CREATE TABLE IF NOT EXISTS chunks (

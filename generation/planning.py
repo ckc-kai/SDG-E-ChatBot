@@ -1,33 +1,54 @@
-"""Provider-independent planning for complex retrieval questions."""
+"""Provider-independent, bounded planning for complex retrieval questions."""
 
 from __future__ import annotations
 
 import json
 import re
 from dataclasses import dataclass
+from typing import Any
 
 from generation.providers.base import ModelProvider, ProviderError
+from generation.routing import route_question
 
 
 CONTENT_TYPES = ("narrative", "table", "figure", "excel_card")
+PDF_CONTENT_TYPES = ("narrative", "table", "figure")
+DEFAULT_MAX_ATOMIC_TASKS = 6
+DEFAULT_MAX_INITIAL_BRANCHES = 4
+
+_TASK_PROPERTIES: dict[str, Any] = {
+    "question": {"type": "string"},
+    "source": {"type": "string", "enum": ["pdf", "excel"]},
+    "document_role": {"type": "string"},
+    "table_role": {"type": "string"},
+    "entity": {"type": "string"},
+    "metric": {"type": "string"},
+    "period": {"type": "string"},
+    "need_table": {"type": "boolean"},
+    "need_figure": {"type": "boolean"},
+}
 PLAN_SCHEMA = {
     "type": "object",
     "properties": {
-        "subquestions": {
+        "tasks": {
             "type": "array",
+            "maxItems": DEFAULT_MAX_ATOMIC_TASKS,
             "items": {
                 "type": "object",
-                "properties": {"question": {"type": "string"}},
-                "required": ["question"],
+                "properties": _TASK_PROPERTIES,
+                "required": ["question", "source"],
                 "additionalProperties": False,
             },
         }
     },
-    "required": ["subquestions"],
+    "required": ["tasks"],
     "additionalProperties": False,
 }
+
 _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
-_COMPARE_RE = re.compile(r"\b(compare|comparing|versus|vs\.?|differences?|evolv(?:e|ed))\b", re.I)
+_COMPARE_RE = re.compile(
+    r"\b(compare|comparing|versus|vs\.?|differences?|evolv(?:e|ed))\b", re.I
+)
 _AUDIT_RE = re.compile(r"\b(review|evaluate|assess|flag|gap analysis|compliance|opportunit(?:y|ies))\b", re.I)
 _COMPOUND_RE = re.compile(
     r"\b(and (?:why|how|what|whether)|as well as)\b|[,;:]\s*(?:why|how|what|whether)\b"
@@ -38,17 +59,37 @@ _MULTI_SCOPE_RE = re.compile(
     r"\b(across|between)\b.*\b(cycles?|years?|utilities|documents?|guidelines?|WMPs?|QDRs?)\b",
     re.I,
 )
-_NUMERIC_RE = re.compile(
-    r"\b(how many|how much|number|numbers|percent(?:age)?|rate|rates|target|targets|"
-    r"completion|reported|quarter|Q[1-4]|20\d{2})\b",
-    re.I,
-)
 
 
 @dataclass(frozen=True)
 class RetrievalStep:
     question: str
     content_types: tuple[str, ...]
+    source: str = "pdf"
+    document_role: str | None = None
+    table_role: str | None = None
+    entity: str | None = None
+    metric: str | None = None
+    period: str | None = None
+
+    @property
+    def branch_signature(self) -> tuple[str, ...]:
+        # Equivalent atomic facts share one retrieval branch even when their
+        # surface questions differ.
+        signature = tuple(
+            (value or "").strip().casefold()
+            for value in (
+                self.source,
+                self.document_role,
+                self.table_role,
+                self.entity,
+                self.metric,
+                self.period,
+                ",".join(self.content_types),
+            )
+        )
+        has_fact_identity = any(signature[index] for index in range(1, 6))
+        return signature if has_fact_identity else (*signature, self.question.casefold())
 
 
 @dataclass(frozen=True)
@@ -56,6 +97,8 @@ class RetrievalPlan:
     steps: tuple[RetrievalStep, ...]
     source: str = "simple"
     trigger_reason: str = "single_task"
+    atomic_task_count: int = 1
+    dropped_task_count: int = 0
 
 
 def planning_reason(question: str) -> str | None:
@@ -78,58 +121,158 @@ def needs_planning(question: str) -> bool:
     return planning_reason(question) is not None
 
 
-def fallback_plan(question: str) -> RetrievalPlan:
-    return RetrievalPlan(
-        (RetrievalStep(question.strip(), CONTENT_TYPES),), "fallback", "planner_failed"
+def _simple_step(question: str) -> RetrievalStep:
+    route = route_question(question, judge_enabled=False)
+    return RetrievalStep(
+        question=question,
+        content_types=route.content_types,
+        source="excel" if route.need_excel and not route.need_pdf else "pdf",
     )
+
+
+def fallback_plan(question: str) -> RetrievalPlan:
+    # Invalid model output must never narrow retrieval.
+    return RetrievalPlan(
+        (RetrievalStep(question.strip(), CONTENT_TYPES, "both"),),
+        "fallback",
+        "planner_failed",
+    )
+
+
+def _clean_optional(value: Any) -> str | None:
+    cleaned = " ".join(str(value or "").split())
+    return cleaned or None
+
+
+def _step_from_item(item: dict[str, Any]) -> RetrievalStep | None:
+    question = _clean_optional(item.get("question"))
+    source = _clean_optional(item.get("source")) or "pdf"
+    source = source.casefold()
+    if not question or source not in {"pdf", "excel"}:
+        return None
+    if source == "excel":
+        content_types = ("excel_card",)
+    else:
+        selected = ["narrative"]
+        if item.get("need_table") is True:
+            selected.append("table")
+        if item.get("need_figure") is True:
+            selected.append("figure")
+        content_types = tuple(selected)
+    return RetrievalStep(
+        question=question,
+        content_types=content_types,
+        source=source,
+        document_role=_clean_optional(item.get("document_role")),
+        table_role=_clean_optional(item.get("table_role")),
+        entity=_clean_optional(item.get("entity")),
+        metric=_clean_optional(item.get("metric")),
+        period=_clean_optional(item.get("period")),
+    )
+
+
+def _legacy_tasks(payload: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """Read the previous planner shape during rollout and cached-run replay."""
+    items = payload.get("subquestions")
+    if not isinstance(items, list):
+        return None
+    converted = []
+    for item in items:
+        if isinstance(item, dict):
+            converted.append({"question": item.get("question"), "source": "pdf"})
+    return converted
 
 
 def build_retrieval_plan(
     question: str,
     provider: ModelProvider,
     *,
-    max_subquestions: int = 2,
+    max_tasks: int = DEFAULT_MAX_ATOMIC_TASKS,
+    max_branches: int = DEFAULT_MAX_INITIAL_BRANCHES,
+    max_subquestions: int | None = None,
 ) -> RetrievalPlan:
-    """Ask the configured answer provider for a soft retrieval plan.
+    """Build at most four initial branches from up to six atomic tasks.
 
-    Invalid output never narrows retrieval: it falls back to the original
-    question across every evidence type.
+    ``max_subquestions`` remains as a rollout compatibility alias.  Planner
+    failure broadens to every evidence type and never makes a second model call.
     """
-    question = question.strip()
+    question = " ".join(question.strip().split())
+    if not question:
+        raise ValueError("question must not be empty")
+    if max_subquestions is not None:
+        max_tasks = max_subquestions
+    if max_tasks <= 0 or max_branches <= 0:
+        raise ValueError("planning limits must be positive")
     reason = planning_reason(question)
     if reason is None:
-        return RetrievalPlan((RetrievalStep(question, CONTENT_TYPES),), "simple")
-    prompt = f"""Plan evidence retrieval for this regulatory-document question.
-Break it into at most {max_subquestions} independently searchable factual subquestions.
-Preserve domain terminology and scope exactly. WMP means Wildfire Mitigation Plan.
-Do not introduce agencies, methods, metrics, document cycles, or comparison subjects
-that are absent from the original question. Keep open questions neutral: never assume
-which targets were missed, why they were missed, or whether a cause was internal or
-external. Combine closely related requirements.
-Return JSON only in this exact shape:
-{{"subquestions":[{{"question":"..."}}]}}
+        return RetrievalPlan((_simple_step(question),), "simple")
+
+    exact_shape = {
+        "tasks": [
+            {
+                "question": "standalone factual search question",
+                "source": "pdf",
+                "document_role": "optional role",
+                "table_role": "optional role",
+                "entity": "optional entity",
+                "metric": "optional metric",
+                "period": "optional period",
+                "need_table": False,
+                "need_figure": False,
+            }
+        ]
+    }
+    prompt = f"""Create a typed evidence plan for this regulatory-data question.
+Produce at most {max_tasks} atomic factual tasks. Return exactly this JSON shape:
+{json.dumps(exact_shape, separators=(",", ":"))}
+
+Every task MUST contain the keys "question" and "source". "source" MUST be
+exactly "pdf" or "excel". Use only the keys shown above; never use source_type,
+narrative_needed, calculations, or explanatory text. For PDF, narrative is
+automatic; set need_table or need_figure only when needed. Excel tasks do not
+need PDF support flags. Preserve entities, periods, metrics, document roles,
+and table roles from the question. Do not assume an answer or a cause.
 
 Original question:
 {question}"""
     try:
         structured = getattr(provider, "generate_structured", None)
-        raw = structured(prompt, PLAN_SCHEMA) if callable(structured) else provider.generate(prompt)
+        raw = (
+            structured(prompt, PLAN_SCHEMA)
+            if callable(structured)
+            else provider.generate(prompt)
+        )
         payload = json.loads(_FENCE_RE.sub("", raw.strip()).strip())
-        items = payload.get("subquestions")
+        if not isinstance(payload, dict):
+            raise ValueError("plan must be an object")
+        items = payload.get("tasks")
+        if not isinstance(items, list):
+            items = _legacy_tasks(payload)
         if not isinstance(items, list) or not items:
-            raise ValueError("subquestions must be a non-empty list")
-        steps: list[RetrievalStep] = []
-        seen: set[str] = set()
-        for item in items[:max_subquestions]:
-            if not isinstance(item, dict):
+            raise ValueError("tasks must be a non-empty list")
+
+        candidates = [
+            step
+            for item in items[:max_tasks]
+            if isinstance(item, dict) and (step := _step_from_item(item)) is not None
+        ]
+        if not candidates:
+            raise ValueError("plan contained no valid retrieval tasks")
+        deduplicated: list[RetrievalStep] = []
+        seen: set[tuple[str, ...]] = set()
+        for step in candidates:
+            signature = step.branch_signature
+            if signature in seen:
                 continue
-            subquestion = " ".join(str(item.get("question", "")).split())
-            signature = subquestion.casefold()
-            if subquestion and signature not in seen:
-                seen.add(signature)
-                steps.append(RetrievalStep(subquestion, CONTENT_TYPES))
-        if not steps:
-            raise ValueError("plan contained no valid retrieval steps")
-        return RetrievalPlan(tuple(steps), "model", reason)
+            seen.add(signature)
+            deduplicated.append(step)
+        selected = deduplicated[:max_branches]
+        return RetrievalPlan(
+            tuple(selected),
+            "model",
+            reason,
+            atomic_task_count=len(candidates),
+            dropped_task_count=max(0, len(deduplicated) - len(selected)),
+        )
     except (ProviderError, ValueError, TypeError, json.JSONDecodeError):
         return fallback_plan(question)

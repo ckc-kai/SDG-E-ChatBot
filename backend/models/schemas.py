@@ -1,9 +1,4 @@
-"""Public FastAPI request and response models.
-
-The response mirrors Task 3's minimal public contract.  Retrieval scores and
-full chunk text stay inside the backend; only validated citations are exposed
-to the browser.
-"""
+"""Public FastAPI request and response models."""
 
 from __future__ import annotations
 
@@ -12,11 +7,12 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+ContentType = Literal["narrative", "table", "figure", "excel_card"]
+
+
 class Filters(BaseModel):
-    content_type: Literal["narrative", "table", "figure", "excel_card"] | None = None
-    content_types: list[
-        Literal["narrative", "table", "figure", "excel_card"]
-    ] | None = Field(default=None, min_length=1)
+    content_type: ContentType | None = None
+    content_types: list[ContentType] | None = Field(default=None, min_length=1)
     section_number: str | None = None
     page: int | None = None
 
@@ -40,6 +36,7 @@ class Citation(BaseModel):
     row_start: int | None = None
     row_end: int | None = None
     breadcrumb: str | None = None
+    contributing_sources: list[str] = Field(default_factory=list)
 
 
 class AskResponse(BaseModel):

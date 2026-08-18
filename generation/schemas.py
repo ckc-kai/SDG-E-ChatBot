@@ -27,6 +27,7 @@ class ChunkMetadata:
     token_count: int | None = None
     distance: float | None = None
     rerank_score: float | None = None
+    contributing_sources: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -82,6 +83,7 @@ class Citation:
     row_start: int | None = None
     row_end: int | None = None
     breadcrumb: str | None = None
+    contributing_sources: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

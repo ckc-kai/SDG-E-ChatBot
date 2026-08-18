@@ -16,6 +16,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
+from eval.environment import evaluation_environment
 from retrieval.query.excel.channel import ExcelAnswer, answer_from_excel
 from retrieval.query.excel.query import (
     ExcelQueryPlan,
@@ -415,6 +416,7 @@ def main(argv: list[str] | None = None) -> None:
         args.out.write_text(
             json.dumps(
                 {
+                    "environment": evaluation_environment(batch_or_concurrency=1),
                     "summary": summary,
                     "run_config": {
                         "caption_rerank_weight": CAPTION_RERANK_WEIGHT,

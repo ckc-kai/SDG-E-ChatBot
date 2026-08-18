@@ -1,11 +1,30 @@
 import unittest
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from retrieval.query.excel.channel import ExcelAnswer, ExcelDecline
+from retrieval.query.excel.query import ExcelQueryPlan
 from retrieval.query.pdf import EvidenceRetrievalResult
-from services.retrieval_service import RetrievalService
+from services.retrieval_service import RetrievalService, _scoped_step_question
+from generation.planning import RetrievalPlan, RetrievalStep
 
 
 class RetrievalServiceTests(unittest.TestCase):
+    @staticmethod
+    def _excel_answer():
+        plan = ExcelQueryPlan(table_number=1)
+        return ExcelAnswer(
+            question="q",
+            card_chunk_id=1,
+            card_caption="card",
+            card_score=1.0,
+            table_number=1,
+            semantic_metric_key=None,
+            plan=plan,
+            result=SimpleNamespace(),
+            bound={},
+        )
+
     @patch("services.retrieval_service.retrieve_configured")
     @patch("services.retrieval_service.connect_db")
     @patch("services.retrieval_service.answer_from_excel")
@@ -48,6 +67,47 @@ class RetrievalServiceTests(unittest.TestCase):
         self.assertEqual(
             retrieve.call_args.kwargs["groups"], ("narrative", "table", "figure")
         )
+
+    def test_planned_step_preserves_original_required_document_scope(self):
+        original = (
+            "Compare the 2023-2025 WMP, 2026-2028 WMP, and corresponding "
+            "guidelines."
+        )
+        step = "How is risk methodology explained in the 2023-2025 WMP?"
+
+        scoped = _scoped_step_question(original, step)
+
+        self.assertIn(step, scoped)
+        self.assertIn(original, scoped)
+
+    @patch(
+        "services.retrieval_service.feature_enabled",
+        side_effect=lambda name: name == "coverage_retry",
+    )
+    def test_plan_allows_only_one_targeted_coverage_retry(self, _feature):
+        service = RetrievalService()
+        empty = SimpleNamespace(
+            evidence=EvidenceRetrievalResult(question="q", groups={}),
+            verified_excel=None,
+            verified_excels=(),
+            timings=SimpleNamespace(
+                connection_ms=0,
+                grouped_retrieval_ms=0,
+                excel_verification_ms=0,
+                total_ms=0,
+            ),
+        )
+        service.retrieve = MagicMock(return_value=empty)
+        plan = RetrievalPlan((
+            RetrievalStep("first", ("narrative",), "pdf"),
+            RetrievalStep("second", ("excel_card",), "excel"),
+        ))
+
+        result = service.retrieve_plan("compound", plan)
+
+        self.assertEqual(service.retrieve.call_count, 3)
+        self.assertEqual(result.plan_diagnostics["retry_count"], 1)
+        self.assertEqual(result.plan_diagnostics["coverage"]["missing_steps"], [0, 1])
 
 
 if __name__ == "__main__":

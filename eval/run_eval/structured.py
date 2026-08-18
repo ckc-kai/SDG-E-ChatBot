@@ -32,6 +32,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from eval.environment import evaluation_environment
 from eval.run_eval.narrative import normalize
 from retrieval.query.lanes import ALL_LANES
 from retrieval.query.pdf.query import (
@@ -408,6 +409,7 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.out:
         payload = {
+            "environment": evaluation_environment(batch_or_concurrency=1),
             "summary": summary,
             "skipped": skipped,
             "run_config": {

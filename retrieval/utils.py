@@ -34,6 +34,7 @@ SUPPORTED_OUTPUT_MODES = {"grouped", "legacy_flat"}
 SUPPORTED_REWRITE_MODES = {"off", "auto", "always"}
 SUPPORTED_EMBEDDING_MODES = {"raw", "contextual", "hybrid"}
 SUPPORTED_HYBRID_POOL_MODES = {"rrf", "union"}
+SUPPORTED_LEXICAL_QUERY_MODES = {"broad_or", "focused", "off"}
 
 
 def _mapping(parent: dict[str, Any], key: str) -> dict[str, Any]:
@@ -140,8 +141,18 @@ def _validate_config(config: dict[str, Any]) -> None:
             f"Unknown retrieval.hybrid_pool_mode {pool_mode!r}; expected one of "
             f"{sorted(SUPPORTED_HYBRID_POOL_MODES)}"
         )
+    lexical_query_mode = retrieval.get("lexical_query_mode", "focused")
+    # PyYAML treats an unquoted ``off`` as boolean false under YAML 1.1.
+    if lexical_query_mode is False:
+        lexical_query_mode = "off"
+    if lexical_query_mode not in SUPPORTED_LEXICAL_QUERY_MODES:
+        raise ValueError(
+            f"Unknown retrieval.lexical_query_mode {lexical_query_mode!r}; "
+            f"expected one of {sorted(SUPPORTED_LEXICAL_QUERY_MODES)}"
+        )
     for key in ("retrieval_top_k", "rerank_top_k", "rrf_k"):
         _integer(retrieval.get(key), f"retrieval.{key}")
+    _integer(retrieval.get("rerank_batch_size", 8), "retrieval.rerank_batch_size")
     for key in (
         "caption_rerank_weight",
         "lexical_caption_weight",
