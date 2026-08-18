@@ -122,6 +122,28 @@ def _validate_config(config: dict[str, Any]) -> None:
         raise ValueError(
             "models.embedding.token_overlap must be smaller than max_tokens_per_chunk"
         )
+    table_max_tokens = _integer(
+        embedding.get("table_max_tokens_per_chunk", max_tokens),
+        "models.embedding.table_max_tokens_per_chunk",
+    )
+    table_overlap = _integer(
+        embedding.get("table_token_overlap", 0),
+        "models.embedding.table_token_overlap",
+        minimum=0,
+    )
+    if table_overlap >= table_max_tokens:
+        raise ValueError(
+            "models.embedding.table_token_overlap must be smaller than "
+            "table_max_tokens_per_chunk"
+        )
+    batch_size = _integer(
+        embedding.get("embedding_batch_size", 32),
+        "models.embedding.embedding_batch_size",
+    )
+    _integer(
+        embedding.get("table_embedding_batch_size", batch_size),
+        "models.embedding.table_embedding_batch_size",
+    )
     retrieval = _mapping(config, "retrieval")
     output_mode = retrieval.get("output_mode", "legacy_flat")
     if output_mode not in SUPPORTED_OUTPUT_MODES:
@@ -242,6 +264,31 @@ def get_embedding_model() -> SentenceTransformer:
     if config.get("provider", "sentence_transformers") != "sentence_transformers":
         raise ValueError("Configured embedding provider is not implemented")
     return SentenceTransformer(config["name"])
+
+
+QUERY_PROMPT_NAME = "query"
+
+
+def model_encodes_asymmetrically(model: SentenceTransformer) -> bool:
+    """True when the model ships a dedicated query prompt."""
+    return QUERY_PROMPT_NAME in (getattr(model, "prompts", None) or {})
+
+
+def encode_query(model: SentenceTransformer, text: str):
+    """Encode a search QUERY. Documents must never go through this function.
+
+    Asymmetric encoding is the whole point of a model like Qwen3: a short
+    question and a long passage are projected differently so they can still meet
+    in the same space. Applying the prompt to documents, or omitting it on
+    queries, degrades retrieval with no error and no log line -- so the direction
+    lives in one function rather than at each call site. Models without a query
+    prompt (bge-base, bge-m3) fall through unprompted, unchanged.
+    """
+    if model_encodes_asymmetrically(model):
+        return model.encode(
+            text, prompt_name=QUERY_PROMPT_NAME, normalize_embeddings=True
+        )
+    return model.encode(text, normalize_embeddings=True)
 
 
 @functools.lru_cache(maxsize=1)

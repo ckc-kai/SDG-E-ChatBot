@@ -13,7 +13,7 @@ DEFAULTS = {
     "coverage_retry": True,
     "metadata_routing": True,
     "cross_resource_computation": True,
-    "parent_child_expansion": False,
+    "parent_child_expansion": True,
     "model_excel_planner": True,
 }
 

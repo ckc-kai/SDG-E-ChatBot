@@ -66,7 +66,7 @@
         "required_lane": "pdf",
         "sources": [
           {
-            "path": "resources/wmp/pdf/2023-2025_WMP_TECHNICAL_GUIDELINES.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp_guidelines__2023-2025__final__2022-12-06.pdf",
             "physical_pages": [
               70,
               73,
@@ -80,7 +80,7 @@
             "supports": "The 2023-2025 cycle already required Overall Utility Risk prioritization, alternatives, costs, uncertainties and schedules."
           },
           {
-            "path": "resources/wmp/pdf/SDG&E_2023-2023_Base-WMP_R5-redacted.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp__2023-2025__r5-redacted__2025-07-25.pdf",
             "physical_pages": [
               51,
               52,
@@ -96,7 +96,7 @@
             "supports": "Circuit-segment granularity, WiNGS version evolution and RSE use in the 2023-2025 WMP."
           },
           {
-            "path": "resources/wmp/pdf/SDG&E_2026-2028_Base-WMP_R2.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp__2026-2028__r2__2025-05-23.pdf",
             "physical_pages": [
               88,
               112,
@@ -137,7 +137,7 @@
         "required_lane": "pdf",
         "sources": [
           {
-            "path": "resources/wmp/pdf/SDG&E_2023-2023_Base-WMP_R5-redacted.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp__2023-2025__r5-redacted__2025-07-25.pdf",
             "physical_pages": [
               253,
               220
@@ -149,7 +149,7 @@
             "supports": "Per-program ignition-reduction estimates in the 2023-2025 cycle: 0.6735 annual ignitions for WMP.459 and 0.188 for WMP.478."
           },
           {
-            "path": "resources/wmp/pdf/SDG&E_2026-2028_Base-WMP_R2.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp__2026-2028__r2__2025-05-23.pdf",
             "physical_pages": [
               112,
               124
@@ -187,7 +187,7 @@
         "required_lane": "pdf",
         "sources": [
           {
-            "path": "resources/wmp/pdf/FINAL_SDGE_20232025_WMP_Decision_and_Cover_Letter.pdf",
+            "path": "resources/wmp/pdf/sdge__oeis_decision__2023-2025__final__2023-10-13.pdf",
             "physical_pages": [
               1,
               55
@@ -199,7 +199,7 @@
             "supports": "OEIS findings on the 2023-2025 WMP that define the improvement agenda."
           },
           {
-            "path": "resources/wmp/pdf/2023-2025_WMP_TECHNICAL_GUIDELINES.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp_guidelines__2023-2025__final__2022-12-06.pdf",
             "physical_pages": [
               70,
               73,
@@ -213,7 +213,7 @@
             "supports": "Guideline requirements for alternatives, cost, uncertainty and schedule."
           },
           {
-            "path": "resources/wmp/pdf/FINAL 2026-2028_Wildfire_Mitigation_Plan_Guidelines.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp_guidelines__2026-2028__final__2025-02-24.pdf",
             "physical_pages": [
               1
             ],
@@ -223,7 +223,7 @@
             "supports": "Successor guideline requirements."
           },
           {
-            "path": "resources/wmp/pdf/SDG&E_2026-2028_Base-WMP_R2.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp__2026-2028__r2__2025-05-23.pdf",
             "physical_pages": [
               88,
               112,
@@ -307,7 +307,7 @@
             ]
           },
           {
-            "path": "resources/wmp/pdf/FINAL_SDGE_20232025_WMP_Decision_and_Cover_Letter.pdf",
+            "path": "resources/wmp/pdf/sdge__oeis_decision__2023-2025__final__2023-10-13.pdf",
             "physical_pages": [
               1
             ],
@@ -409,7 +409,7 @@
         "required_lane": "pdf",
         "sources": [
           {
-            "path": "resources/wmp/pdf/2023-2025_WMP_TECHNICAL_GUIDELINES.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp_guidelines__2023-2025__final__2022-12-06.pdf",
             "physical_pages": [
               70,
               73,
@@ -424,7 +424,7 @@
             "supports": "2023-2025 guideline requirements."
           },
           {
-            "path": "resources/wmp/pdf/FINAL 2026-2028_Wildfire_Mitigation_Plan_Guidelines.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp_guidelines__2026-2028__final__2025-02-24.pdf",
             "physical_pages": [
               1
             ],
@@ -434,7 +434,7 @@
             "supports": "2026-2028 guideline requirements."
           },
           {
-            "path": "resources/wmp/pdf/FINAL_SDGE_20232025_WMP_Decision_and_Cover_Letter.pdf",
+            "path": "resources/wmp/pdf/sdge__oeis_decision__2023-2025__final__2023-10-13.pdf",
             "physical_pages": [
               1
             ],
@@ -444,7 +444,7 @@
             "supports": "OEIS-confirmed gaps for the 2023-2025 cycle."
           },
           {
-            "path": "resources/wmp/pdf/SDG&E_2026-2028_Base-WMP_R2.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp__2026-2028__r2__2025-05-23.pdf",
             "physical_pages": [
               88,
               112,
@@ -489,7 +489,7 @@
         "required_lane": "pdf",
         "sources": [
           {
-            "path": "resources/wmp/pdf/FINAL_SDGE_20232025_WMP_Decision_and_Cover_Letter.pdf",
+            "path": "resources/wmp/pdf/sdge__oeis_decision__2023-2025__final__2023-10-13.pdf",
             "physical_pages": [
               1,
               55
@@ -500,7 +500,7 @@
             "supports": "OEIS's own criticisms of the 2023-2025 plan."
           },
           {
-            "path": "resources/wmp/pdf/FINAL Resolution SPD-16 SDG&E WMP Decision 2023.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp_decision__2023-2025__spd-16-final__2023-12-01.pdf",
             "physical_pages": [
               1
             ],
@@ -510,7 +510,7 @@
             "supports": "Related CPUC direction."
           },
           {
-            "path": "resources/wmp/pdf/FINAL 2026-2028_Wildfire_Mitigation_Plan_Guidelines.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp_guidelines__2026-2028__final__2025-02-24.pdf",
             "physical_pages": [
               1
             ],
@@ -520,7 +520,7 @@
             "supports": "Requirements the next plan must satisfy."
           },
           {
-            "path": "resources/wmp/pdf/SDG&E_2026-2028_Base-WMP_R2.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp__2026-2028__r2__2025-05-23.pdf",
             "physical_pages": [
               88,
               166
@@ -635,7 +635,7 @@
             ]
           },
           {
-            "path": "resources/wmp/pdf/SDG&E_2023-2023_Base-WMP_R5-redacted.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp__2023-2025__r5-redacted__2025-07-25.pdf",
             "physical_pages": [
               220
             ],
@@ -646,7 +646,7 @@
             "supports": "GO 165 five-year cycle, no planned frequency change, and WUI inspections entering WMP reporting from 2025."
           },
           {
-            "path": "resources/wmp/pdf/SDG&E_2026-2028_Base-WMP_R2.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp__2026-2028__r2__2025-05-23.pdf",
             "physical_pages": [
               186,
               208
@@ -753,7 +753,7 @@
         "required_lane": "pdf",
         "sources": [
           {
-            "path": "resources/wmp/pdf/2023-12-19_SDGE_2023_Change Order Report_R1.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp_change_order__2023-2025__r1__2023-12-19.pdf",
             "physical_pages": [
               5,
               6,
@@ -793,7 +793,7 @@
         "required_lane": "pdf",
         "sources": [
           {
-            "path": "resources/wmp/pdf/SDG&E_2023-2023_Base-WMP_R5-redacted.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp__2023-2025__r5-redacted__2025-07-25.pdf",
             "physical_pages": [
               253,
               254
@@ -836,7 +836,7 @@
         "required_lane": "pdf",
         "sources": [
           {
-            "path": "resources/wmp/pdf/SDG&E_2023-2023_Base-WMP_R5-redacted.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp__2023-2025__r5-redacted__2025-07-25.pdf",
             "physical_pages": [
               190
             ],
@@ -873,7 +873,7 @@
         "required_lane": "pdf",
         "sources": [
           {
-            "path": "resources/wmp/pdf/SDG&E_2023-2023_Base-WMP_R5-redacted.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp__2023-2025__r5-redacted__2025-07-25.pdf",
             "physical_pages": [
               219,
               220
@@ -914,7 +914,7 @@
         "required_lane": "pdf",
         "sources": [
           {
-            "path": "resources/wmp/pdf/SDG&E_2026-2028_Base-WMP_R2.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp__2026-2028__r2__2025-05-23.pdf",
             "physical_pages": [
               88
             ],
@@ -953,7 +953,7 @@
         "required_lane": "pdf",
         "sources": [
           {
-            "path": "resources/wmp/pdf/FINAL_SDGE_20232025_WMP_Decision_and_Cover_Letter.pdf",
+            "path": "resources/wmp/pdf/sdge__oeis_decision__2023-2025__final__2023-10-13.pdf",
             "physical_pages": [
               1
             ],
@@ -986,7 +986,7 @@
         "required_lane": "pdf",
         "sources": [
           {
-            "path": "resources/wmp/pdf/SDGE_20232025_Wildfire_Mitigation_Plan_NonSubstantive_Errata_4.26.23.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp_errata__2023-2025__v1__2023-04-26.pdf",
             "physical_pages": [
               2
             ],
@@ -996,7 +996,7 @@
             "supports": "Nine April 2023 items."
           },
           {
-            "path": "resources/wmp/pdf/SDGE_2023-2025_WMP_Non-Substantive_Errata_10-23-23.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp_errata__2023-2025__v2__2023-10-23.pdf",
             "physical_pages": [
               2,
               3
@@ -1007,7 +1007,7 @@
             "supports": "Cumulative table of seventeen items including the October additions."
           },
           {
-            "path": "resources/wmp/pdf/SDG&E_2023-2023_Base-WMP_R5-redacted.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp__2023-2025__r5-redacted__2025-07-25.pdf",
             "physical_pages": [
               1
             ],
@@ -1040,7 +1040,7 @@
         "required_lane": "pdf",
         "sources": [
           {
-            "path": "resources/wmp/pdf/2023-2025_WMP_TECHNICAL_GUIDELINES.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp_guidelines__2023-2025__final__2022-12-06.pdf",
             "physical_pages": [
               70,
               73,
@@ -1055,7 +1055,7 @@
             "supports": "Baseline requirements in the earlier generation."
           },
           {
-            "path": "resources/wmp/pdf/FINAL 2026-2028_Wildfire_Mitigation_Plan_Guidelines.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp_guidelines__2026-2028__final__2025-02-24.pdf",
             "physical_pages": [
               1
             ],
@@ -1065,7 +1065,7 @@
             "supports": "Successor requirements."
           },
           {
-            "path": "resources/wmp/pdf/SDG&E_2026-2028_Base-WMP_R2.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp__2026-2028__r2__2025-05-23.pdf",
             "physical_pages": [
               112,
               124,
@@ -1101,7 +1101,7 @@
         "required_lane": "pdf",
         "sources": [
           {
-            "path": "resources/wmp/pdf/SDG&E_2023-2023_Base-WMP_R5-redacted.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp__2023-2025__r5-redacted__2025-07-25.pdf",
             "physical_pages": [
               190
             ],
@@ -1112,7 +1112,7 @@
             "supports": "The 2023-2025 customer-impact comparison and its preliminary-result caveat."
           },
           {
-            "path": "resources/wmp/pdf/SDG&E_2026-2028_Base-WMP_R2.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp__2026-2028__r2__2025-05-23.pdf",
             "physical_pages": [
               112,
               124,
@@ -1149,7 +1149,7 @@
         "required_lane": "pdf",
         "sources": [
           {
-            "path": "resources/wmp/pdf/2023-12-19_SDGE_2023_Change Order Report_R1.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp_change_order__2023-2025__r1__2023-12-19.pdf",
             "physical_pages": [
               3,
               5,
@@ -1163,7 +1163,7 @@
             "supports": "The 25 percent significance threshold, the Section 2 approval table and the Section 3 non-approval table."
           },
           {
-            "path": "resources/wmp/pdf/2023-2025_WMP_TECHNICAL_GUIDELINES.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp_guidelines__2023-2025__final__2022-12-06.pdf",
             "physical_pages": [
               1
             ],
@@ -1200,7 +1200,7 @@
         "required_lane": "pdf",
         "sources": [
           {
-            "path": "resources/wmp/pdf/FINAL_SDGE_20232025_WMP_Decision_and_Cover_Letter.pdf",
+            "path": "resources/wmp/pdf/sdge__oeis_decision__2023-2025__final__2023-10-13.pdf",
             "physical_pages": [
               1
             ],
@@ -1210,7 +1210,7 @@
             "supports": "Prior-cycle decision present in corpus; not a 2026-2028 ruling."
           },
           {
-            "path": "resources/wmp/pdf/FINAL Resolution SPD-16 SDG&E WMP Decision 2023.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp_decision__2023-2025__spd-16-final__2023-12-01.pdf",
             "physical_pages": [
               1
             ],
@@ -1849,7 +1849,7 @@
         "required_lane": "combined",
         "sources": [
           {
-            "path": "resources/wmp/pdf/2023-12-19_SDGE_2023_Change Order Report_R1.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp_change_order__2023-2025__r1__2023-12-19.pdf",
             "physical_pages": [
               5,
               9
@@ -1936,7 +1936,7 @@
         "required_lane": "combined",
         "sources": [
           {
-            "path": "resources/wmp/pdf/SDG&E_2026-2028_Base-WMP_R2.pdf",
+            "path": "resources/wmp/pdf/sdge__wmp__2026-2028__r2__2025-05-23.pdf",
             "physical_pages": [
               88
             ],

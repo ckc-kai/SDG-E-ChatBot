@@ -25,6 +25,7 @@ from retrieval.ingest.pdf.figure_context import (
     persist_links,
 )
 from retrieval.ingest.pdf.schema import migrate
+from retrieval.source_manifest import title_for_filename
 from retrieval.utils import connect_db, get_embedding_model
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,11 @@ def reembed_figures(conn, model, chunk_ids: list[int]) -> int:
     )
     contextual_inputs = [
         contextual_embedding_text_for_model(
-            filename, breadcrumb, content, model.tokenizer, model.max_seq_length
+            title_for_filename(filename),
+            breadcrumb,
+            content,
+            model.tokenizer,
+            model.max_seq_length,
         )
         for _, filename, breadcrumb, content in rows
     ]

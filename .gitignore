@@ -29,6 +29,5 @@ files/
 
 # Local evaluation artifacts stay private, except the release gold contract.
 local/*
-!local/beta_golden_questions.json
 
 user_questions/beta_golden_questions.json

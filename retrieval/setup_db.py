@@ -50,6 +50,12 @@ def setup_database(conn=None) -> None:
                     sub_document text,
                     breadcrumb text NOT NULL,
                     section_number text,
+                    -- Document-order position of the owning section. Parent
+                    -- spans let two sections share a page_start, so the page
+                    -- alone no longer identifies a section: this is both the
+                    -- disambiguator in the uniqueness key below and the key
+                    -- parent-child expansion reconstructs a section from.
+                    section_ordinal int NOT NULL DEFAULT 0,
                     page_start int NOT NULL,
                     page_end int NOT NULL,
                     chunk_index int NOT NULL,
@@ -72,7 +78,8 @@ def setup_database(conn=None) -> None:
                     extractor text NOT NULL,
                     created_at timestamptz NOT NULL DEFAULT now(),
                     UNIQUE (
-                        document_id, content_type, page_start, chunk_index
+                        document_id, content_type, section_ordinal,
+                        page_start, chunk_index
                     )
                 );
                 """
@@ -94,6 +101,7 @@ def setup_database(conn=None) -> None:
                 "content_hash",
                 "embedding_provider",
                 "extractor",
+                "section_ordinal",
             }
             missing = sorted(required - columns)
             if missing:
@@ -123,6 +131,13 @@ def setup_database(conn=None) -> None:
                     f"{expected_type}. Reset the schema and re-ingest after "
                     "changing embedding dimensions."
                 )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS chunks_section_idx
+                ON chunks (document_id, section_ordinal, chunk_index)
+                WHERE content_type = 'narrative';
+                """
+            )
             cur.execute(
                 """
                 CREATE INDEX IF NOT EXISTS chunks_embedding_hnsw_idx
