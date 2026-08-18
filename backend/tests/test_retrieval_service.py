@@ -106,6 +106,8 @@ class RetrievalServiceTests(unittest.TestCase):
         result = service.retrieve_plan("compound", plan)
 
         self.assertEqual(service.retrieve.call_count, 3)
+        self.assertIs(result.plan, plan)
+        self.assertEqual(len(result.step_bundles), 2)
         self.assertEqual(result.plan_diagnostics["retry_count"], 1)
         self.assertEqual(result.plan_diagnostics["coverage"]["missing_steps"], [0, 1])
 

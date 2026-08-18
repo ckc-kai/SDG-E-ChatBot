@@ -1,7 +1,14 @@
 import json
 import unittest
 
-from generation.planning import CONTENT_TYPES, build_retrieval_plan, needs_planning
+from generation.planning import (
+    CONTENT_TYPES,
+    RetrievalPlan,
+    RetrievalStep,
+    build_retrieval_plan,
+    needs_planning,
+    supports_multistep_generation,
+)
 from generation.providers.base import ProviderError
 
 
@@ -12,9 +19,11 @@ class FakeProvider:
         self.response = response
         self.error = error
         self.calls = 0
+        self.last_prompt = None
 
     def generate(self, prompt):
         self.calls += 1
+        self.last_prompt = prompt
         if self.error:
             raise self.error
         return self.response
@@ -24,6 +33,24 @@ class FakeProvider:
 
 
 class RetrievalPlanningTests(unittest.TestCase):
+    def test_multistep_generation_requires_complete_model_plan(self):
+        steps = (
+            RetrievalStep("Find requirement A", ("narrative",)),
+            RetrievalStep("Find requirement B", ("narrative",)),
+        )
+        self.assertTrue(supports_multistep_generation(
+            RetrievalPlan(steps, source="model")
+        ))
+        self.assertFalse(supports_multistep_generation(
+            RetrievalPlan(steps[:1], source="model")
+        ))
+        self.assertFalse(supports_multistep_generation(
+            RetrievalPlan(steps, source="fallback")
+        ))
+        self.assertFalse(supports_multistep_generation(
+            RetrievalPlan(steps, source="model", dropped_task_count=1)
+        ))
+
     def test_between_years_single_fact_is_not_complex(self):
         self.assertFalse(needs_planning(
             "How many wildfires occurred between 2015 and 2022?"
@@ -51,6 +78,19 @@ class RetrievalPlanningTests(unittest.TestCase):
         self.assertEqual(len(plan.steps), 2)
         self.assertEqual(plan.steps[0].content_types, ("excel_card",))
         self.assertEqual(plan.steps[1].content_types, ("narrative",))
+
+    def test_complex_planner_receives_project_domain_vocabulary(self):
+        provider = FakeProvider(json.dumps({"tasks": [{
+            "question": "Review the Wildfire Mitigation Plan against OEIS expectations.",
+            "source": "pdf",
+        }]}))
+        build_retrieval_plan(
+            "Review the WMP from OEIS's perspective for a future filing cycle.",
+            provider,
+        )
+        self.assertIn("WMP means Wildfire Mitigation Plan", provider.last_prompt)
+        self.assertIn("OEIS means the California Office", provider.last_prompt)
+        self.assertIn("not automatically a request for forecast", provider.last_prompt)
 
     def test_every_subquestion_searches_all_evidence_types(self):
         provider = FakeProvider(json.dumps({"tasks": [{

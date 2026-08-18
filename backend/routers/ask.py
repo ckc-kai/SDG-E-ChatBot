@@ -43,6 +43,7 @@ def ask(
 ):
     pipeline_started = time.perf_counter()
     request_id = payload.request_id or f"req_{uuid4().hex}"
+    plan = None
     try:
         filters = payload.filters
         single_type = filters.content_type if filters else None
@@ -109,7 +110,13 @@ def ask(
             content={"request_id": request_id, "error": "retrieval_failed"},
         )
 
-    result = generation_service.generate(request_id, payload.question, bundle)
+    result = (
+        generation_service.generate_mixed(
+            request_id, payload.question, bundle, plan
+        )
+        if plan is not None
+        else generation_service.generate(request_id, payload.question, bundle)
+    )
     if isinstance(bundle.plan_diagnostics, dict):
         logger.info(
             "retrieval_plan request_id=%s diagnostics=%s",

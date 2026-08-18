@@ -44,6 +44,8 @@ class RetrievalBundle:
     timings: RetrievalTimings = RetrievalTimings()
     plan_diagnostics: dict | None = None
     calculations: tuple[CalculationResult, ...] = ()
+    plan: RetrievalPlan | None = None
+    step_bundles: tuple["RetrievalBundle", ...] = ()
 
 
 def _groups_for_types(content_types) -> tuple[str, ...]:
@@ -290,4 +292,6 @@ class RetrievalService:
                     )
                 ],
             },
+            plan=plan,
+            step_bundles=tuple(step_bundles),
         )

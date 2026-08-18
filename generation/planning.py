@@ -101,6 +101,20 @@ class RetrievalPlan:
     dropped_task_count: int = 0
 
 
+def supports_multistep_generation(plan: RetrievalPlan) -> bool:
+    """Return whether a plan is safe to answer step-by-step then synthesize.
+
+    Fallback, single-branch, and truncated plans use the normal merged-evidence
+    answer path.  A second model pass cannot add coverage in those cases and
+    may incorrectly weaken an insufficient-context decision.
+    """
+    return (
+        plan.source == "model"
+        and 2 <= len(plan.steps) <= DEFAULT_MAX_INITIAL_BRANCHES
+        and plan.dropped_task_count == 0
+    )
+
+
 def planning_reason(question: str) -> str | None:
     """Return a conservative reason based on independent evidence tasks."""
     normalized = " ".join(question.split())
@@ -222,9 +236,37 @@ def build_retrieval_plan(
             }
         ]
     }
-    prompt = f"""Create a typed evidence plan for this regulatory-data question.
+    prompt = f"""Create a typed evidence plan for this California utility regulatory-data question.
 Produce at most {max_tasks} atomic factual tasks. Return exactly this JSON shape:
 {json.dumps(exact_shape, separators=(",", ":"))}
+
+Project vocabulary:
+- WMP means Wildfire Mitigation Plan. It never means Water Management Plan.
+- OEIS means the California Office of Energy Infrastructure Safety (Energy Safety),
+  the regulator that reviews utility WMP filings.
+- QDR means Quarterly Data Report.
+- SDG&E means San Diego Gas & Electric, the regulated utility.
+- A WMP cycle such as 2023-2025 or 2026-2028 is the filing period.
+
+Keep project acronyms and regulatory terms unchanged. Never replace them with a
+different domain expansion. Distinguish evidence needed to support a requested
+review or recommendation from the recommendation itself. A future period named
+as the intended use of the analysis is not automatically a request for forecast
+data or resource allocations for that period.
+
+Create only tasks that retrieve evidence directly needed by an explicit user
+requirement. Do not create background tasks to rediscover an entity, acronym,
+filing period, or date already stated in the question. Do not introduce a QDR,
+spreadsheet, forecast, or other document type unless the question requires facts
+from it. For a review or recommendation, retrieve the applicable requirements,
+the filing content being reviewed, and regulator findings or past criticisms;
+do not retrieve the recommendation itself. Treat phrases such as "for a future
+cycle" or "to help future development" as the intended use, not an evidence
+period, unless the user explicitly asks for facts or projections from that cycle.
+Prefer 2-4 necessary tasks and combine closely related facts that use the same
+source role. Use 5-6 tasks only when the original question has that many truly
+independent factual requirements. Do not add tasks for facts that merely might
+be useful. Omit optional keys when their value would only be N/A or unknown.
 
 Every task MUST contain the keys "question" and "source". "source" MUST be
 exactly "pdf" or "excel". Use only the keys shown above; never use source_type,
