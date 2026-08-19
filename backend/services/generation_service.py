@@ -86,6 +86,12 @@ class GenerationService:
                 tuple(enumerate(bundle.calculations, start=1))
             ):
                 chunks.insert(0, _calculation_chunk(calculation, index))
+        # Row windows lead the ranked evidence, with verified executions above
+        # them. Moving them after the ranked evidence was measured and reverted:
+        # 48.24 against 51.37, with refusals back up from 6 to 9 of 27. Evidence
+        # the model has to scroll past is evidence it declines to use.
+        for row_slice in reversed(getattr(bundle, "excel_rows", ())):
+            chunks.insert(0, _excel_rows_chunk(row_slice))
         verified_items = bundle.verified_excels or (
             (bundle.verified_excel,) if bundle.verified_excel is not None else ()
         )
@@ -234,6 +240,23 @@ def _create_planner_provider():
         values["GROQ_MAX_TOKENS"] = values.get("TASK3_PLANNER_MAX_TOKENS", "500")
         values["GROQ_REASONING_EFFORT"] = "low"
     return create_provider_from_env(provider_name, environ=values)
+
+
+def _excel_rows_chunk(row_slice) -> Chunk:
+    """Render a window of workbook rows as one citable evidence chunk."""
+    return Chunk(
+        source_id=row_slice.source_file,
+        chunk_id=f"excel-rows-{row_slice.card_chunk_id}",
+        content=row_slice.render(),
+        metadata=ChunkMetadata(
+            source_file=row_slice.source_file,
+            sheet=f"Table {row_slice.table_number}",
+            breadcrumb=(
+                f"Quarterly Data Report > Table {row_slice.table_number}"
+            ),
+            content_type="excel_card",
+        ),
+    )
 
 
 def _verified_excel_chunks(answer) -> list[Chunk]:

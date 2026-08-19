@@ -35,7 +35,10 @@ class RetrievalPlanningTests(unittest.TestCase):
     def test_simple_question_uses_all_types_without_model_call(self):
         provider = FakeProvider()
         plan = build_retrieval_plan("What is the target?", provider)
-        self.assertEqual(plan.steps[0].content_types, ("narrative",))
+        self.assertEqual(
+            plan.steps[0].content_types,
+            ("narrative", "table", "figure", "excel_card"),
+        )
         self.assertEqual(plan.steps[0].source, "pdf")
         self.assertEqual(provider.calls, 0)
 

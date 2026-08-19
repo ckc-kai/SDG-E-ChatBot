@@ -44,7 +44,7 @@ from retrieval.utils import (
     encode_query,
     get_anthropic_client,
     get_embedding_model,
-    get_reranker_model,
+    rerank_scores,
     load_config,
 )
 
@@ -918,7 +918,7 @@ def rerank(
     if not candidates:
         return []
     pairs = [(question, _candidate_text(candidate)) for candidate in candidates]
-    scores = get_reranker_model().predict(pairs, batch_size=RERANK_BATCH_SIZE)
+    scores = rerank_scores(pairs, batch_size=RERANK_BATCH_SIZE)
     ranked = sorted(
         (
             (

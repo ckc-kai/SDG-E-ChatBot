@@ -52,6 +52,9 @@ DUAL_YEAR_AXIS_TABLES = {14, 15}
 DEFAULT_PLANNER_MODEL = "openai/gpt-oss-120b"
 MAX_CANDIDATE_TABLES = 4
 MAX_VOCAB_VALUES = 25
+# Two extra queries cover the aggregate-plus-detail and two-table shapes
+# without letting one question fan out into a survey of the workbook.
+MAX_FOLLOW_UP_PLANS = 2
 
 _VINTAGE_CUE_RE = re.compile(r"\b(submission|submitted|filing|filed|vintage|year[ _-]basis)\b", re.I)
 _SHAPE_CUE_RE = re.compile(
@@ -65,40 +68,63 @@ _SHAPE_CUE_RE = re.compile(
 )
 _EITHER_OR_RE = re.compile(r"\bmore\b.+\bor\b", re.I)
 
+# The shape of one plan, shared by the primary plan and every follow-up so
+# the two can never validate differently.
+_PLAN_BODY_PROPERTIES: dict[str, Any] = {
+    "table_number": {"type": "integer"},
+    "semantic_metric_key": {"type": ["string", "null"]},
+    "operation": {"type": "string", "enum": ["aggregate", "select", "rank"]},
+    "aggregate": {"type": "string", "enum": ["sum", "avg", "count", "min", "max"]},
+    "filters": {
+        "type": "array",
+        "maxItems": 8,
+        "items": {
+            "type": "object",
+            "properties": {
+                "field": {"type": "string"},
+                "operator": {
+                    "type": "string",
+                    "enum": sorted(OPERATORS),
+                },
+                "value": {"type": ["string", "number"]},
+            },
+            "required": ["field", "value"],
+            "additionalProperties": False,
+        },
+    },
+    "group_by": {"type": "array", "maxItems": 3, "items": {"type": "string"}},
+    "select_json_keys": {
+        "type": "array",
+        "maxItems": 6,
+        "items": {"type": "string"},
+    },
+    "descending": {"type": "boolean"},
+    "limit": {"type": "integer"},
+}
+
 PLAN_RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "action": {"type": "string", "enum": ["plan", "decline"]},
         "reason": {"type": "string"},
-        "table_number": {"type": "integer"},
-        "semantic_metric_key": {"type": ["string", "null"]},
-        "operation": {"type": "string", "enum": ["aggregate", "select", "rank"]},
-        "aggregate": {"type": "string", "enum": ["sum", "avg", "count", "min", "max"]},
-        "filters": {
+        **_PLAN_BODY_PROPERTIES,
+        "follow_up_plans": {
+            # Some questions are two queries, not one: an aggregate total and
+            # the ranked detail behind it, or the same metric read from two
+            # tables. Asked for a single plan the model used to decline these
+            # outright -- "cannot be expressed with a single query plan" -- and
+            # the question fell back to prose with no numbers. Each follow-up is
+            # sanitised and executed exactly like the primary plan, so this
+            # widens what can be asked without widening what can be run.
             "type": "array",
-            "maxItems": 8,
+            "maxItems": MAX_FOLLOW_UP_PLANS,
             "items": {
                 "type": "object",
-                "properties": {
-                    "field": {"type": "string"},
-                    "operator": {
-                        "type": "string",
-                        "enum": sorted(OPERATORS),
-                    },
-                    "value": {"type": ["string", "number"]},
-                },
-                "required": ["field", "value"],
+                "properties": _PLAN_BODY_PROPERTIES,
+                "required": ["table_number", "operation"],
                 "additionalProperties": False,
             },
         },
-        "group_by": {"type": "array", "maxItems": 3, "items": {"type": "string"}},
-        "select_json_keys": {
-            "type": "array",
-            "maxItems": 6,
-            "items": {"type": "string"},
-        },
-        "descending": {"type": "boolean"},
-        "limit": {"type": "integer"},
     },
     "required": ["action"],
     "additionalProperties": False,
@@ -282,8 +308,8 @@ def _render_prompt(
     entity_options: dict[int, list[tuple[str, str]]] | None = None,
 ) -> str:
     lines = [
-        "Convert this question about SDG&E quarterly wildfire data into one",
-        "typed query plan, or decline if no table can answer it.",
+        "Convert this question about SDG&E quarterly wildfire data into typed",
+        "query plans, or decline if no table can answer it.",
         "",
         f"Question: {question}",
         "",
@@ -324,6 +350,15 @@ def _render_prompt(
     lines += [
         "",
         "Rules:",
+        "- A question that asks for two separate figures needs two plans, not a",
+        "  decline. Put the first in the top-level plan and each additional one",
+        f"  in follow_up_plans (up to {MAX_FOLLOW_UP_PLANS}), each with its own table_number and",
+        "  operation. Typical shapes: a total AND the ranked detail behind it",
+        "  ('what was the Tier 3 total, and which segments were highest' ->",
+        "  plan: operation=aggregate filtered to the tier; follow_up:",
+        "  operation=rank group_by record_id); the same metric on two tables;",
+        "  or two different metrics. NEVER decline because one query is not",
+        "  enough. Use one plan when one plan genuinely answers the question.",
         "- A plan MUST set top-level table_number, and for metric-fact tables a",
         "  top-level semantic_metric_key naming the metric concept. Neither is",
         "  a filter.",
@@ -552,6 +587,15 @@ def _sanitize_plan(
         # are decoration the executor cannot select. Keep the plan itself.
         select_json_keys = ()
     if select_json_keys:
+        # A model naming ``title`` or ``status`` is naming a real record column,
+        # not a hallucinated field: those are promoted out of the attributes
+        # jsonb and the executor already returns them. Rejecting the whole plan
+        # over a decorative select threw away otherwise valid queries, so drop
+        # the promoted names and keep the plan. A name that is neither a jsonb
+        # attribute nor a column is still invented, and still rejected.
+        select_json_keys = tuple(
+            key for key in select_json_keys if key not in typed_columns
+        )
         unknown = [key for key in select_json_keys if key not in json_keys]
         if unknown:
             raise _PlanRejected(f"unknown attributes {unknown!r}")
@@ -645,13 +689,24 @@ def build_model_plan(
     conn,
     contracts: ContractSet,
 ) -> tuple[ExcelQueryPlan, ExcelExecutionResult] | None:
-    """Formulate, validate, and execute a model plan; None means fall back."""
+    """Back-compatible single-plan entry point; None means fall back."""
+    plans = build_model_plans(question, cards, conn, contracts)
+    return plans[0] if plans else None
+
+
+def build_model_plans(
+    question: str,
+    cards,
+    conn,
+    contracts: ContractSet,
+) -> list[tuple[ExcelQueryPlan, ExcelExecutionResult]]:
+    """Formulate, validate and execute one or more plans; [] means fall back."""
     provider = _get_planner_provider()
     if provider is None or not cards:
-        return None
+        return []
     candidates = _candidate_tables(cards)
     if not candidates:
-        return None
+        return []
     contexts = {
         table_number: _table_context(conn, table_number, contracts)
         for table_number, _, _ in candidates
@@ -669,6 +724,43 @@ def build_model_plan(
         payload = json.loads(raw)
         if not isinstance(payload, dict):
             raise _PlanRejected("plan response must be a JSON object")
+    except (ProviderError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        logger.warning("Excel model planning failed: %s", exc)
+        return []
+
+    executed: list[tuple[ExcelQueryPlan, ExcelExecutionResult]] = []
+    follow_ups = payload.get("follow_up_plans")
+    # A follow-up carries only a plan body; ``action`` lives once on the
+    # envelope. Without it every follow-up sanitises as "model declined".
+    bodies = [payload] + [
+        {**body, "action": "plan"}
+        for body in (follow_ups if isinstance(follow_ups, list) else [])
+        if isinstance(body, dict)
+    ][:MAX_FOLLOW_UP_PLANS]
+    for index, body in enumerate(bodies):
+        outcome = _execute_one(body, question, candidates, contexts, conn, contracts)
+        if outcome is None:
+            # A failed follow-up is not a failed answer: the primary plan may
+            # still stand on its own.
+            if index == 0:
+                return []
+            continue
+        if any(plan == outcome[0] for plan, _ in executed):
+            continue
+        executed.append(outcome)
+    return executed
+
+
+def _execute_one(
+    payload: dict,
+    question: str,
+    candidates,
+    contexts,
+    conn,
+    contracts: ContractSet,
+) -> tuple[ExcelQueryPlan, ExcelExecutionResult] | None:
+    """Sanitise, execute and guard one plan body. None means discard it."""
+    try:
         plan = _sanitize_plan(payload, question, candidates, contexts)
         plan = _merge_question_dimensions(plan, question, conn)
         result = execute_plan(plan, conn, contracts=contracts)
@@ -679,8 +771,8 @@ def build_model_plan(
         # Includes ClarificationNeeded; surface through the heuristic path.
         logger.info("Excel model plan refused by executor: %s", exc)
         return None
-    except (ProviderError, ValueError, TypeError, json.JSONDecodeError) as exc:
-        logger.warning("Excel model planning failed: %s", exc)
+    except (ValueError, TypeError) as exc:
+        logger.warning("Excel model plan could not be built: %s", exc)
         return None
     if plan.operation == "select":
         selected_indexes = [

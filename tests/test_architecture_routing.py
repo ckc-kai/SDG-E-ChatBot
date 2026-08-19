@@ -21,22 +21,28 @@ class FakeJudge:
 
 
 class ResourceRoutingTests(unittest.TestCase):
-    def test_simple_pdf_question_uses_narrative_only(self):
+    def test_every_question_requests_every_evidence_group(self):
+        """Grouped retrieval ranks groups independently, so withholding one can
+        only lose evidence. Routing therefore no longer predicts resources."""
         route = route_question("How does SDG&E define wildfire risk?")
         self.assertTrue(route.need_pdf)
-        self.assertFalse(route.need_excel)
-        self.assertEqual(route.pdf_content_types, ("narrative",))
-        self.assertFalse(route.uncertain)
-
-    def test_explicit_figure_and_workbook_cues_are_deterministic(self):
-        figure = route_question("According to Figure 7-2, what does the chart show?")
-        workbook = route_question(
-            "In the quarterly activity workbook, what was WMP.455's 2024 target?"
+        self.assertTrue(route.need_excel)
+        self.assertEqual(
+            route.pdf_content_types, ("narrative", "table", "figure")
         )
-        self.assertEqual(figure.pdf_content_types, ("narrative", "figure"))
-        self.assertFalse(figure.need_excel)
-        self.assertTrue(workbook.need_excel)
-        self.assertFalse(workbook.need_pdf)
+        self.assertEqual(
+            route.content_types,
+            ("narrative", "table", "figure", "excel_card"),
+        )
+
+    def test_stakeholder_phrasing_still_reaches_the_workbook(self):
+        """The regression this replaced a classifier for: a question answerable
+        only from the workbook, phrased without the words "workbook" or "QDR"."""
+        plain = route_question(
+            "How many poles were replaced in 2024, and what was the target?"
+        )
+        self.assertTrue(plain.need_excel)
+        self.assertIn("excel_card", plain.content_types)
 
     def test_uncertain_route_uses_at_most_one_structured_judge_call(self):
         judge = FakeJudge(json.dumps({
@@ -50,7 +56,11 @@ class ResourceRoutingTests(unittest.TestCase):
             "What exact values are shown for the mitigation categories?", judge=judge
         )
         self.assertEqual(judge.calls, 1)
-        self.assertEqual(route.pdf_content_types, ("narrative", "table"))
+        # A judge may add evidence but never remove a deterministic group.
+        self.assertEqual(
+            route.pdf_content_types, ("narrative", "table", "figure")
+        )
+        self.assertTrue(route.need_excel)
         self.assertEqual(route.source, "judge")
 
     def test_failed_judge_fails_open_to_bounded_pdf_support(self):

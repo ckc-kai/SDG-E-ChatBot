@@ -15,6 +15,7 @@ DEFAULTS = {
     "cross_resource_computation": True,
     "parent_child_expansion": True,
     "model_excel_planner": True,
+    "excel_row_evidence": True,
 }
 
 

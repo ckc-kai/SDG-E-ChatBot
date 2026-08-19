@@ -13,10 +13,11 @@ from generation.features import feature_enabled
 from generation.planning import RetrievalPlan
 from retrieval.query.excel.channel import (
     ExcelAnswer,
-    answer_from_excel,
+    answer_from_excel_all,
     is_entity_history_question,
 )
 from retrieval.query.excel.query import bind_entity_key
+from retrieval.query.excel.rows import ExcelRowSlice, fetch_card_rows
 from retrieval.query.pdf import EvidenceGroup, EvidenceRetrievalResult, retrieve_configured
 from retrieval.query.pdf.query import required_source_roles
 from retrieval.utils import connect_db
@@ -52,6 +53,7 @@ class RetrievalBundle:
     plan_diagnostics: dict | None = None
     calculations: tuple[CalculationResult, ...] = ()
     computation_notes: tuple[str, ...] = ()
+    excel_rows: tuple[ExcelRowSlice, ...] = ()
 
 
 def _groups_for_types(content_types) -> tuple[str, ...]:
@@ -115,6 +117,8 @@ class RetrievalService:
         grouped_retrieval_ms = 0
         excel_verification_ms = 0
         verified_excel = None
+        verified_excels: tuple[ExcelAnswer, ...] = ()
+        excel_rows: tuple[ExcelRowSlice, ...] = ()
         try:
             source_roles = required_source_roles(question)
             excel_requested = (
@@ -138,14 +142,15 @@ class RetrievalService:
             if should_try_excel and is_entity_history_question(question):
                 excel_started = time.perf_counter()
                 try:
-                    excel_result = answer_from_excel(question, connection)
+                    excel_result = answer_from_excel_all(question, connection)
                     excel_attempted = True
                 finally:
                     excel_verification_ms = round(
                         (time.perf_counter() - excel_started) * 1000
                     )
-                if isinstance(excel_result, ExcelAnswer):
-                    verified_excel = excel_result
+                if isinstance(excel_result, tuple) and excel_result:
+                    verified_excels = excel_result
+                    verified_excel = excel_result[0]
                     if content_type is None and content_types is None:
                         # Exact execution is stronger than semantic cards. Avoid
                         # spending retrieval/context budget after it succeeds.
@@ -162,13 +167,23 @@ class RetrievalService:
             if should_try_excel and not excel_attempted:
                 excel_started = time.perf_counter()
                 try:
-                    excel_result = answer_from_excel(question, connection)
+                    excel_result = answer_from_excel_all(question, connection)
                 finally:
                     excel_verification_ms = round(
                         (time.perf_counter() - excel_started) * 1000
                     )
-                if isinstance(excel_result, ExcelAnswer):
-                    verified_excel = excel_result
+                if isinstance(excel_result, tuple) and excel_result:
+                    verified_excels = excel_result
+                    verified_excel = excel_result[0]
+
+            # A retrieved card describes a table; these are the rows it
+            # describes. Verified execution, when it fired, is stronger and is
+            # rendered ahead of this, so the two do not compete.
+            excel_group = getattr(result, "groups", {}).get("excel")
+            if excel_group is not None and feature_enabled("excel_row_evidence"):
+                excel_rows = fetch_card_rows(
+                    question, excel_group.results, connection
+                )
         finally:
             connection.close()
 
@@ -176,8 +191,9 @@ class RetrievalService:
             raise TypeError("Task 2 did not return grouped evidence")
         return RetrievalBundle(
             evidence=result,
+            excel_rows=excel_rows,
             verified_excel=verified_excel,
-            verified_excels=((verified_excel,) if verified_excel else ()),
+            verified_excels=verified_excels,
             timings=RetrievalTimings(
                 connection_ms=connection_ms,
                 grouped_retrieval_ms=grouped_retrieval_ms,
@@ -280,6 +296,15 @@ class RetrievalService:
                     verified_keys.add(key)
                     verified_list.append(answer)
 
+        merged_excel_rows: tuple[ExcelRowSlice, ...] = ()
+        seen_row_scopes: set[tuple] = set()
+        for bundle in step_bundles:
+            for row_slice in bundle.excel_rows:
+                scope = (row_slice.table_number, row_slice.card_chunk_id)
+                if scope not in seen_row_scopes:
+                    seen_row_scopes.add(scope)
+                    merged_excel_rows += (row_slice,)
+
         calculations: tuple[CalculationResult, ...] = ()
         computation_notes: tuple[str, ...] = ()
         if feature_enabled("cross_resource_computation"):
@@ -316,6 +341,7 @@ class RetrievalService:
         )
         return RetrievalBundle(
             evidence=EvidenceRetrievalResult(question=question, groups=merged),
+            excel_rows=merged_excel_rows,
             verified_excel=verified_items[0] if verified_items else None,
             verified_excels=verified_items,
             timings=timings,
