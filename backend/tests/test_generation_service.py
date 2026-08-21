@@ -14,6 +14,7 @@ from services.generation_service import (
 )
 from generation.schemas import Chunk, ChunkMetadata
 from generation.computation import CalculationResult
+from generation.planning import Requirement, RetrievalPlan, RetrievalStep
 from services.retrieval_service import RetrievalBundle
 
 
@@ -46,6 +47,83 @@ def group(name: str, results: list):
 
 
 class GenerationServiceTests(unittest.TestCase):
+    def test_multistep_plan_answers_steps_then_synthesizes(self):
+        step_responses = [
+            AnswerResponse(
+                request_id="req_step_1",
+                answer="first finding",
+                cited_chunk_ids=("1",),
+                citations=(),
+                insufficient_context=False,
+                model_id="fake",
+                latency_ms=1,
+            ),
+            AnswerResponse(
+                request_id="req_step_2",
+                answer="second partial finding",
+                cited_chunk_ids=("2",),
+                citations=(),
+                insufficient_context=True,
+                model_id="fake",
+                latency_ms=1,
+                missing_requirements=("second missing fact",),
+            ),
+        ]
+        services = []
+        for response in step_responses:
+            service = MagicMock()
+            service.answer.return_value = response
+            services.append(service)
+        synthesis = MagicMock()
+        synthesis.provider.model_id = "synthesis-model"
+        synthesis.provider.last_usage = None
+        synthesis.provider.generate_structured.return_value = (
+            '{"answer":"combined","cited_chunk_ids":["1","2"],'
+            '"insufficient_context":false,"answered_requirements":["R1"],'
+            '"missing_requirements":["R2"]}'
+        )
+        services.append(synthesis)
+
+        plan = RetrievalPlan(
+            steps=(
+                RetrievalStep("first", ("narrative",), requirement_ids=("R1",)),
+                RetrievalStep("second", ("narrative",), requirement_ids=("R2",)),
+            ),
+            source="model",
+            atomic_task_count=2,
+            requirements=(Requirement("R1", "first"), Requirement("R2", "second")),
+        )
+        step_bundles = (
+            RetrievalBundle(EvidenceRetrievalResult(
+                question="first",
+                groups={"narrative": group("narrative", [result(1)])},
+            )),
+            RetrievalBundle(EvidenceRetrievalResult(
+                question="second",
+                groups={"narrative": group("narrative", [result(2)])},
+            )),
+        )
+        combined = RetrievalBundle(
+            EvidenceRetrievalResult(
+                question="combined",
+                groups={"narrative": group("narrative", [result(1), result(2)])},
+            ),
+            plan=plan,
+            step_bundles=step_bundles,
+        )
+        service = GenerationService(
+            answer_service=MagicMock(),
+            answer_service_factory=lambda: services.pop(0),
+        )
+
+        response = service.generate_mixed("req", "combined", combined, plan)
+
+        self.assertEqual(response.answer, "combined")
+        self.assertEqual(response.cited_chunk_ids, ("1", "2"))
+        self.assertTrue(response.insufficient_context)
+        self.assertEqual(response.missing_requirements, ("R2",))
+        synthesis.provider.generate_structured.assert_called_once()
+
     def test_deduplicates_equivalent_evidence_and_keeps_first_metadata(self):
         chunks = [
             Chunk("source-a", "1", "Same  evidence", ChunkMetadata(source_file="a.pdf")),

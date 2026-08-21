@@ -12,6 +12,7 @@ from typing import Any, Protocol
 from urllib.parse import urlparse
 
 from generation.providers.base import ProviderError
+from generation.providers.capabilities import ModelCapabilities
 
 
 DEFAULT_BASE_URL = "http://127.0.0.1:11434"
@@ -28,8 +29,16 @@ ANSWER_SCHEMA: dict[str, Any] = {
         "answer": {"type": "string"},
         "cited_chunk_ids": {"type": "array", "items": {"type": "string"}},
         "insufficient_context": {"type": "boolean"},
+        "answered_requirements": {"type": "array", "items": {"type": "string"}},
+        "missing_requirements": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["answer", "cited_chunk_ids", "insufficient_context"],
+    "required": [
+        "answer",
+        "cited_chunk_ids",
+        "insufficient_context",
+        "answered_requirements",
+        "missing_requirements",
+    ],
     "additionalProperties": False,
 }
 
@@ -126,6 +135,12 @@ class OllamaProvider:
         self.last_usage: OllamaUsage | None = None
         self.last_request_payload: Mapping[str, Any] | None = None
         self.last_raw_text: str | None = None
+        self.capabilities = ModelCapabilities(
+            context_window=context_tokens,
+            max_output_tokens=max_tokens,
+            requested_output_tokens=max_tokens,
+            prompt_token_budget=context_tokens - max_tokens,
+        )
 
     @classmethod
     def from_env(

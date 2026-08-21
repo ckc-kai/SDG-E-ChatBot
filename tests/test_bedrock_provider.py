@@ -68,6 +68,8 @@ class BedrockProviderTests(unittest.TestCase):
             ],
         )
         self.assertEqual(provider.last_usage, BedrockUsage(100, 20, 120, 250))
+        self.assertEqual(provider.capabilities.context_window, 4096)
+        self.assertEqual(provider.capabilities.prompt_token_budget, 3796)
 
     def test_multiple_text_blocks_are_joined(self) -> None:
         client = FakeBedrockClient(

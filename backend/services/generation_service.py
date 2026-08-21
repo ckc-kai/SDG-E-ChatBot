@@ -5,23 +5,38 @@ from __future__ import annotations
 import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from generation.adapters import adapt_ranked_results
 from generation.computation import CalculationResult
 from generation.features import feature_enabled
-from generation.planning import RetrievalPlan, build_retrieval_plan
+from generation.multistep import (
+    PlannedSubanswer,
+    build_synthesis_prompt,
+    protect_synthesis_coverage,
+)
+from generation.planning import (
+    RetrievalPlan,
+    build_retrieval_plan,
+    supports_multistep_generation,
+)
 from generation.providers import create_provider_from_env
+from generation.providers.base import ProviderError
+from generation.providers.ollama import ANSWER_SCHEMA
 from generation.routing import RouteDecision, route_question
 from generation.schemas import (
     AnswerRequest,
     AnswerResponse,
+    AnswerTimings,
     Chunk,
     ChunkMetadata,
     ErrorResponse,
+    ModelAnswer,
 )
-from generation.service import AnswerService
+from generation.service import AnswerService, ModelOutputError, parse_model_answer
+from generation.citation_validation import validate_and_hydrate_citations
 from retrieval.query.pdf import EVIDENCE_GROUPS, EvidenceRetrievalResult
 from services.retrieval_service import RetrievalBundle
 
@@ -61,10 +76,16 @@ class GenerationService:
         self,
         answer_service: AnswerService | None = None,
         planner_provider=None,
+        answer_service_factory=None,
     ):
-        self._answer_service = answer_service or AnswerService(
-            create_provider_from_env()
-        )
+        self._answer_service_factory = answer_service_factory
+        if answer_service is None:
+            self._answer_service_factory = (
+                answer_service_factory
+                or (lambda: AnswerService(create_provider_from_env()))
+            )
+            answer_service = self._answer_service_factory()
+        self._answer_service = answer_service
         self._planner_provider = planner_provider
 
     def generate(
@@ -75,38 +96,7 @@ class GenerationService:
     ) -> AnswerResponse | ErrorResponse:
         started = time.perf_counter()
         adapter_started = time.perf_counter()
-        ranked_results = interleave_grouped_results(bundle.evidence)
-        chunks = list(adapt_ranked_results(ranked_results))
-        if feature_enabled("cross_resource_computation"):
-            for index, note in reversed(
-                tuple(enumerate(getattr(bundle, "computation_notes", ()), start=1))
-            ):
-                chunks.insert(0, _computation_note_chunk(note, index))
-            for index, calculation in reversed(
-                tuple(enumerate(bundle.calculations, start=1))
-            ):
-                chunks.insert(0, _calculation_chunk(calculation, index))
-        verified_items = bundle.verified_excels or (
-            (bundle.verified_excel,) if bundle.verified_excel is not None else ()
-        )
-        for answer in reversed(verified_items):
-            chunks[0:0] = _verified_excel_chunks(answer)
-        chunks = deduplicate_chunks(chunks)
-        # Two verified executions of one card (different plan shapes) share a
-        # card id; keep every distinct result citable under a unique id.
-        seen_ids: dict[str, int] = {}
-        unique_chunks: list[Chunk] = []
-        for chunk in chunks:
-            count = seen_ids.get(chunk.chunk_id)
-            if count is None:
-                seen_ids[chunk.chunk_id] = 0
-            else:
-                seen_ids[chunk.chunk_id] = count + 1
-                chunk = replace(
-                    chunk, chunk_id=f"{chunk.chunk_id}-v{count + 1}"
-                )
-            unique_chunks.append(chunk)
-        chunks = unique_chunks
+        chunks = _chunks_from_bundle(bundle)
         request = AnswerRequest(
             request_id=request_id,
             question=question,
@@ -126,6 +116,127 @@ class GenerationService:
                     (time.perf_counter() - started) * 1000
                 ),
             ),
+        )
+
+    def generate_mixed(
+        self,
+        request_id: str,
+        question: str,
+        bundle: RetrievalBundle,
+        plan: RetrievalPlan,
+    ) -> AnswerResponse | ErrorResponse:
+        """Use parallel subanswers only for a complete multi-step model plan."""
+        if (
+            not feature_enabled("multistep_generation")
+            or not supports_multistep_generation(plan)
+            or len(bundle.step_bundles) != len(plan.steps)
+        ):
+            return self.generate(request_id, question, bundle)
+
+        started = time.perf_counter()
+
+        def answer_step(index_bundle):
+            index, step_bundle = index_bundle
+            service = (
+                self._answer_service_factory()
+                if self._answer_service_factory is not None
+                else self._answer_service
+            )
+            worker = GenerationService(answer_service=service)
+            return worker.generate(
+                f"{request_id}_step_{index + 1}",
+                plan.steps[index].question,
+                step_bundle,
+            )
+
+        with ThreadPoolExecutor(max_workers=len(plan.steps)) as executor:
+            responses = tuple(executor.map(
+                answer_step, enumerate(bundle.step_bundles)
+            ))
+        if any(isinstance(response, ErrorResponse) for response in responses):
+            return self.generate(request_id, question, bundle)
+
+        subanswers = tuple(
+            PlannedSubanswer(
+                requirement_ids=plan.steps[index].requirement_ids,
+                answer=ModelAnswer(
+                    answer=response.answer,
+                    cited_chunk_ids=response.cited_chunk_ids,
+                    insufficient_context=response.insufficient_context,
+                    answered_requirements=response.answered_requirements,
+                    missing_requirements=response.missing_requirements,
+                ),
+            )
+            for index, response in enumerate(responses)
+        )
+        synthesis_service = (
+            self._answer_service_factory()
+            if self._answer_service_factory is not None
+            else self._answer_service
+        )
+        provider = synthesis_service.provider
+        prompt = build_synthesis_prompt(question, plan.requirements, subanswers)
+        try:
+            structured = getattr(provider, "generate_structured", None)
+            raw = (
+                structured(prompt, ANSWER_SCHEMA)
+                if callable(structured)
+                else provider.generate(prompt)
+            )
+            synthesized = protect_synthesis_coverage(
+                parse_model_answer(raw), plan.requirements, subanswers
+            )
+            chunks = _chunks_from_bundle(bundle)
+            registry = {chunk.chunk_id: chunk for chunk in chunks}
+            allowed_ids = tuple(dict.fromkeys(
+                chunk_id
+                for item in subanswers
+                for chunk_id in item.answer.cited_chunk_ids
+                if chunk_id in registry
+            ))
+            validation_request = AnswerRequest(
+                request_id=request_id,
+                question=question,
+                chunks=tuple(registry[chunk_id] for chunk_id in allowed_ids),
+            )
+            valid_ids, citations, warnings = validate_and_hydrate_citations(
+                validation_request, synthesized
+            )
+        except (
+            ProviderError,
+            ModelOutputError,
+            TimeoutError,
+            ConnectionError,
+        ):
+            return self.generate(request_id, question, bundle)
+
+        latency_ms = round((time.perf_counter() - started) * 1000)
+        input_tokens = sum(
+            response.timings.model_input_tokens or 0
+            for response in responses
+            if response.timings is not None
+        ) + (getattr(getattr(provider, "last_usage", None), "input_tokens", 0) or 0)
+        output_tokens = sum(
+            response.timings.model_output_tokens or 0
+            for response in responses
+            if response.timings is not None
+        ) + (getattr(getattr(provider, "last_usage", None), "output_tokens", 0) or 0)
+        return AnswerResponse(
+            request_id=request_id,
+            answer=synthesized.answer,
+            cited_chunk_ids=valid_ids,
+            citations=citations,
+            insufficient_context=synthesized.insufficient_context,
+            model_id=provider.model_id,
+            latency_ms=latency_ms,
+            warnings=warnings,
+            timings=AnswerTimings(
+                generation_total_ms=latency_ms,
+                model_input_tokens=input_tokens,
+                model_output_tokens=output_tokens,
+            ),
+            answered_requirements=synthesized.answered_requirements,
+            missing_requirements=synthesized.missing_requirements,
         )
 
     def plan_retrieval(self, question: str) -> RetrievalPlan:
@@ -187,6 +298,39 @@ def _int_or_none(value) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _chunks_from_bundle(bundle: RetrievalBundle) -> list[Chunk]:
+    ranked_results = interleave_grouped_results(bundle.evidence)
+    chunks = list(adapt_ranked_results(ranked_results))
+    if feature_enabled("cross_resource_computation"):
+        for index, note in reversed(
+            tuple(enumerate(getattr(bundle, "computation_notes", ()), start=1))
+        ):
+            chunks.insert(0, _computation_note_chunk(note, index))
+        for index, calculation in reversed(
+            tuple(enumerate(bundle.calculations, start=1))
+        ):
+            chunks.insert(0, _calculation_chunk(calculation, index))
+    verified_items = bundle.verified_excels or (
+        (bundle.verified_excel,) if bundle.verified_excel is not None else ()
+    )
+    for answer in reversed(verified_items):
+        chunks[0:0] = _verified_excel_chunks(answer)
+    chunks = deduplicate_chunks(chunks)
+    # Different verified executions can share one card id. Preserve each
+    # distinct result under a unique id so citation validation is unambiguous.
+    seen_ids: dict[str, int] = {}
+    unique_chunks: list[Chunk] = []
+    for chunk in chunks:
+        count = seen_ids.get(chunk.chunk_id)
+        if count is None:
+            seen_ids[chunk.chunk_id] = 0
+        else:
+            seen_ids[chunk.chunk_id] = count + 1
+            chunk = replace(chunk, chunk_id=f"{chunk.chunk_id}-v{count + 1}")
+        unique_chunks.append(chunk)
+    return unique_chunks
 
 
 def _calculation_chunk(result: CalculationResult, index: int) -> Chunk:

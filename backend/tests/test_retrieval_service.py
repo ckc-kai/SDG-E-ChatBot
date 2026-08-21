@@ -68,17 +68,21 @@ class RetrievalServiceTests(unittest.TestCase):
             retrieve.call_args.kwargs["groups"], ("narrative", "table", "figure")
         )
 
-    def test_planned_step_preserves_original_required_document_scope(self):
+    def test_planned_step_does_not_reintroduce_broad_original_scope(self):
         original = (
             "Compare the 2023-2025 WMP, 2026-2028 WMP, and corresponding "
             "guidelines."
         )
         step = "How is risk methodology explained in the 2023-2025 WMP?"
 
-        scoped = _scoped_step_question(original, step)
+        planned = RetrievalStep(
+            step, ("narrative",), "pdf", document_role="2023-2025 WMP"
+        )
+        scoped = _scoped_step_question(original, step, planned)
 
         self.assertIn(step, scoped)
-        self.assertIn(original, scoped)
+        self.assertNotIn(original, scoped)
+        self.assertIn("2023-2025 WMP", scoped)
 
     @patch(
         "services.retrieval_service.feature_enabled",
@@ -106,6 +110,8 @@ class RetrievalServiceTests(unittest.TestCase):
         result = service.retrieve_plan("compound", plan)
 
         self.assertEqual(service.retrieve.call_count, 3)
+        self.assertIs(result.plan, plan)
+        self.assertEqual(len(result.step_bundles), 2)
         self.assertEqual(result.plan_diagnostics["retry_count"], 1)
         self.assertEqual(result.plan_diagnostics["coverage"]["missing_steps"], [0, 1])
 

@@ -13,11 +13,13 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from generation.providers.base import ProviderError
+from generation.providers.capabilities import ModelCapabilities
 
 
 DEFAULT_REGION = "us-east-1"
 DEFAULT_MAX_TOKENS = 500
 DEFAULT_TEMPERATURE = 0.0
+DEFAULT_CONTEXT_TOKENS = 4096
 
 
 class BedrockRuntimeClient(Protocol):
@@ -47,6 +49,7 @@ class BedrockProvider:
         *,
         max_tokens: int = DEFAULT_MAX_TOKENS,
         temperature: float = DEFAULT_TEMPERATURE,
+        context_tokens: int = DEFAULT_CONTEXT_TOKENS,
     ) -> None:
         if not model_id.strip():
             raise ValueError("model_id must not be empty")
@@ -54,11 +57,20 @@ class BedrockProvider:
             raise ValueError("max_tokens must be positive")
         if not 0 <= temperature <= 1:
             raise ValueError("temperature must be between 0 and 1")
+        if context_tokens <= max_tokens:
+            raise ValueError("context_tokens must exceed max_tokens")
         self.client = client
         self.model_id = model_id
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.last_usage: BedrockUsage | None = None
+        self.context_tokens = context_tokens
+        self.capabilities = ModelCapabilities(
+            context_window=context_tokens,
+            max_output_tokens=max_tokens,
+            requested_output_tokens=max_tokens,
+            prompt_token_budget=context_tokens - max_tokens,
+        )
 
     @classmethod
     def from_env(
@@ -82,6 +94,9 @@ class BedrockProvider:
             temperature = float(
                 values.get("BEDROCK_TEMPERATURE", str(DEFAULT_TEMPERATURE))
             )
+            context_tokens = int(
+                values.get("BEDROCK_CONTEXT_TOKENS", str(DEFAULT_CONTEXT_TOKENS))
+            )
         except ValueError as exc:
             raise ProviderError("Invalid Bedrock inference configuration") from exc
 
@@ -91,6 +106,7 @@ class BedrockProvider:
             model_id,
             max_tokens=max_tokens,
             temperature=temperature,
+            context_tokens=context_tokens,
         )
 
     def generate(self, prompt: str) -> str:
