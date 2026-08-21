@@ -279,3 +279,82 @@ body {
   background: #B8BEC7;
   cursor: default;
 }
+
+
+/* --- Added: multi-chat sidebar (tabs, chat list, new-chat button) --- */
+.sidebar-tabs {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.9rem;
+}
+.sidebar-tab {
+  flex: 1;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  padding: 0.4rem 0;
+  font-size: 0.78rem;
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--steel);
+  cursor: pointer;
+}
+.sidebar-tab-active {
+  background: var(--ink);
+  color: white;
+  border-color: var(--ink);
+}
+
+.new-chat-button {
+  width: 100%;
+  background: var(--card);
+  border: 1px dashed var(--hairline);
+  border-radius: 6px;
+  padding: 0.5rem;
+  font-size: 0.82rem;
+  color: var(--steel);
+  cursor: pointer;
+  margin-bottom: 0.75rem;
+}
+.new-chat-button:hover {
+  border-color: var(--signal-amber);
+  color: var(--signal-amber);
+}
+
+.chat-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  margin-bottom: 0.2rem;
+}
+.chat-list-item:hover {
+  background: var(--surface);
+}
+.chat-list-item-active {
+  background: var(--surface);
+  border-left: 3px solid var(--signal-amber);
+  padding-left: calc(0.6rem - 3px);
+}
+.chat-list-item-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-list-item-delete {
+  background: none;
+  border: none;
+  color: var(--steel);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.chat-list-item-delete:hover {
+  color: var(--signal-amber);
+}
