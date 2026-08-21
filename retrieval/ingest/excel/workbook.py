@@ -34,6 +34,7 @@ from retrieval.contextual_embeddings import (
 )
 from retrieval.ingest.excel.schema import migrate
 from retrieval.setup_db import setup_database
+from retrieval.source_manifest import title_for_filename
 from retrieval.utils import connect_db, embedding_config, get_embedding_model
 
 
@@ -420,9 +421,10 @@ def _embed(model, path: Path, chunks: Sequence[WorkbookChunk]) -> tuple[list, li
         normalize_embeddings=True,
         show_progress_bar=False,
     )
+    document_title = title_for_filename(path.name)
     contextual_inputs = [
         contextual_embedding_text_for_model(
-            path.name,
+            document_title,
             f"{path.name} > {chunk.sheet} > rows {chunk.row_start}-{chunk.row_end}",
             chunk.content,
             model.tokenizer,

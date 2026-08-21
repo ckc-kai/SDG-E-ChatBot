@@ -70,11 +70,11 @@ class QueryScopeTests(unittest.TestCase):
         self.assertIn("WMP guidelines", roles[1].query)
         self.assertEqual(
             roles[0].filename_patterns,
-            ("FINAL_SDGE_20232025_WMP_Decision_and_Cover_Letter.pdf",),
+            ("sdge__oeis_decision__2023-2025__final__2023-10-13.pdf",),
         )
         self.assertEqual(
             roles[1].filename_patterns,
-            ("FINAL 2026-2028_Wildfire_Mitigation_Plan_Guidelines.pdf",),
+            ("sdge__wmp_guidelines__2026-2028__final__2025-02-24.pdf",),
         )
 
     def test_required_source_roles_leave_unrelated_questions_unrouted(self):
@@ -109,10 +109,10 @@ class QueryScopeTests(unittest.TestCase):
         self.assertEqual(
             {pattern for role in roles for pattern in role.filename_patterns},
             {
-                "SDG&E_2023-2023_Base-WMP_R5-redacted.pdf",
-                "2023-2025_WMP_TECHNICAL_GUIDELINES.pdf",
-                "SDG&E_2026-2028_Base-WMP_R2.pdf",
-                "FINAL 2026-2028_Wildfire_Mitigation_Plan_Guidelines.pdf",
+                "sdge__wmp__2023-2025__r5-redacted__2025-07-25.pdf",
+                "sdge__wmp_guidelines__2023-2025__final__2022-12-06.pdf",
+                "sdge__wmp__2026-2028__r2__2025-05-23.pdf",
+                "sdge__wmp_guidelines__2026-2028__final__2025-02-24.pdf",
             },
         )
 

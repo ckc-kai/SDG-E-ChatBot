@@ -2,16 +2,22 @@
 
 from __future__ import annotations
 
-CONTEXTUAL_EMBEDDING_RECIPE = "document-section-chunk-v2-budgeted"
+# v3: the leading Document line now carries the manifest's readable title rather
+# than a filename, so every previously written contextual vector is stale.
+CONTEXTUAL_EMBEDDING_RECIPE = "document-section-chunk-v3-title"
 
 
 def contextual_embedding_text(
-    source_pdf: str,
+    document_title: str,
     breadcrumb: str | None,
     content: str,
 ) -> str:
-    """Compose embedding-only context without changing stored display content."""
-    parts = [f"Document: {source_pdf}"]
+    """Compose embedding-only context without changing stored display content.
+
+    ``document_title`` is the manifest's ``display_title`` where one exists, and
+    the filename otherwise.
+    """
+    parts = [f"Document: {document_title}"]
     if breadcrumb:
         parts.append(f"Section: {breadcrumb}")
     parts.append(f"Chunk: {content}")
@@ -19,7 +25,7 @@ def contextual_embedding_text(
 
 
 def contextual_embedding_text_for_model(
-    source_pdf: str,
+    document_title: str,
     breadcrumb: str | None,
     content: str,
     tokenizer,
@@ -28,9 +34,11 @@ def contextual_embedding_text_for_model(
     """Compose context while guaranteeing that stored chunk text is not truncated.
 
     The complete document/section/chunk form is preferred. If it exceeds the
-    model limit, optional context is removed in order: the source filename,
-    then the breadcrumb and ``Chunk:`` label. The stored chunk content is never
-    truncated. The final guard raises only when the content itself is too long.
+    model limit, the supplementary document-title line is removed first. The full
+    breadcrumb and chunk content are retained; the final guard raises instead of
+    silently truncating. Against a 32k-token embedder this fallback should never
+    fire, but it costs nothing and it is the check that would catch a chunk-size
+    or model change that quietly outgrew the window.
     """
     def bounded_token_count(text: str) -> int:
         return len(
@@ -42,7 +50,7 @@ def contextual_embedding_text_for_model(
             )
         )
 
-    contextual_text = contextual_embedding_text(source_pdf, breadcrumb, content)
+    contextual_text = contextual_embedding_text(document_title, breadcrumb, content)
     if bounded_token_count(contextual_text) <= max_seq_length:
         return contextual_text
 
@@ -52,17 +60,9 @@ def contextual_embedding_text_for_model(
     parts.append(f"Chunk: {content}")
     contextual_text = "\n".join(parts)
     token_count = bounded_token_count(contextual_text)
-    if token_count <= max_seq_length:
-        return contextual_text
-
-    # A chunk may sit exactly at the model's limit. In that case even the
-    # contextual labels can add one or more tokens, so fall back to the
-    # authoritative content alone rather than rejecting the whole document.
-    token_count = bounded_token_count(content)
-    if token_count <= max_seq_length:
-        return content
-
-    raise ValueError(
-        "Embedding input content exceeds the model limit "
-        f"({token_count} > {max_seq_length})."
-    )
+    if token_count > max_seq_length:
+        raise ValueError(
+            "Contextual embedding input exceeds the model limit even without the "
+            f"document title line ({token_count} > {max_seq_length})."
+        )
+    return contextual_text

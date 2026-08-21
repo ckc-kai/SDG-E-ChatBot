@@ -7,6 +7,11 @@ requires-python = ">=3.12"
 dependencies = [
     "anthropic>=0.117.0",
     "docling>=2.114.0",
+    # Docling's OCR stage runs RapidOCR, which ships ONNX weights but silently
+    # falls back to a torch engine that downloads from modelscope.cn when
+    # onnxruntime is absent. That host is unreachable here, so without this the
+    # structured extraction of every PDF fails.
+    "onnxruntime>=1.29.0",
     "pgvector>=0.5.0",
     "psycopg2-binary>=2.9.12",
     "pypdf>=6.14.2",
