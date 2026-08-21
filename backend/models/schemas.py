@@ -17,11 +17,17 @@ class Filters(BaseModel):
     page: int | None = None
 
 
+class ConversationTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=4_000)
+
+
 class AskRequest(BaseModel):
     model_config = ConfigDict(coerce_numbers_to_str=False)
 
     request_id: str | None = None
     question: str = Field(min_length=1)
+    history: list[ConversationTurn] = Field(default_factory=list, max_length=4)
     filters: Filters | None = None
     embedding_mode: Literal["raw", "contextual", "hybrid"] | None = None
     rewrite_mode: Literal["auto", "off", "always"] | None = None

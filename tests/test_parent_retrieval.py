@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import unittest
 from dataclasses import dataclass
+from unittest.mock import Mock
 
 from retrieval.query.pdf.expansion import (
     PARENT_TOKEN_BUDGET,
@@ -147,10 +148,14 @@ class SectionDeduplicationTests(unittest.TestCase):
             raise RuntimeError("database is gone")
 
         self.expansion._fetch_section_siblings = boom
+        connection = Mock()
         results = [
             FakeRanked(FakeQueryObject(chunk_id=1000, chunk_index=0, content="alpha", token_count=10))
         ]
-        self.assertEqual(self.expansion.expand_to_parent_sections(None, results), results)
+        self.assertEqual(
+            self.expansion.expand_to_parent_sections(connection, results), results
+        )
+        connection.rollback.assert_called_once_with()
 
 
 class AsymmetricEncodingTests(unittest.TestCase):

@@ -68,6 +68,23 @@ class RetrievalServiceTests(unittest.TestCase):
             retrieve.call_args.kwargs["groups"], ("narrative", "table", "figure")
         )
 
+    @patch("services.retrieval_service.retrieve_configured")
+    @patch("services.retrieval_service.connect_db")
+    @patch("services.retrieval_service.answer_from_excel")
+    def test_verified_excel_only_request_skips_semantic_cards(
+        self, answer_from_excel, connect_db, retrieve
+    ):
+        answer_from_excel.return_value = self._excel_answer()
+        retrieve.return_value = EvidenceRetrievalResult(question="q", groups={})
+
+        result = RetrievalService().retrieve(
+            "reported values from 2022-2025",
+            content_types=("excel_card",),
+        )
+
+        self.assertIsNotNone(result.verified_excel)
+        self.assertEqual(retrieve.call_args.kwargs["groups"], ())
+
     def test_planned_step_does_not_reintroduce_broad_original_scope(self):
         original = (
             "Compare the 2023-2025 WMP, 2026-2028 WMP, and corresponding "
@@ -114,6 +131,36 @@ class RetrievalServiceTests(unittest.TestCase):
         self.assertEqual(len(result.step_bundles), 2)
         self.assertEqual(result.plan_diagnostics["retry_count"], 1)
         self.assertEqual(result.plan_diagnostics["coverage"]["missing_steps"], [0, 1])
+
+    @patch(
+        "services.retrieval_service.feature_enabled",
+        side_effect=lambda name: name == "coverage_retry",
+    )
+    def test_confirmed_reporting_gap_is_not_retried(self, _feature):
+        service = RetrievalService()
+        partial = self._excel_answer()
+        partial.bound = {"missing_reporting_years": (2022,)}
+        bundle = SimpleNamespace(
+            evidence=EvidenceRetrievalResult(question="q", groups={}),
+            verified_excel=partial,
+            verified_excels=(partial,),
+            timings=SimpleNamespace(
+                connection_ms=0,
+                grouped_retrieval_ms=0,
+                excel_verification_ms=0,
+                total_ms=0,
+            ),
+        )
+        service.retrieve = MagicMock(return_value=bundle)
+        plan = RetrievalPlan((
+            RetrievalStep("history", ("excel_card",), "excel"),
+        ))
+
+        result = service.retrieve_plan("history", plan)
+
+        self.assertEqual(service.retrieve.call_count, 1)
+        self.assertEqual(result.plan_diagnostics["retry_count"], 0)
+        self.assertEqual(result.plan_diagnostics["coverage"]["missing_steps"], [0])
 
 
 if __name__ == "__main__":

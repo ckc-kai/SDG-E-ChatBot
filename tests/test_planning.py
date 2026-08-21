@@ -58,6 +58,11 @@ class RetrievalPlanningTests(unittest.TestCase):
             "How many wildfires occurred between 2015 and 2022?"
         ))
 
+    def test_reported_metric_over_year_range_uses_planner(self):
+        self.assertTrue(needs_planning(
+            "How many ignitions were reported from 2022-2025?"
+        ))
+
     def test_short_comparison_is_complex(self):
         self.assertTrue(needs_planning("Compare the two WMP cycles."))
 

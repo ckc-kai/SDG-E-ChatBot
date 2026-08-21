@@ -87,6 +87,16 @@ _RECONCILE_RE = re.compile(
     re.I,
 )
 _TABLE_REF_RE = re.compile(r"\btables?\s+(\d+(?:\s*(?:,|and|&)\s*\d+)*)", re.I)
+_YEAR_RANGE_RE = re.compile(
+    r"\b20[2-3]\d\s*(?:-|\u2013|\u2014|through|to)\s*20[2-3]\d\b", re.I
+)
+_REPORTED_METRIC_RE = re.compile(
+    r"\b(?:reported|reporting|QDR|quarterly data)\b.*"
+    r"\b(?:how many|how much|total|sum|count|trend|change|values?|numbers?)\b"
+    r"|\b(?:how many|how much|total|sum|count|trend|change|values?|numbers?)\b.*"
+    r"\b(?:reported|reporting|QDR|quarterly data)\b",
+    re.I,
+)
 
 
 def _references_multiple_tables(question: str) -> bool:
@@ -169,13 +179,22 @@ def supports_multistep_generation(plan: RetrievalPlan) -> bool:
 def planning_reason(question: str) -> str | None:
     """Return a conservative reason based on independent evidence tasks."""
     normalized = " ".join(question.split())
+    # Introductory source phrases do not create a second factual task. Without
+    # stripping them, ", how many" is mistaken for a compound question.
+    structural = re.sub(
+        r"^(?:based on|according to)\s+[^,]+,\s*",
+        "",
+        normalized,
+        count=1,
+        flags=re.I,
+    )
     if normalized.count("?") >= 2:
         return "multiple_questions"
     if _COMPARE_RE.search(normalized):
         return "comparison"
     if _AUDIT_RE.search(normalized):
         return "review_or_compliance"
-    if _COMPOUND_RE.search(normalized):
+    if _COMPOUND_RE.search(structural):
         return "compound_tasks"
     if _MULTI_SCOPE_RE.search(normalized):
         return "multi_document_scope"
@@ -183,6 +202,11 @@ def planning_reason(question: str) -> str | None:
         return "side_by_side_report"
     if _RECONCILE_RE.search(normalized):
         return "cross_source_reconciliation"
+    # A single sentence can still require structured longitudinal execution.
+    # Keep ordinary historical facts simple; planning is reserved for an
+    # explicit reporting cue plus a numeric operation over a year interval.
+    if _YEAR_RANGE_RE.search(normalized) and _REPORTED_METRIC_RE.search(normalized):
+        return "longitudinal_reported_metric"
     if _references_multiple_tables(normalized):
         return "multiple_workbook_tables"
     return None
@@ -354,6 +378,24 @@ def build_retrieval_plan(
     reason = planning_reason(question)
     if reason is None:
         return RetrievalPlan((_simple_step(question),), "simple")
+    if reason == "longitudinal_reported_metric":
+        # One reported metric over a year range is one deterministic workbook
+        # execution, not a decomposition problem. Avoid a model planner that
+        # can invent extra tasks or rename the metric before Excel binding.
+        requirement = Requirement("R1", question)
+        return RetrievalPlan(
+            (
+                RetrievalStep(
+                    question,
+                    ("excel_card",),
+                    source="excel",
+                    requirement_ids=(requirement.id,),
+                ),
+            ),
+            source="rules",
+            trigger_reason=reason,
+            requirements=(requirement,),
+        )
 
     exact_shape = {
         "requirements": [

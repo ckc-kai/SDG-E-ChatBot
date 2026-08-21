@@ -685,6 +685,7 @@ def _search_lexical(
     conn,
     *,
     content_types: tuple[str, ...] | None = None,
+    source_patterns: tuple[str, ...] | None = None,
 ) -> list[QueryObject]:
     expression = _lexical_query(question)
     if not expression:
@@ -717,8 +718,11 @@ def _search_lexical(
                            'english', coalesce(c.retrieval_hint, '')
                        ) AS hint_document
                 FROM chunks c
-                WHERE %s::text[] IS NULL
-                   OR c.content_type = ANY(%s::text[])
+                WHERE (%s::text[] IS NULL
+                   OR c.content_type = ANY(%s::text[]))
+                  AND (%s::text[] IS NULL OR c.document_id IN (
+                      SELECT id FROM documents WHERE filename ILIKE ANY(%s::text[])
+                  ))
             )
             SELECT corpus.id, d.filename, corpus.sub_document,
                    corpus.breadcrumb, corpus.section_number,
@@ -751,6 +755,8 @@ def _search_lexical(
                 expression,
                 list(content_types) if content_types else None,
                 list(content_types) if content_types else None,
+                list(source_patterns) if source_patterns else None,
+                list(source_patterns) if source_patterns else None,
                 LEXICAL_CAPTION_WEIGHT,
                 HINT_IN_LEXICAL_RETRIEVAL,
                 LEXICAL_HINT_WEIGHT,
@@ -964,6 +970,7 @@ def retrieve_with_diagnostics(
     hybrid_pool_mode: str = DEFAULT_HYBRID_POOL_MODE,
     lanes: tuple[str, ...] | None = None,
     content_types: tuple[str, ...] | None = None,
+    source_patterns: tuple[str, ...] | None = None,
     search_queries: list[str] | None = None,
     query_vectors: list | None = None,
     _skip_embedding_validation: bool = False,
@@ -1013,6 +1020,7 @@ def retrieve_with_diagnostics(
             rrf_k=rrf_k,
             hybrid_pool_mode=hybrid_pool_mode,
             content_types=(content_types_for([lane]) if lane else content_types),
+            source_patterns=source_patterns,
             query_vectors=query_vectors,
         )
         per_lane_sets[lane] = lane_sets
@@ -1128,6 +1136,7 @@ def _generate_candidates(
     rrf_k: int,
     hybrid_pool_mode: str,
     content_types: tuple[str, ...] | None,
+    source_patterns: tuple[str, ...] | None,
     query_vectors: list | None = None,
 ) -> tuple[list[list[QueryObject]], list[dict[str, list[QueryObject]]]]:
     candidate_sets: list[list[QueryObject]] = []
@@ -1145,6 +1154,7 @@ def _generate_candidates(
                 conn,
                 embedding_mode="raw",
                 content_types=content_types,
+                source_patterns=source_patterns,
                 validate_embedding=False,
             )
             contextual_candidates = _search_by_vector(
@@ -1153,6 +1163,7 @@ def _generate_candidates(
                 conn,
                 embedding_mode="contextual",
                 content_types=content_types,
+                source_patterns=source_patterns,
                 validate_embedding=False,
             )
             channels = {
@@ -1177,6 +1188,7 @@ def _generate_candidates(
                 conn,
                 embedding_mode=embedding_mode,
                 content_types=content_types,
+                source_patterns=source_patterns,
                 validate_embedding=False,
             )
             channels = {embedding_mode: candidates}
@@ -1185,6 +1197,7 @@ def _generate_candidates(
             retrieval_top_k,
             conn,
             content_types=content_types,
+            source_patterns=source_patterns,
         )
         channels["lexical"] = lexical_candidates
         seen_ids = {candidate.chunk_id for candidate in candidates}
@@ -1213,6 +1226,7 @@ def retrieve(
     hybrid_pool_mode: str = DEFAULT_HYBRID_POOL_MODE,
     lanes: tuple[str, ...] | None = None,
     content_types: tuple[str, ...] | None = None,
+    source_patterns: tuple[str, ...] | None = None,
 ) -> list[RankedResult]:
     ranked, _ = retrieve_with_diagnostics(
         question,
@@ -1225,6 +1239,7 @@ def retrieve(
         hybrid_pool_mode=hybrid_pool_mode,
         lanes=lanes,
         content_types=content_types,
+        source_patterns=source_patterns,
     )
     return ranked
 
@@ -1240,6 +1255,7 @@ def retrieve_evidence(
     embedding_mode: str = DEFAULT_EMBEDDING_MODE,
     rrf_k: int = RRF_K,
     hybrid_pool_mode: str = DEFAULT_HYBRID_POOL_MODE,
+    source_patterns: tuple[str, ...] | None = None,
 ) -> EvidenceRetrievalResult:
     """Retrieve independently ranked evidence groups without score mixing.
 
@@ -1313,6 +1329,7 @@ def retrieve_evidence(
             rrf_k=rrf_k,
             hybrid_pool_mode=hybrid_pool_mode,
             content_types=selected_types,
+            source_patterns=source_patterns,
             search_queries=search_queries,
             query_vectors=query_vectors,
             _skip_embedding_validation=True,

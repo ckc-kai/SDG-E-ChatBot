@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 from retrieval.query.excel.channel import (
     ExcelAnswer,
+    _card_fact_history_answer,
     _keep_requested_years,
     _plan_for_card,
     answer_from_excel,
@@ -258,6 +259,44 @@ class QueryScopeTests(unittest.TestCase):
 
         self.assertIsInstance(outcome, ExcelAnswer)
         self.assertFalse(retrieve.called)
+
+    @patch("retrieval.query.excel.channel.dimension_vocabulary", return_value={})
+    @patch("retrieval.query.excel.channel.execute_plan")
+    def test_fact_history_preserves_partial_year_coverage(
+        self, execute, _vocabulary
+    ):
+        execute.return_value = SimpleNamespace(
+            is_answer=True,
+            rows=[(2023, 16), (2024, 30), (2025, 11)],
+            columns=["reporting_year", "value"],
+            unit="Number of ignitions",
+            contributing_facts=144,
+            provenance=[],
+        )
+        card = SimpleNamespace(
+            query_object=SimpleNamespace(
+                chunk_id=149,
+                caption="QDR Table 2 ignition metrics",
+                structured_data={
+                    "table_number": 2,
+                    "semantic_metric_key": "number_of_ignitions",
+                },
+            ),
+            rerank_score=0.9,
+        )
+
+        answer = _card_fact_history_answer(
+            "How many ignitions were reported from 2022-2025?",
+            card,
+            (2022, 2023, 2024, 2025),
+            Mock(),
+            Mock(),
+        )
+
+        self.assertIsInstance(answer, ExcelAnswer)
+        self.assertEqual(answer.bound["missing_reporting_years"], (2022,))
+        self.assertEqual(answer.plan.group_by, ("reporting_year",))
+        self.assertEqual(answer.plan.semantic_metric_key, "number_of_ignitions")
 
 
 if __name__ == "__main__":

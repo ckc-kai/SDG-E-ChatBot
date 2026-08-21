@@ -143,6 +143,71 @@ def _default_manifest() -> SourceManifest | None:
         return None
 
 
+_SCOPE_YEAR_RE = re.compile(r"\b(20[2-3]\d)\b")
+
+
+def filenames_for_document_scope(
+    document_role: str | None,
+    period: str | None,
+    *,
+    document_type: DocumentType = "pdf",
+) -> tuple[str, ...]:
+    """Resolve a planner's human-readable document scope to corpus filenames.
+
+    Planner fields are intentionally descriptive rather than database enums.
+    Resolution therefore uses the stable manifest's role family and cycle
+    metadata.  If the scope is not specific enough to filter safely, return an
+    empty tuple and preserve broad retrieval.
+    """
+    manifest = _default_manifest()
+    if manifest is None:
+        return ()
+    role_text = " ".join((document_role or "").split()).casefold()
+    period_text = " ".join((period or "").split()).casefold()
+    years = [int(value) for value in _SCOPE_YEAR_RE.findall(
+        f"{role_text} {period_text}"
+    )]
+    cycle = (min(years), max(years)) if len(set(years)) >= 2 else None
+
+    if "guideline" in role_text:
+        family = "wmp_guidelines"
+    elif "change order" in role_text:
+        family = "wmp_change_order"
+    elif "decision" in role_text or "oeis" in role_text:
+        family = "decision"
+    elif "wildfire mitigation plan" in role_text or re.search(r"\bwmp\b", role_text):
+        family = "wmp"
+    else:
+        return ()
+
+    matched: list[str] = []
+    for record in manifest.records:
+        if record.document_type != document_type:
+            continue
+        if cycle and (record.cycle_start, record.cycle_end) != cycle:
+            continue
+        role = record.document_role
+        if family == "wmp":
+            if cycle and role != f"wmp_{cycle[0]}_{cycle[1]}":
+                continue
+            if not cycle and not re.fullmatch(r"wmp_20\d{2}_20\d{2}", role):
+                continue
+        if family == "wmp_guidelines" and not role.startswith("wmp_guidelines"):
+            continue
+        if family == "wmp_change_order" and "change_order" not in role:
+            continue
+        if family == "decision" and "decision" not in role:
+            continue
+        for filename in (
+            record.original_filename,
+            record.canonical_filename,
+            record.received_filename,
+        ):
+            if filename and filename not in matched:
+                matched.append(filename)
+    return tuple(matched)
+
+
 def title_for_filename(filename: str) -> str:
     """Readable document title for the embedder, falling back to the filename."""
     manifest = _default_manifest()

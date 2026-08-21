@@ -12,6 +12,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from generation.adapters import adapt_ranked_results
 from generation.computation import CalculationResult
 from generation.features import feature_enabled
+from generation.followup import resolve_followup_question
 from generation.multistep import (
     PlannedSubanswer,
     build_synthesis_prompt,
@@ -286,6 +287,12 @@ class GenerationService:
             self._planner_provider = _create_planner_provider()
         return route_question(question, judge=self._planner_provider)
 
+    def resolve_followup(self, question: str, history) -> str:
+        """Resolve an underspecified follow-up without treating history as evidence."""
+        if self._planner_provider is None:
+            self._planner_provider = _create_planner_provider()
+        return resolve_followup_question(question, history, self._planner_provider)
+
     def warmup(self) -> None:
         """Warm providers that expose a no-answer local preload hook."""
         warmup = getattr(self._answer_service.provider, "warmup", None)
@@ -377,6 +384,13 @@ def _create_planner_provider():
         )
         values["GROQ_MAX_TOKENS"] = values.get("TASK3_PLANNER_MAX_TOKENS", "500")
         values["GROQ_REASONING_EFFORT"] = "low"
+    elif provider_name == "deepseek":
+        values["DEEPSEEK_MODEL"] = values.get(
+            "TASK3_PLANNER_MODEL", "deepseek-v4-flash"
+        )
+        values["DEEPSEEK_MAX_TOKENS"] = values.get(
+            "TASK3_PLANNER_MAX_TOKENS", "500"
+        )
     return create_provider_from_env(provider_name, environ=values)
 
 
@@ -413,6 +427,19 @@ def _verified_excel_chunks(answer) -> list[Chunk]:
             *rendered_rows,
             f"Unit: {answer.unit or 'not specified'}",
             f"Contributing facts: {answer.result.contributing_facts}",
+            *(
+                [
+                    "Missing requested reporting years: "
+                    + ", ".join(
+                        str(year)
+                        for year in answer.bound.get(
+                            "missing_reporting_years", ()
+                        )
+                    )
+                ]
+                if answer.bound.get("missing_reporting_years")
+                else []
+            ),
         ]
     )
     source_file = first.get("source_file") or f"sdge_table{answer.table_number:02d}.csv"
@@ -551,6 +578,19 @@ def _verified_entity_history_chunks(
                 ),
                 "Row provenance:",
                 *provenance_lines,
+                *(
+                    [
+                        "Missing requested reporting years: "
+                        + ", ".join(
+                            str(year)
+                            for year in answer.bound.get(
+                                "missing_reporting_years", ()
+                            )
+                        )
+                    ]
+                    if answer.bound.get("missing_reporting_years")
+                    else []
+                ),
             ]
         ),
         metadata=ChunkMetadata(

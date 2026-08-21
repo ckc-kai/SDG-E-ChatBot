@@ -93,7 +93,11 @@ function App() {
 
     setLoading(true);
     try {
-      const result = await askQuestion(question);
+      const history = activeConversation.messages.slice(-2).map(({ role, content }) => ({
+        role,
+        content,
+      }));
+      const result = await askQuestion(question, history);
       updateActiveConversation((c) => ({
         ...c,
         messages: [

@@ -7,6 +7,7 @@ from collections.abc import Mapping
 
 from generation.providers.base import ModelProvider, ProviderError
 from generation.providers.bedrock import BedrockProvider
+from generation.providers.deepseek import DeepSeekProvider
 from generation.providers.groq import GroqProvider
 from generation.providers.ollama import OllamaProvider
 
@@ -25,6 +26,8 @@ def create_provider_from_env(
         return BedrockProvider.from_env(environ=values)
     if selected == "groq":
         return GroqProvider.from_env(environ=values)
+    if selected == "deepseek":
+        return DeepSeekProvider.from_env(environ=values)
     if not selected:
         raise ProviderError("TASK3_PROVIDER is required")
     raise ProviderError(f"Unsupported TASK3_PROVIDER: {selected}")

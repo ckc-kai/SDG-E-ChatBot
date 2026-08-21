@@ -152,6 +152,13 @@ def _get_planner_provider():
     elif provider_name == "ollama":
         values["OLLAMA_MODEL"] = values.get("EXCEL_PLANNER_MODEL", "qwen3.5:9b")
         values["OLLAMA_MAX_TOKENS"] = values.get("EXCEL_PLANNER_MAX_TOKENS", "700")
+    elif provider_name == "deepseek":
+        values["DEEPSEEK_MODEL"] = values.get(
+            "EXCEL_PLANNER_MODEL", "deepseek-v4-flash"
+        )
+        values["DEEPSEEK_MAX_TOKENS"] = values.get(
+            "EXCEL_PLANNER_MAX_TOKENS", "700"
+        )
     try:
         _planner_provider = create_provider_from_env(provider_name, environ=values)
     except (ProviderError, ValueError):

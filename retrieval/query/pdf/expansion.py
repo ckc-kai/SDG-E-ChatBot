@@ -222,6 +222,14 @@ def expand_to_parent_sections(
     try:
         sections_by_anchor = _fetch_section_siblings(conn, anchor_ids)
     except Exception:
+        # PostgreSQL leaves the whole transaction aborted after a missing
+        # compatibility column or any other SQL error. Retrieval is read-only,
+        # so rolling back here is safe and lets the caller continue with the
+        # original child chunks as this fallback promises.
+        try:
+            conn.rollback()
+        except Exception:  # pragma: no cover - a closed connection will fail later
+            logger.debug("Could not roll back failed parent expansion", exc_info=True)
         logger.warning(
             "Parent expansion query failed; returning un-expanded results",
             exc_info=True,

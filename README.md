@@ -3,8 +3,8 @@ UCLA MEng Capstone project for grounded question answering over SDG&E
 regulatory filings.
 
 Task 2 retrieval code is in `retrieval/`. Task 3's framework-neutral generation
-core is in `generation/`; it supports deterministic mocks, a local Ollama
-provider, Groq, and an Amazon Bedrock Converse provider. Live Bedrock calls remain
+core is in `generation/`; it supports deterministic mocks, local Ollama,
+DeepSeek, Groq, and an Amazon Bedrock Converse provider. Live Bedrock calls remain
 disabled until account access and credentials are available. See
 `docs/task3-contract.md` for the Task 2/Task 4 contract and
 `docs/task3-ollama.md` for local end-to-end testing.
@@ -435,3 +435,29 @@ citation metadata from the retrieved chunks. A free-tier `429` is returned as a
 controlled provider error and is not automatically retried. The application
 cannot control the account's billing plan, so verify that the Groq console says
 **Free** and do not add/upgrade to a paid plan if zero cost is required.
+
+### Use DeepSeek for answer-generation comparison
+
+Create a DeepSeek API key and put these values in the local `.env` (never
+commit the real key):
+
+```dotenv
+TASK3_PROVIDER=deepseek
+TASK3_PLANNER_PROVIDER=ollama
+TASK3_PLANNER_MODEL=qwen3.5:9b
+TASK3_PLANNER_MAX_TOKENS=500
+DEEPSEEK_API_KEY=your_local_key
+DEEPSEEK_MODEL=deepseek-v4-flash
+DEEPSEEK_THINKING=disabled
+DEEPSEEK_PROMPT_TOKEN_BUDGET=6500
+DEEPSEEK_MAX_TOKENS=1500
+MODEL_WARMUP_ENABLED=false
+```
+
+This setup uses the local `qwen3.5:9b` model only for question rewrite/planning
+and DeepSeek V4 Flash for final answer generation. The default evidence and
+output budgets match the Groq comparison. DeepSeek's JSON-object output is
+parsed and citation-validated by the same Task 3 code; retrieval, citation
+hydration, and the public FastAPI response do not change.
+DeepSeek API calls are billed to the configured DeepSeek account, so review the
+provider's current pricing and balance before running live tests.

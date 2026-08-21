@@ -6,11 +6,26 @@ from retrieval.source_manifest import (
     SourceManifest,
     SourceRecord,
     audit_local_files,
+    filenames_for_document_scope,
     validate_intake_filename,
 )
 
 
 class SourceManifestTests(unittest.TestCase):
+    def test_human_wmp_scope_resolves_both_filename_aliases(self):
+        filenames = filenames_for_document_scope(
+            "SDG&E 2026-2028 Wildfire Mitigation Plan filing",
+            "2026-2028",
+        )
+
+        self.assertIn("SDG&E_2026-2028_Base-WMP_R2.pdf", filenames)
+        self.assertIn(
+            "sdge__wmp__2026-2028__r2__2025-05-23.pdf", filenames
+        )
+        self.assertNotIn(
+            "SDG&E_2023-2023_Base-WMP_R5-redacted.pdf", filenames
+        )
+
     def test_manifest_resolves_stable_role_to_current_filename(self):
         manifest = SourceManifest((
             SourceRecord(
