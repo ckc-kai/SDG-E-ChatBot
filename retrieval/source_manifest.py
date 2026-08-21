@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import functools
 import json
+import logging
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable, Literal
 
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_MANIFEST_PATH = Path(__file__).resolve().parents[1] / "config/source_manifest.json"
 DocumentType = Literal["pdf", "excel", "csv"]
@@ -34,6 +38,16 @@ class SourceRecord:
     effective_date: str | None = None
     table_role: str | None = None
     sheet_alias: str | None = None
+    # As-received name, kept only for provenance once a file has been renamed on
+    # disk. ``original_filename`` always tracks the current on-disk name, which is
+    # what every consumer resolves against.
+    received_filename: str | None = None
+    # Human-readable title fed to the embedder as the first line of every
+    # contextual embedding. Renaming the files fixed what is on disk; this fixes
+    # what is embedded. A filename tokenises badly, and this corpus needs the
+    # regulatory cycle and the issuing body legible -- a plan and the guidelines
+    # it must comply with are otherwise near-indistinguishable in embedding space.
+    display_title: str | None = None
 
     @classmethod
     def from_mapping(cls, value: dict[str, Any]) -> "SourceRecord":
@@ -88,11 +102,55 @@ class SourceManifest:
             (record for record in self.records if record.source_id == source_id), None
         )
 
+    def by_filename(self, filename: str) -> SourceRecord | None:
+        """Resolve a record by its current on-disk name, or its as-received one.
+
+        Accepting the received name keeps artefacts written before the rename --
+        golden-set source paths, older logs -- resolvable instead of silently
+        missing.
+        """
+        folded = filename.casefold()
+        for record in self.records:
+            if record.original_filename.casefold() == folded:
+                return record
+        for record in self.records:
+            if (record.received_filename or "").casefold() == folded:
+                return record
+        return None
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": "source-manifest-v1",
             "sources": [asdict(row) for row in self.records],
         }
+
+
+@functools.lru_cache(maxsize=1)
+def _default_manifest() -> SourceManifest | None:
+    """The checked-in manifest, or None if it cannot be read.
+
+    Ingest must not become unrunnable because a title lookup failed, so callers
+    fall back to the filename. Loading once keeps that off the per-document path.
+    """
+    try:
+        return SourceManifest.load()
+    except (OSError, ValueError) as exc:
+        logger.warning(
+            "Source manifest unavailable (%s); falling back to filenames for "
+            "embedded document titles",
+            exc,
+        )
+        return None
+
+
+def title_for_filename(filename: str) -> str:
+    """Readable document title for the embedder, falling back to the filename."""
+    manifest = _default_manifest()
+    record = manifest.by_filename(filename) if manifest else None
+    if record is None or not record.display_title:
+        logger.debug("No display_title for %s; embedding the filename", filename)
+        return filename
+    return record.display_title
 
 
 def validate_intake_filename(filename: str, document_type: str) -> None:

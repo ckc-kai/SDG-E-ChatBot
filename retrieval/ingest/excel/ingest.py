@@ -48,6 +48,7 @@ from retrieval.ingest.excel.transform import (
     transform,
 )
 from retrieval.failure_log import get_failure_logger
+from retrieval.source_manifest import title_for_filename
 from retrieval.utils import connect_db, embedding_config, get_embedding_model
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,7 @@ TRANSFORM_VERSION = "excel-transform-v1"
 CARD_CONTENT_TYPE = "excel_card"
 CARD_EXTRACTOR = "excel-card-v1"
 DEFAULT_INPUT_DIR = Path("excel_cleaning/cleaned_csv_rag_ready")
+EMBEDDING_BATCH_SIZE = int(embedding_config().get("embedding_batch_size", 32))
 
 
 @dataclass
@@ -357,17 +359,27 @@ def _replace_cards(
 # --------------------------------------------------------------------------
 
 
-def embed_cards(model, cards: Sequence[Card], source_key: str) -> tuple[list, list]:
+def embed_cards(
+    model, cards: Sequence[Card], source_key: str, source_file: str | None = None
+) -> tuple[list, list]:
+    """Cards are documents, so neither encode carries the asymmetric query prompt.
+
+    The contextual input leads with the manifest's readable table title rather
+    than a bare ``sdge_tableNN.csv``, which tells the embedder what the table is
+    about instead of only what it is called.
+    """
     if not cards:
         return [], []
     raw = model.encode(
         [card.content for card in cards],
+        batch_size=EMBEDDING_BATCH_SIZE,
         normalize_embeddings=True,
         show_progress_bar=False,
     )
+    document_title = title_for_filename(source_file or f"{source_key}.csv")
     contextual_inputs = [
         contextual_embedding_text_for_model(
-            f"{source_key}.csv",
+            document_title,
             card.breadcrumb,
             card.content,
             model.tokenizer,
@@ -376,7 +388,10 @@ def embed_cards(model, cards: Sequence[Card], source_key: str) -> tuple[list, li
         for card in cards
     ]
     contextual = model.encode(
-        contextual_inputs, normalize_embeddings=True, show_progress_bar=False
+        contextual_inputs,
+        batch_size=EMBEDDING_BATCH_SIZE,
+        normalize_embeddings=True,
+        show_progress_bar=False,
     )
     return [v.tolist() for v in raw], [v.tolist() for v in contextual]
 
@@ -507,7 +522,9 @@ def ingest_file(
     conn.commit()
 
     try:
-        raw_embeddings, contextual_embeddings = embed_cards(model, cards, source_key)
+        raw_embeddings, contextual_embeddings = embed_cards(
+            model, cards, source_key, path.name
+        )
         with conn.cursor() as cur:
             document_id = _ensure_document(
                 cur, source_key, source_hash, signature, len(cards)

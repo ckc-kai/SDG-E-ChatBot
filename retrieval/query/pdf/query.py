@@ -24,6 +24,7 @@ import re
 from dataclasses import dataclass, field, replace
 
 from generation.features import feature_enabled
+from retrieval.query.pdf.expansion import expand_to_parent_sections
 from retrieval.query.calibration import Calibrator
 from retrieval.contextual_embeddings import CONTEXTUAL_EMBEDDING_RECIPE
 from retrieval.failure_log import get_failure_logger
@@ -40,6 +41,7 @@ from retrieval.source_manifest import SourceManifest
 from retrieval.utils import (
     connect_db,
     embedding_config,
+    encode_query,
     get_anthropic_client,
     get_embedding_model,
     get_reranker_model,
@@ -624,7 +626,7 @@ def search(
 ) -> list[QueryObject]:
     if embedding_mode == "hybrid":
         raise ValueError("Use retrieve() for hybrid raw+contextual search.")
-    query_vector = model.encode(question.strip(), normalize_embeddings=True)
+    query_vector = encode_query(model, question.strip())
     return _search_by_vector(
         query_vector,
         top_k,
@@ -937,6 +939,19 @@ def rerank(
     return results[:top_k] if top_k is not None else results
 
 
+def _expand_parents(conn, results: list[RankedResult]) -> list[RankedResult]:
+    """Widen returned narrative chunks to their surrounding section, if enabled.
+
+    512-token children are a deliberate precision choice, and they are only safe
+    because this restores the context a small chunk cannot carry. Turning the
+    feature off without also raising the chunk size hands the model less context
+    than either setting intends -- see the chunk-geometry note in config.yaml.
+    """
+    if not results or not feature_enabled("parent_child_expansion"):
+        return results
+    return expand_to_parent_sections(conn, results)
+
+
 def retrieve_with_diagnostics(
     question: str,
     conn,
@@ -1036,7 +1051,10 @@ def retrieve_with_diagnostics(
         reranked_candidates=ranked,
         lane_outcomes=lane_outcomes,
     )
-    return ranked[:rerank_top_k], diagnostics
+    # Expansion runs AFTER truncation to rerank_top_k, so it widens only what is
+    # actually returned and never influences which chunks those are. Diagnostics
+    # keep the un-expanded ranking, which is what ranking analysis wants.
+    return _expand_parents(conn, ranked[:rerank_top_k]), diagnostics
 
 
 def _rank_by_lane(
@@ -1118,7 +1136,7 @@ def _generate_candidates(
         query_vector = (
             query_vectors[query_index]
             if query_vectors is not None
-            else model.encode(search_query.strip(), normalize_embeddings=True)
+            else encode_query(model, search_query.strip())
         )
         if embedding_mode == "hybrid":
             raw_candidates = _search_by_vector(
@@ -1277,7 +1295,7 @@ def retrieve_evidence(
     search_queries = query_rewrite(question, mode=rewrite_mode)
     model = get_embedding_model()
     query_vectors = [
-        model.encode(search_query.strip(), normalize_embeddings=True)
+        encode_query(model, search_query.strip())
         for search_query in search_queries
     ]
     modes = ("raw", "contextual") if embedding_mode == "hybrid" else (embedding_mode,)
@@ -1328,7 +1346,7 @@ def _retrieve_source_role_group(
     pooled: list[QueryObject] = []
 
     for role in source_roles:
-        vector = model.encode(role.query, normalize_embeddings=True)
+        vector = encode_query(model, role.query)
         channels: dict[str, list[QueryObject]] = {}
         if embedding_mode == "hybrid":
             raw = _search_by_vector(
@@ -1373,9 +1391,10 @@ def _retrieve_source_role_group(
         pooled.extend(candidates)
         ranked_by_role.append(rerank(role.query, candidates, top_k=per_role_top_k))
 
-    results = deduplicate_ranked(_interleave_ranked_groups(ranked_by_role))[
-        :rerank_top_k
-    ]
+    results = _expand_parents(
+        conn,
+        deduplicate_ranked(_interleave_ranked_groups(ranked_by_role))[:rerank_top_k],
+    )
     diagnostics = RetrievalDiagnostics(
         search_queries=[role.query for role in source_roles],
         candidate_sets=candidate_sets,

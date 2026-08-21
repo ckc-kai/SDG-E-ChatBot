@@ -18,11 +18,19 @@ models:
   embedding:
     # Provider interface is ready for extension; this is the implemented provider.
     provider: sentence_transformers
-    name: BAAI/bge-base-en-v1.5
-    dimensions: 768
-    max_tokens_per_chunk: 400
+    # Encodes queries and documents asymmetrically: queries carry
+    # prompt_name="query", documents carry none. See retrieval.utils.encode_query.
+    name: Qwen/Qwen3-Embedding-0.6B
+    dimensions: 1024
+    # ~One chunk per page. A median page of this corpus is 403 tokens.
+    max_tokens_per_chunk: 512
     minimum_chunk_chars: 20
-    token_overlap: 50
+    token_overlap: 64
+    # Tables are kept whole where possible; header repetition replaces overlap.
+    table_max_tokens_per_chunk: 2000
+    table_token_overlap: 0
+    embedding_batch_size: 64
+    table_embedding_batch_size: 16
   reranker:
     provider: sentence_transformers
     name: BAAI/bge-reranker-base
@@ -100,4 +108,5 @@ architecture_features:
   coverage_retry: true
   metadata_routing: true
   cross_resource_computation: true
-  parent_child_expansion: false
+  # Rank on small children, hand the model the whole section (<=2500 tokens).
+  parent_child_expansion: true

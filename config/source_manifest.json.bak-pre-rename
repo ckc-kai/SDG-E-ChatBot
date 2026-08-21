@@ -10,10 +10,8 @@
       "cycle_end": 2023,
       "version": "final",
       "effective_date": "2023-07-20",
-      "original_filename": "sdge__safety_briefing__2023-2023__final__2023-07-20.pdf",
-      "canonical_filename": "sdge__safety_briefing__2023-2023__final__2023-07-20.pdf",
-      "received_filename": "230720 CPUC OEIS Presentation_Safety_SDGE_AB1054 Briefing FINAL.pdf",
-      "display_title": "SDG&E AB 1054 Safety Briefing to California Energy Safety (OEIS), July 20 2023"
+      "original_filename": "230720 CPUC OEIS Presentation_Safety_SDGE_AB1054 Briefing FINAL.pdf",
+      "canonical_filename": "sdge__safety_briefing__2023-2023__final__2023-07-20.pdf"
     },
     {
       "source_id": "sdge-wmp-2026-2028",
@@ -24,10 +22,8 @@
       "cycle_end": 2028,
       "version": "r2",
       "effective_date": "2025-05-23",
-      "original_filename": "sdge__wmp__2026-2028__r2__2025-05-23.pdf",
-      "canonical_filename": "sdge__wmp__2026-2028__r2__2025-05-23.pdf",
-      "received_filename": "SDG&E_2026-2028_Base-WMP_R2.pdf",
-      "display_title": "SDG&E Wildfire Mitigation Plan, 2026-2028 cycle, Revision 2, May 23 2025"
+      "original_filename": "SDG&E_2026-2028_Base-WMP_R2.pdf",
+      "canonical_filename": "sdge__wmp__2026-2028__r2__2025-05-23.pdf"
     },
     {
       "source_id": "sdge-executive-compensation-2023",
@@ -37,11 +33,8 @@
       "cycle_start": 2023,
       "cycle_end": 2023,
       "version": "final",
-      "original_filename": "sdge__executive_compensation_decision__2023-2023__final__2023-09-20.pdf",
-      "canonical_filename": "sdge__executive_compensation_decision__2023-2023__final__2023-09-20.pdf",
-      "effective_date": "2023-09-20",
-      "received_filename": "Final_Approval_of_SDGE's_2023_Executive_Compensation_Structure_0.pdf",
-      "display_title": "CPUC Final Decision on SDG&E's 2023 Executive Compensation Structure, September 20 2023"
+      "original_filename": "Final_Approval_of_SDGE's_2023_Executive_Compensation_Structure_0.pdf",
+      "canonical_filename": "sdge__executive_compensation_decision__2023-2023__final__undated.pdf"
     },
     {
       "source_id": "sdge-wmp-2023-2025",
@@ -51,11 +44,8 @@
       "cycle_start": 2023,
       "cycle_end": 2025,
       "version": "r5-redacted",
-      "original_filename": "sdge__wmp__2023-2025__r5-redacted__2025-07-25.pdf",
-      "canonical_filename": "sdge__wmp__2023-2025__r5-redacted__2025-07-25.pdf",
-      "effective_date": "2025-07-25",
-      "received_filename": "SDG&E_2023-2023_Base-WMP_R5-redacted.pdf",
-      "display_title": "SDG&E Wildfire Mitigation Plan, 2023-2025 cycle, Revision 5 (redacted), July 25 2025"
+      "original_filename": "SDG&E_2023-2023_Base-WMP_R5-redacted.pdf",
+      "canonical_filename": "sdge__wmp__2023-2025__r5-redacted__undated.pdf"
     },
     {
       "source_id": "sdge-wmp-2023-2025-errata-apr",
@@ -66,10 +56,8 @@
       "cycle_end": 2025,
       "version": "errata-2023-04-26",
       "effective_date": "2023-04-26",
-      "original_filename": "sdge__wmp_errata__2023-2025__v1__2023-04-26.pdf",
-      "canonical_filename": "sdge__wmp_errata__2023-2025__v1__2023-04-26.pdf",
-      "received_filename": "SDGE_20232025_Wildfire_Mitigation_Plan_NonSubstantive_Errata_4.26.23.pdf",
-      "display_title": "SDG&E Wildfire Mitigation Plan Non-Substantive Errata, 2023-2025 cycle, April 26 2023"
+      "original_filename": "SDGE_20232025_Wildfire_Mitigation_Plan_NonSubstantive_Errata_4.26.23.pdf",
+      "canonical_filename": "sdge__wmp_errata__2023-2025__v1__2023-04-26.pdf"
     },
     {
       "source_id": "sdge-wmp-guidelines-2023-2025",
@@ -80,10 +68,8 @@
       "cycle_end": 2025,
       "version": "final",
       "effective_date": "2022-12-06",
-      "original_filename": "sdge__wmp_guidelines__2023-2025__final__2022-12-06.pdf",
-      "canonical_filename": "sdge__wmp_guidelines__2023-2025__final__2022-12-06.pdf",
-      "received_filename": "2023-2025_WMP_TECHNICAL_GUIDELINES.pdf",
-      "display_title": "California Energy Safety (OEIS) Wildfire Mitigation Plan Guidelines, 2023-2025 cycle, December 6 2022"
+      "original_filename": "2023-2025_WMP_TECHNICAL_GUIDELINES.pdf",
+      "canonical_filename": "sdge__wmp_guidelines__2023-2025__final__2022-12-06.pdf"
     },
     {
       "source_id": "sdge-wmp-2023-2025-errata-oct",
@@ -94,10 +80,8 @@
       "cycle_end": 2025,
       "version": "errata-2023-10-23",
       "effective_date": "2023-10-23",
-      "original_filename": "sdge__wmp_errata__2023-2025__v2__2023-10-23.pdf",
-      "canonical_filename": "sdge__wmp_errata__2023-2025__v2__2023-10-23.pdf",
-      "received_filename": "SDGE_2023-2025_WMP_Non-Substantive_Errata_10-23-23.pdf",
-      "display_title": "SDG&E Wildfire Mitigation Plan Non-Substantive Errata, 2023-2025 cycle, October 23 2023"
+      "original_filename": "SDGE_2023-2025_WMP_Non-Substantive_Errata_10-23-23.pdf",
+      "canonical_filename": "sdge__wmp_errata__2023-2025__v2__2023-10-23.pdf"
     },
     {
       "source_id": "sdge-wmp-guidelines-2026-2028",
@@ -107,11 +91,8 @@
       "cycle_start": 2026,
       "cycle_end": 2028,
       "version": "final",
-      "original_filename": "sdge__wmp_guidelines__2026-2028__final__2025-02-24.pdf",
-      "canonical_filename": "sdge__wmp_guidelines__2026-2028__final__2025-02-24.pdf",
-      "effective_date": "2025-02-24",
-      "received_filename": "FINAL 2026-2028_Wildfire_Mitigation_Plan_Guidelines.pdf",
-      "display_title": "California Energy Safety (OEIS) Wildfire Mitigation Plan Guidelines, 2026-2028 cycle, February 24 2025"
+      "original_filename": "FINAL 2026-2028_Wildfire_Mitigation_Plan_Guidelines.pdf",
+      "canonical_filename": "sdge__wmp_guidelines__2026-2028__final__undated.pdf"
     },
     {
       "source_id": "sdge-wmp-decision-spd16-2023",
@@ -121,11 +102,8 @@
       "cycle_start": 2023,
       "cycle_end": 2025,
       "version": "spd-16-final",
-      "original_filename": "sdge__wmp_decision__2023-2025__spd-16-final__2023-12-01.pdf",
-      "canonical_filename": "sdge__wmp_decision__2023-2025__spd-16-final__2023-12-01.pdf",
-      "effective_date": "2023-12-01",
-      "received_filename": "FINAL Resolution SPD-16 SDG&E WMP Decision 2023.pdf",
-      "display_title": "CPUC Resolution SPD-16, ratifying Energy Safety's decision on SDG&E's 2023-2025 Wildfire Mitigation Plan, December 1 2023"
+      "original_filename": "FINAL Resolution SPD-16 SDG&E WMP Decision 2023.pdf",
+      "canonical_filename": "sdge__wmp_decision__2023-2025__spd-16-final__undated.pdf"
     },
     {
       "source_id": "sdge-change-order-2023",
@@ -136,10 +114,8 @@
       "cycle_end": 2025,
       "version": "r1",
       "effective_date": "2023-12-19",
-      "original_filename": "sdge__wmp_change_order__2023-2025__r1__2023-12-19.pdf",
-      "canonical_filename": "sdge__wmp_change_order__2023-2025__r1__2023-12-19.pdf",
-      "received_filename": "2023-12-19_SDGE_2023_Change Order Report_R1.pdf",
-      "display_title": "SDG&E Wildfire Mitigation Plan Change Order Report, 2023-2025 cycle, Revision 1, December 19 2023"
+      "original_filename": "2023-12-19_SDGE_2023_Change Order Report_R1.pdf",
+      "canonical_filename": "sdge__wmp_change_order__2023-2025__r1__2023-12-19.pdf"
     },
     {
       "source_id": "sdge-wmp-decision-2023-2025",
@@ -149,11 +125,8 @@
       "cycle_start": 2023,
       "cycle_end": 2025,
       "version": "final",
-      "original_filename": "sdge__oeis_decision__2023-2025__final__2023-10-13.pdf",
-      "canonical_filename": "sdge__oeis_decision__2023-2025__final__2023-10-13.pdf",
-      "effective_date": "2023-10-13",
-      "received_filename": "FINAL_SDGE_20232025_WMP_Decision_and_Cover_Letter.pdf",
-      "display_title": "California Energy Safety (OEIS) Decision on SDG&E's Wildfire Mitigation Plan, 2023-2025 cycle, October 13 2023"
+      "original_filename": "FINAL_SDGE_20232025_WMP_Decision_and_Cover_Letter.pdf",
+      "canonical_filename": "sdge__wmp_decision__2023-2025__final__undated.pdf"
     },
     {
       "source_id": "sdge-qdr-table-01",
@@ -164,8 +137,7 @@
       "original_filename": "sdge_table01_rag_ready.csv",
       "canonical_filename": "sdge__qdr_table_01__cleaned__v1.csv",
       "table_role": "qdr_table_01",
-      "sheet_alias": "Table 1",
-      "display_title": "SDG&E Quarterly Data Report (QDR), Table 1: WMP activities"
+      "sheet_alias": "Table 1"
     },
     {
       "source_id": "sdge-qdr-table-02",
@@ -176,8 +148,7 @@
       "original_filename": "sdge_table02_rag_ready.csv",
       "canonical_filename": "sdge__qdr_table_02__cleaned__v1.csv",
       "table_role": "qdr_table_02",
-      "sheet_alias": "Table 2",
-      "display_title": "SDG&E Quarterly Data Report (QDR), Table 2: Risk events, outages, and inspection findings"
+      "sheet_alias": "Table 2"
     },
     {
       "source_id": "sdge-qdr-table-03",
@@ -188,8 +159,7 @@
       "original_filename": "sdge_table03_rag_ready.csv",
       "canonical_filename": "sdge__qdr_table_03__cleaned__v1.csv",
       "table_role": "qdr_table_03",
-      "sheet_alias": "Table 3",
-      "display_title": "SDG&E Quarterly Data Report (QDR), Table 3: Utility-defined metrics with definitions and purpose"
+      "sheet_alias": "Table 3"
     },
     {
       "source_id": "sdge-qdr-table-04",
@@ -200,8 +170,7 @@
       "original_filename": "sdge_table04_rag_ready.csv",
       "canonical_filename": "sdge__qdr_table_04__cleaned__v1.csv",
       "table_role": "qdr_table_04",
-      "sheet_alias": "Table 4",
-      "display_title": "SDG&E Quarterly Data Report (QDR), Table 4: Weather-condition circuit mile days"
+      "sheet_alias": "Table 4"
     },
     {
       "source_id": "sdge-qdr-table-05",
@@ -212,8 +181,7 @@
       "original_filename": "sdge_table05_rag_ready.csv",
       "canonical_filename": "sdge__qdr_table_05__cleaned__v1.csv",
       "table_role": "qdr_table_05",
-      "sheet_alias": "Table 5",
-      "display_title": "SDG&E Quarterly Data Report (QDR), Table 5: Risk events by driver"
+      "sheet_alias": "Table 5"
     },
     {
       "source_id": "sdge-qdr-table-06",
@@ -224,8 +192,7 @@
       "original_filename": "sdge_table06_rag_ready.csv",
       "canonical_filename": "sdge__qdr_table_06__cleaned__v1.csv",
       "table_role": "qdr_table_06",
-      "sheet_alias": "Table 6",
-      "display_title": "SDG&E Quarterly Data Report (QDR), Table 6: Ignitions by driver"
+      "sheet_alias": "Table 6"
     },
     {
       "source_id": "sdge-qdr-table-07",
@@ -236,8 +203,7 @@
       "original_filename": "sdge_table07_rag_ready.csv",
       "canonical_filename": "sdge__qdr_table_07__cleaned__v1.csv",
       "table_role": "qdr_table_07",
-      "sheet_alias": "Table 7",
-      "display_title": "SDG&E Quarterly Data Report (QDR), Table 7: System composition"
+      "sheet_alias": "Table 7"
     },
     {
       "source_id": "sdge-qdr-table-08",
@@ -248,8 +214,7 @@
       "original_filename": "sdge_table08_rag_ready.csv",
       "canonical_filename": "sdge__qdr_table_08__cleaned__v1.csv",
       "table_role": "qdr_table_08",
-      "sheet_alias": "Table 8",
-      "display_title": "SDG&E Quarterly Data Report (QDR), Table 8: Net system additions and removals"
+      "sheet_alias": "Table 8"
     },
     {
       "source_id": "sdge-qdr-table-09",
@@ -260,8 +225,7 @@
       "original_filename": "sdge_table09_rag_ready.csv",
       "canonical_filename": "sdge__qdr_table_09__cleaned__v1.csv",
       "table_role": "qdr_table_09",
-      "sheet_alias": "Table 9",
-      "display_title": "SDG&E Quarterly Data Report (QDR), Table 9: System upgrades"
+      "sheet_alias": "Table 9"
     },
     {
       "source_id": "sdge-qdr-table-10",
@@ -272,8 +236,7 @@
       "original_filename": "sdge_table10_rag_ready.csv",
       "canonical_filename": "sdge__qdr_table_10__cleaned__v1.csv",
       "table_role": "qdr_table_10",
-      "sheet_alias": "Table 10",
-      "display_title": "SDG&E Quarterly Data Report (QDR), Table 10: PSPS and fast-trip metrics"
+      "sheet_alias": "Table 10"
     },
     {
       "source_id": "sdge-qdr-table-11",
@@ -284,8 +247,7 @@
       "original_filename": "sdge_table11_rag_ready.csv",
       "canonical_filename": "sdge__qdr_table_11__cleaned__v1.csv",
       "table_role": "qdr_table_11",
-      "sheet_alias": "Table 11",
-      "display_title": "SDG&E Quarterly Data Report (QDR), Table 11: WMP spend by initiative"
+      "sheet_alias": "Table 11"
     },
     {
       "source_id": "sdge-qdr-table-13",
@@ -296,8 +258,7 @@
       "original_filename": "sdge_table13_rag_ready.csv",
       "canonical_filename": "sdge__qdr_table_13__cleaned__v1.csv",
       "table_role": "qdr_table_13",
-      "sheet_alias": "Table 13",
-      "display_title": "SDG&E Quarterly Data Report (QDR), Table 13: Open work orders"
+      "sheet_alias": "Table 13"
     },
     {
       "source_id": "sdge-qdr-table-14",
@@ -308,8 +269,7 @@
       "original_filename": "sdge_table14_rag_ready.csv",
       "canonical_filename": "sdge__qdr_table_14__cleaned__v1.csv",
       "table_role": "qdr_table_14",
-      "sheet_alias": "Table 14",
-      "display_title": "SDG&E Quarterly Data Report (QDR), Table 14: Utility risk by tier and line type"
+      "sheet_alias": "Table 14"
     },
     {
       "source_id": "sdge-qdr-table-15",
@@ -320,8 +280,7 @@
       "original_filename": "sdge_table15_rag_ready.csv",
       "canonical_filename": "sdge__qdr_table_15__cleaned__v1.csv",
       "table_role": "qdr_table_15",
-      "sheet_alias": "Table 15",
-      "display_title": "SDG&E Quarterly Data Report (QDR), Table 15: Highest-risk circuit segments"
+      "sheet_alias": "Table 15"
     }
   ]
 }

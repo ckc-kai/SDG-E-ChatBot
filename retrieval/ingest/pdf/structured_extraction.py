@@ -55,7 +55,18 @@ _config = load_config()
 _embedding_config = embedding_config()
 _structured_config = _config.get("extraction", {}).get("structured", {})
 
-MAX_TOKENS_PER_CHUNK = _embedding_config["max_tokens_per_chunk"]
+# Tables get their own, much larger window than narrative text. Table rows are
+# homogeneous, so a large chunk barely dilutes the signal, while fragmenting a
+# table separates a value from the header that names it -- which is how a
+# risk-per-mile column became unanswerable. Header repetition (see
+# `piece_markdown`) is the table-appropriate substitute for token overlap, and a
+# better one, so table overlap is 0.
+TABLE_MAX_TOKENS_PER_CHUNK = int(
+    _embedding_config.get(
+        "table_max_tokens_per_chunk", _embedding_config["max_tokens_per_chunk"]
+    )
+)
+TABLE_TOKEN_OVERLAP = int(_embedding_config.get("table_token_overlap", 0))
 MIN_CHUNK_CHARS = _embedding_config["minimum_chunk_chars"]
 
 EXTRACTOR_VERSION = _structured_config.get("extractor_version", "docling-v1")
@@ -67,7 +78,7 @@ _description_config = _structured_config.get("figure_description", {})
 PICTURE_DESCRIPTION = bool(_description_config.get("generate", True))
 PAGE_BATCH_SIZE = int(_structured_config.get("page_batch_size", 0))
 
-# Reserved headroom when packing table rows against MAX_TOKENS_PER_CHUNK, so
+# Reserved headroom when packing table rows against TABLE_MAX_TOKENS_PER_CHUNK, so
 # joins/newlines never push a composed piece over the embedding window.
 _TOKEN_PACK_SLACK = 8
 
@@ -118,6 +129,7 @@ def extractor_signature() -> str:
         f"|desc={PICTURE_DESCRIPTION}|scale={IMAGES_SCALE}"
         f"|min_table={MIN_TABLE_ROWS}x{MIN_TABLE_COLS}"
         f"|min_fig={MIN_FIGURE_AREA_PX}|page_batch={PAGE_BATCH_SIZE}"
+        f"|table_tokens={TABLE_MAX_TOKENS_PER_CHUNK}x{TABLE_TOKEN_OVERLAP}"
         f"|filters={_FILTERS_VERSION}"
     )
 
@@ -443,6 +455,11 @@ def build_structured_chunks(
                 sub_document=leaf.sub_document if leaf else None,
                 breadcrumb=leaf.breadcrumb if leaf else pdf_path.name,
                 section_number=leaf.section_number if leaf else None,
+                # -1 marks an element on a page no leaf claims. Structured chunks
+                # are already unique on (content_type, page_start, chunk_index)
+                # through the counters below, so this carries information without
+                # bearing any uniqueness weight.
+                section_ordinal=leaf.section_ordinal if leaf else -1,
                 page_start=element.page_start,
                 page_end=element.page_end,
                 chunk_index=next_index(element.content_type, element.page_start),
@@ -473,7 +490,7 @@ def build_structured_chunks(
             )
             added_before = len(chunks)
             for row_range in chunk_table_grid(
-                grid, tokenizer, MAX_TOKENS_PER_CHUNK, reserved_tokens=caption_tokens
+                grid, tokenizer, TABLE_MAX_TOKENS_PER_CHUNK, reserved_tokens=caption_tokens
             ):
                 content = compose_table_text(element.caption, piece_markdown(grid, row_range))
                 if len(content) < MIN_CHUNK_CHARS:
@@ -481,8 +498,13 @@ def build_structured_chunks(
                 # A single monster row can exceed the window even alone; fall
                 # back to plain token windows so the contextual-embedding
                 # guard never rejects the piece downstream.
-                if token_count(content) > MAX_TOKENS_PER_CHUNK:
-                    pieces = chunk_text(content, tokenizer, MAX_TOKENS_PER_CHUNK, overlap=0)
+                if token_count(content) > TABLE_MAX_TOKENS_PER_CHUNK:
+                    pieces = chunk_text(
+                        content,
+                        tokenizer,
+                        TABLE_MAX_TOKENS_PER_CHUNK,
+                        overlap=TABLE_TOKEN_OVERLAP,
+                    )
                 else:
                     pieces = [content]
                 for piece in pieces:
@@ -499,8 +521,8 @@ def build_structured_chunks(
                 for piece in chunk_text(
                     compose_table_text(element.caption, full_markdown),
                     tokenizer,
-                    MAX_TOKENS_PER_CHUNK,
-                    overlap=0,
+                    TABLE_MAX_TOKENS_PER_CHUNK,
+                    overlap=TABLE_TOKEN_OVERLAP,
                 ):
                     add_chunk(element, piece, None, base_data, None)
         else:
