@@ -77,6 +77,7 @@ class GenerationService:
         self,
         answer_service: AnswerService | None = None,
         planner_provider=None,
+        auxiliary_provider=None,
         answer_service_factory=None,
     ):
         self._answer_service_factory = answer_service_factory
@@ -88,6 +89,7 @@ class GenerationService:
             answer_service = self._answer_service_factory()
         self._answer_service = answer_service
         self._planner_provider = planner_provider
+        self._auxiliary_provider = auxiliary_provider
 
     def generate(
         self,
@@ -283,15 +285,15 @@ class GenerationService:
         route = route_question(question, judge_enabled=False)
         if not route.uncertain or not feature_enabled("support_evidence_judge"):
             return route
-        if self._planner_provider is None:
-            self._planner_provider = _create_planner_provider()
-        return route_question(question, judge=self._planner_provider)
+        if self._auxiliary_provider is None:
+            self._auxiliary_provider = _create_auxiliary_provider()
+        return route_question(question, judge=self._auxiliary_provider)
 
     def resolve_followup(self, question: str, history) -> str:
         """Resolve an underspecified follow-up without treating history as evidence."""
-        if self._planner_provider is None:
-            self._planner_provider = _create_planner_provider()
-        return resolve_followup_question(question, history, self._planner_provider)
+        if self._auxiliary_provider is None:
+            self._auxiliary_provider = _create_auxiliary_provider()
+        return resolve_followup_question(question, history, self._auxiliary_provider)
 
     def warmup(self) -> None:
         """Warm providers that expose a no-answer local preload hook."""
@@ -375,6 +377,10 @@ def _computation_note_chunk(note: str, index: int) -> Chunk:
 def _create_planner_provider():
     provider_name = os.getenv("TASK3_PLANNER_PROVIDER", "ollama").strip().casefold()
     values = dict(os.environ)
+    if provider_name == "dsh":
+        from generation.providers.dsh import DshPlannerProvider
+
+        return DshPlannerProvider.from_env(environ=values)
     if provider_name == "ollama":
         values["OLLAMA_MODEL"] = values.get("TASK3_PLANNER_MODEL", "qwen3:4b")
         values["OLLAMA_MAX_TOKENS"] = values.get("TASK3_PLANNER_MAX_TOKENS", "500")
@@ -394,8 +400,40 @@ def _create_planner_provider():
     return create_provider_from_env(provider_name, environ=values)
 
 
+def _create_auxiliary_provider():
+    """Create the original non-planning helper independently from DSH."""
+    provider_name = (
+        os.getenv("TASK3_AUXILIARY_PROVIDER", "ollama").strip().casefold()
+    )
+    values = dict(os.environ)
+    if provider_name == "ollama":
+        values["OLLAMA_MODEL"] = values.get(
+            "TASK3_AUXILIARY_MODEL", "qwen3:4b"
+        )
+        values["OLLAMA_MAX_TOKENS"] = values.get(
+            "TASK3_AUXILIARY_MAX_TOKENS", "500"
+        )
+    elif provider_name == "groq":
+        values["GROQ_MODEL"] = values.get(
+            "TASK3_AUXILIARY_MODEL", "openai/gpt-oss-20b"
+        )
+        values["GROQ_MAX_TOKENS"] = values.get(
+            "TASK3_AUXILIARY_MAX_TOKENS", "500"
+        )
+        values["GROQ_REASONING_EFFORT"] = "low"
+    elif provider_name == "deepseek":
+        values["DEEPSEEK_MODEL"] = values.get(
+            "TASK3_AUXILIARY_MODEL", "deepseek-v4-flash"
+        )
+        values["DEEPSEEK_MAX_TOKENS"] = values.get(
+            "TASK3_AUXILIARY_MAX_TOKENS", "500"
+        )
+    return create_provider_from_env(provider_name, environ=values)
+
+
 def _verified_excel_chunks(answer) -> list[Chunk]:
     """Turn an executed Excel result into explicit, cited evidence chunks."""
+    bound = getattr(answer, "bound", {})
     selected_keys = tuple(getattr(answer.plan, "select_json_keys", ()))
     required = {
         "annual_quant_target",
@@ -429,15 +467,28 @@ def _verified_excel_chunks(answer) -> list[Chunk]:
             f"Contributing facts: {answer.result.contributing_facts}",
             *(
                 [
+                    "Contributing record IDs: "
+                    + ", ".join(
+                        str(item["record_id"])
+                        for item in provenance
+                        if item.get("record_id")
+                    )
+                ]
+                if any(item.get("record_id") for item in provenance)
+                else []
+            ),
+            *(f"Warning: {warning}" for warning in answer.result.warnings),
+            *(
+                [
                     "Missing requested reporting years: "
                     + ", ".join(
                         str(year)
-                        for year in answer.bound.get(
+                        for year in bound.get(
                             "missing_reporting_years", ()
                         )
                     )
                 ]
-                if answer.bound.get("missing_reporting_years")
+                if bound.get("missing_reporting_years")
                 else []
             ),
         ]
@@ -474,16 +525,21 @@ def _format_decimal(value: Decimal) -> str:
 def _percent_complete(actual: Decimal, target: Decimal) -> Decimal | None:
     if target == 0:
         return None
-    return (actual / target * 100).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+    return (actual / target * 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 def _format_percent(value: Decimal | None) -> str:
-    return "not defined (target is zero)" if value is None else f"{value}%"
+    return (
+        "not defined (target is zero)"
+        if value is None
+        else f"{_format_decimal(value)}%"
+    )
 
 
 def _verified_entity_history_chunks(
     answer, selected_keys: tuple[str, ...]
 ) -> list[Chunk]:
+    bound = getattr(answer, "bound", {})
     columns = answer.result.columns
     year_index = columns.index("reporting_year")
     record_index = columns.index("record_id")
@@ -491,6 +547,7 @@ def _verified_entity_history_chunks(
         key: columns.index(f"selected_{index}")
         for index, key in enumerate(selected_keys)
     }
+    status_index = columns.index("status") if "status" in columns else None
     row_chunks: list[Chunk] = []
     totals_target = Decimal(0)
     totals_actual = Decimal(0)
@@ -524,6 +581,11 @@ def _verified_entity_history_chunks(
                 f"q4_year_end_actual={_format_decimal(actual)}",
                 f"unit={unit}",
                 f"percent_complete={_format_percent(percent)}",
+                *(
+                    [f"status={row[status_index]}"]
+                    if status_index is not None
+                    else []
+                ),
                 (
                     "calculation=undefined because target is zero"
                     if percent is None
@@ -583,12 +645,12 @@ def _verified_entity_history_chunks(
                         "Missing requested reporting years: "
                         + ", ".join(
                             str(year)
-                            for year in answer.bound.get(
+                            for year in bound.get(
                                 "missing_reporting_years", ()
                             )
                         )
                     ]
-                    if answer.bound.get("missing_reporting_years")
+                    if bound.get("missing_reporting_years")
                     else []
                 ),
             ]

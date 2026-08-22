@@ -179,6 +179,15 @@ def _safe_runtime_config() -> dict[str, Any]:
 
     names = (
         "TASK3_PROVIDER",
+        "TASK3_AUXILIARY_PROVIDER",
+        "TASK3_AUXILIARY_MODEL",
+        "TASK3_PLANNER_PROVIDER",
+        "TASK3_PLANNER_MODEL",
+        "DSH_PLANNER_MODEL",
+        "DSH_PLANNER_MAX_TOKENS",
+        "DSH_PLANNER_TIMEOUT_SECONDS",
+        "DSH_BASE_URL",
+        "DSH_PROVIDER",
         "GROQ_MODEL",
         "GROQ_MAX_TOKENS",
         "GROQ_CONTEXT_TOKENS",
@@ -255,6 +264,7 @@ def capture_answers(
             plan_diagnostics = None
             verified_excel = False
             plan = None
+            route = None
             if pipeline_variant == "legacy_flat":
                 ranked_results = retrieve(case["question"], connection)
                 evidence_payload: Any = [
@@ -270,8 +280,11 @@ def capture_answers(
                         rewrite_mode="off",
                     )
                 else:
+                    route = generation_service.route_retrieval(case["question"])
                     bundle = retrieval_service.retrieve(
-                        case["question"], rewrite_mode="off"
+                        case["question"],
+                        content_types=route.content_types,
+                        rewrite_mode="off",
                     )
                 ranked_results = interleave_grouped_results(bundle.evidence)
                 evidence_payload = {
@@ -332,6 +345,7 @@ def capture_answers(
                     "retrieved_evidence": evidence_payload,
                     "verified_excel": verified_excel,
                     "plan_diagnostics": plan_diagnostics,
+                    "route": vars(route) if route is not None else None,
                     "response": response_payload,
                 }
             )

@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any
 
 from generation.features import feature_enabled
@@ -111,6 +112,13 @@ def _history_select_keys(question: str) -> tuple[str, ...]:
     return ("quant_actual_progress_q1_4",)
 
 
+def _history_group_by(question: str) -> tuple[str, ...]:
+    fields = ["reporting_year", "record_id"]
+    if "status" in question.casefold():
+        fields.append("status")
+    return tuple(fields)
+
+
 def is_entity_history_question(question: str) -> bool:
     """True when an exact WMP id and time-series value request are explicit."""
     lowered = question.casefold()
@@ -161,6 +169,141 @@ def _exact_entity_card(conn, entity_key: str) -> tuple[int, str, dict] | None:
         )
         row = cur.fetchone()
     return (row[0], row[1] or "", row[2] or {}) if row else None
+
+
+_SPEND_CUES = (
+    "spend",
+    "capex",
+    "opex",
+    "capital expenditure",
+    "operating expenditure",
+)
+
+
+def _is_exact_activity_spend_question(question: str) -> bool:
+    lowered = question.casefold()
+    return (
+        bind_entity_key(question) is not None
+        and len(bind_years(question)) == 1
+        and "territory" in lowered
+        and any(cue in lowered for cue in _SPEND_CUES)
+    )
+
+
+def _exact_activity_spend_answer(
+    question: str,
+    entity_key: str,
+    year: int,
+    conn,
+    contracts: ContractSet,
+) -> ExcelAnswer | ExcelDecline:
+    """Return Territory CAPEX/OPEX without summing duplicate HFTD columns."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT DISTINCT f.semantic_metric_key
+            FROM excel_facts f
+            JOIN excel_revisions r ON r.id=f.revision_id AND r.state='active'
+            WHERE f.table_number=11
+              AND f.reporting_year=%s
+              AND f.hftd_tier='Territory'
+              AND f.dimensions ->> 'tracking_id_normalized'=%s
+              AND f.dimensions ->> 'expense_type' IN ('CAPEX', 'OPEX')
+            ORDER BY 1
+            """,
+            (year, entity_key),
+        )
+        semantic_keys = [row[0] for row in cur.fetchall()]
+        if len(semantic_keys) != 1:
+            return ExcelDecline(
+                "Table 11 activity does not resolve to exactly one reviewed metric"
+            )
+        semantic_key = semantic_keys[0]
+        cur.execute(
+            """
+            SELECT id, caption
+            FROM chunks
+            WHERE content_type='excel_card'
+              AND structured_data ->> 'table_number'='11'
+              AND structured_data ->> 'semantic_metric_key'=%s
+            ORDER BY id LIMIT 1
+            """,
+            (semantic_key,),
+        )
+        card = cur.fetchone()
+    if card is None:
+        return ExcelDecline("no reviewed Table 11 card for the activity")
+
+    results: dict[str, ExcelExecutionResult] = {}
+    plans: dict[str, ExcelQueryPlan] = {}
+    for expense_type in ("CAPEX", "OPEX"):
+        plan = ExcelQueryPlan(
+            table_number=11,
+            semantic_metric_key=semantic_key,
+            measure_name="actual_value",
+            filters=(
+                Filter("reporting_year", value=year),
+                Filter("hftd_tier", value="Territory"),
+                Filter(
+                    "tracking_id_normalized", value=entity_key, json_key=True
+                ),
+                Filter("expense_type", value=expense_type, json_key=True),
+            ),
+            aggregate="sum",
+        )
+        try:
+            result = execute_plan(plan, conn, contracts=contracts)
+        except (PlanError, KeyError, ValueError) as exc:
+            return ExcelDecline(f"exact Table 11 plan refused: {exc}")
+        if not result.is_answer or result.contributing_facts != 1:
+            return ExcelDecline(
+                f"Table 11 {expense_type} did not resolve to exactly one Territory fact"
+            )
+        plans[expense_type] = plan
+        results[expense_type] = result
+
+    capex = Decimal(str(results["CAPEX"].scalar()))
+    opex = Decimal(str(results["OPEX"].scalar()))
+    combined = capex + opex
+    combined_millions = combined / Decimal("1000")
+    provenance = [
+        item
+        for expense_type in ("CAPEX", "OPEX")
+        for item in results[expense_type].provenance
+    ]
+    composite = ExcelExecutionResult(
+        plan=plans["CAPEX"],
+        revision_id=results["CAPEX"].revision_id,
+        columns=[
+            "territory_capex_thousand_usd",
+            "territory_opex_thousand_usd",
+            "combined_thousand_usd",
+            "combined_million_usd",
+        ],
+        rows=[(capex, opex, combined, combined_millions)],
+        unit="$ Thousands and $ Millions",
+        contributing_facts=2,
+        provenance=provenance,
+        warnings=[
+            "Territory is the selected scope; HFTD is an alternative duplicate scope and was not added."
+        ],
+    )
+    return ExcelAnswer(
+        question=question,
+        card_chunk_id=card[0],
+        card_caption=card[1] or "Table 11 — WMP spend by initiative",
+        card_score=1.0,
+        table_number=11,
+        semantic_metric_key=semantic_key,
+        plan=plans["CAPEX"],
+        result=composite,
+        bound={
+            "entity_key": entity_key,
+            "reporting_year": year,
+            "hftd_tier": "Territory",
+            "expense_types": ("CAPEX", "OPEX"),
+        },
+    )
 
 
 def _missing_requested_years(
@@ -245,7 +388,7 @@ def _plan_for_card(
                 source=RECORDS,
                 operation="select",
                 filters=tuple(filters),
-                group_by=("reporting_year", "record_id"),
+                group_by=_history_group_by(question),
                 select_json_keys=_history_select_keys(question),
                 descending=False,
                 limit=max(3, years[-1] - years[0] + 1),
@@ -287,6 +430,15 @@ def answer_from_excel(
     """Attempt an exact Excel answer; decline rather than guess."""
     contracts = contracts or load_contracts()
     entity_key = bind_entity_key(question)
+    if (
+        entity_key
+        and _is_exact_activity_spend_question(question)
+        and not is_entity_history_question(question)
+    ):
+        years = bind_years(question)
+        return _exact_activity_spend_answer(
+            question, entity_key, years[0], conn, contracts
+        )
     if entity_key and is_entity_history_question(question):
         return _exact_history_answer(question, entity_key, conn, contracts)
 
@@ -450,7 +602,7 @@ def _card_entity_history_answer(
         source=RECORDS,
         operation="select",
         filters=tuple(filters),
-        group_by=("reporting_year", "record_id"),
+        group_by=_history_group_by(question),
         select_json_keys=_history_select_keys(question),
         descending=False,
         limit=max(3, years[-1] - years[0] + 1),

@@ -21,6 +21,9 @@ config/config.yaml
 
 .tests
 .venv/
+.dsh-python/
+/outputs/
+/beta_golden_questions.json
 
 # Local source corpus. PDF/Excel files are ingested locally, not committed.
 files/

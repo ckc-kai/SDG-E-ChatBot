@@ -468,6 +468,20 @@ appear in at least one task's requirement_ids. Closely related requirements
 that use the same source, document scope, entity, period, or table should share
 one retrieval task rather than being omitted.
 
+Treat every explicitly requested output as a requirement, including status,
+comparisons, percentages, totals, unit conversions, scope exclusions, and a
+request not to make a causal claim. A derived calculation maps to the task that
+retrieves its operands; it must not be silently omitted just because it is not
+a separately stored fact. Before returning JSON, check the original question
+clause by clause and confirm every requested output or constraint appears in a
+requirement and maps to at least one task.
+
+An Excel execution task must resolve to one workbook table. When a question
+spans multiple workbook tables, create one task per table and name the table in
+each task question. Keep fields together when they use the same table, entity,
+period, and scope. Treat alternative reporting scopes as mutually exclusive
+unless the question explicitly asks to combine them.
+
 For longitudinal performance questions, including repeated outcomes across
 years, target-versus-actual comparisons, completion status, or a complete list
 of delayed, cancelled, or missed activities, create an Excel task for the

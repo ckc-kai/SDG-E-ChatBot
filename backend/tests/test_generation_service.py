@@ -1,7 +1,7 @@
 import unittest
 from decimal import Decimal
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from generation.schemas import AnswerResponse
 from retrieval.query.excel.query import RECORDS, ExcelQueryPlan
@@ -13,6 +13,7 @@ from services.generation_service import (
     interleave_grouped_results,
 )
 from generation.schemas import Chunk, ChunkMetadata
+from generation.routing import RouteDecision
 from generation.computation import CalculationResult
 from generation.planning import Requirement, RetrievalPlan, RetrievalStep
 from services.retrieval_service import RetrievalBundle
@@ -47,6 +48,64 @@ def group(name: str, results: list):
 
 
 class GenerationServiceTests(unittest.TestCase):
+    def test_non_planning_route_does_not_reuse_dsh_planner(self):
+        planner = MagicMock(name="dsh_planner")
+        auxiliary = MagicMock(name="original_auxiliary_provider")
+        initial = RouteDecision(
+            need_pdf=True,
+            need_excel=False,
+            need_narrative=True,
+            uncertain=True,
+        )
+        judged = RouteDecision(
+            need_pdf=True,
+            need_excel=False,
+            need_narrative=True,
+            need_table=True,
+            uncertain=False,
+            source="judge",
+        )
+        service = GenerationService(
+            answer_service=MagicMock(),
+            planner_provider=planner,
+            auxiliary_provider=auxiliary,
+        )
+
+        with patch(
+            "services.generation_service.feature_enabled", return_value=True
+        ), patch(
+            "services.generation_service.route_question",
+            side_effect=(initial, judged),
+        ) as route:
+            result = service.route_retrieval("Show the exact values")
+
+        self.assertIs(result, judged)
+        self.assertEqual(route.call_count, 2)
+        self.assertIs(route.call_args_list[1].kwargs["judge"], auxiliary)
+        planner.generate_structured.assert_not_called()
+        planner.generate.assert_not_called()
+
+    def test_followup_resolution_uses_auxiliary_provider(self):
+        planner = MagicMock(name="dsh_planner")
+        auxiliary = MagicMock(name="original_auxiliary_provider")
+        service = GenerationService(
+            answer_service=MagicMock(),
+            planner_provider=planner,
+            auxiliary_provider=auxiliary,
+        )
+        history = [{"role": "user", "content": "Earlier question"}]
+
+        with patch(
+            "services.generation_service.resolve_followup_question",
+            return_value="Resolved question",
+        ) as resolve:
+            result = service.resolve_followup("What about 2025?", history)
+
+        self.assertEqual(result, "Resolved question")
+        self.assertIs(resolve.call_args.args[2], auxiliary)
+        planner.generate_structured.assert_not_called()
+        planner.generate.assert_not_called()
+
     def test_multistep_plan_answers_steps_then_synthesizes(self):
         step_responses = [
             AnswerResponse(
@@ -214,7 +273,7 @@ class GenerationServiceTests(unittest.TestCase):
                 table_number=1,
                 source=RECORDS,
                 operation="select",
-                group_by=("reporting_year", "record_id"),
+                group_by=("reporting_year", "record_id", "status"),
                 select_json_keys=(
                     "annual_quant_target",
                     "quant_actual_progress_q1_4",
@@ -225,14 +284,15 @@ class GenerationServiceTests(unittest.TestCase):
                 columns=[
                     "reporting_year",
                     "record_id",
+                    "status",
                     "selected_0",
                     "selected_1",
                     "selected_2",
                 ],
                 rows=[
-                    (2023, "r23", "11100", "11755", "Structures"),
-                    (2024, "r24", "15450", "16503", "Structures"),
-                    (2025, "r25", "13275", "17950", "Structures"),
+                    (2023, "r23", "Delayed", "11100", "11755", "Structures"),
+                    (2024, "r24", "Complete", "15450", "16503", "Structures"),
+                    (2025, "r25", "Complete", "13275", "17950", "Structures"),
                 ],
                 provenance=[
                     {
@@ -262,9 +322,10 @@ class GenerationServiceTests(unittest.TestCase):
             ["2023.xlsx", "2024.xlsx", "2025.xlsx"],
         )
         self.assertIn("percent_complete=105.9%", chunks[0].content)
+        self.assertIn("status=Delayed", chunks[0].content)
         self.assertIn("cumulative_target=39825", chunks[3].content)
         self.assertIn("cumulative_actual=46208", chunks[3].content)
-        self.assertIn("cumulative_percent_complete=116.0%", chunks[3].content)
+        self.assertIn("cumulative_percent_complete=116.03%", chunks[3].content)
         self.assertEqual(
             chunks[3].metadata.contributing_sources,
             (

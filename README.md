@@ -7,7 +7,8 @@ core is in `generation/`; it supports deterministic mocks, local Ollama,
 DeepSeek, Groq, and an Amazon Bedrock Converse provider. Live Bedrock calls remain
 disabled until account access and credentials are available. See
 `docs/task3-contract.md` for the Task 2/Task 4 contract and
-`docs/task3-ollama.md` for local end-to-end testing.
+`docs/task3-ollama.md` for local end-to-end testing. The optional DeepSeek
+Harness planner is documented in `docs/dsh-planner.md`.
 
 ## Local web app quick start
 

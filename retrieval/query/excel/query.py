@@ -343,7 +343,7 @@ def execute_plan(
             unit = units[0] if units else None
             cur.execute(
                 f"""
-                SELECT f.provenance, f.value_raw
+                SELECT f.provenance, f.value_raw, f.record_id
                 FROM excel_facts f
                 JOIN excel_revisions r ON r.id = f.revision_id
                 WHERE {meta_where} AND f.value_numeric IS NOT NULL
@@ -352,7 +352,8 @@ def execute_plan(
                 meta_params,
             )
             provenance = [
-                {**(row[0] or {}), "value_raw": row[1]} for row in cur.fetchall()
+                {**(row[0] or {}), "value_raw": row[1], "record_id": row[2]}
+                for row in cur.fetchall()
             ]
         else:
             meta_where, meta_params = _record_scope(plan, contract)

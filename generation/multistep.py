@@ -28,6 +28,10 @@ allowed chunk IDs actually needed by the final answer. If any material
 requirement remains unsupported, set insufficient_context=true, identify it,
 and present only supported partial findings.
 
+Preserve every displayed decimal place from validated subanswers. Do not round
+or abbreviate execution-verified values unless the original question asks for
+rounding.
+
 answered_requirements and missing_requirements must contain only the supplied
 requirement IDs (for example R1), never paraphrases. Put every supplied ID in
 exactly one of those arrays.

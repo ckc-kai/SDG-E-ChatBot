@@ -2,12 +2,15 @@
 
 import unittest
 from copy import deepcopy
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 
 from retrieval.query.excel.channel import (
     ExcelAnswer,
     _card_fact_history_answer,
+    _exact_activity_spend_answer,
+    _history_group_by,
     _keep_requested_years,
     _plan_for_card,
     answer_from_excel,
@@ -42,6 +45,16 @@ class QueryScopeTests(unittest.TestCase):
     def test_entity_history_route_requires_an_explicit_year(self):
         self.assertFalse(
             is_entity_history_question("What is the annual target for WMP.478?")
+        )
+
+    def test_entity_history_includes_status_only_when_requested(self):
+        self.assertEqual(
+            _history_group_by("Show target and actual"),
+            ("reporting_year", "record_id"),
+        )
+        self.assertEqual(
+            _history_group_by("Show target, actual, and status"),
+            ("reporting_year", "record_id", "status"),
         )
 
     def test_discrete_years_do_not_include_intervening_rows(self):
@@ -259,6 +272,67 @@ class QueryScopeTests(unittest.TestCase):
 
         self.assertIsInstance(outcome, ExcelAnswer)
         self.assertFalse(retrieve.called)
+
+    @patch("retrieval.query.excel.channel.execute_plan")
+    def test_exact_activity_spend_keeps_territory_capex_and_opex_separate(
+        self, execute
+    ):
+        cursor = MagicMock()
+        cursor.fetchall.return_value = [("initiative_spend",)]
+        cursor.fetchone.return_value = (4001, "Table 11 spend")
+        connection = MagicMock()
+        connection.cursor.return_value.__enter__.return_value = cursor
+
+        capex = MagicMock(
+            is_answer=True,
+            contributing_facts=1,
+            revision_id=7,
+            provenance=[{"record_id": "capex-record"}],
+        )
+        capex.scalar.return_value = Decimal("174778.4583")
+        opex = MagicMock(
+            is_answer=True,
+            contributing_facts=1,
+            revision_id=7,
+            provenance=[{"record_id": "opex-record"}],
+        )
+        opex.scalar.return_value = Decimal("428.602")
+        execute.side_effect = (capex, opex)
+
+        answer = _exact_activity_spend_answer(
+            "For WMP.473 in 2023, show Territory CAPEX and OPEX",
+            "WMP.473",
+            2023,
+            connection,
+            Mock(),
+        )
+
+        self.assertIsInstance(answer, ExcelAnswer)
+        self.assertEqual(
+            answer.result.rows,
+            [
+                (
+                    Decimal("174778.4583"),
+                    Decimal("428.602"),
+                    Decimal("175207.0603"),
+                    Decimal("175.2070603"),
+                )
+            ],
+        )
+        plans = [call.args[0] for call in execute.call_args_list]
+        self.assertEqual(
+            [plan.filters[-1].value for plan in plans],
+            ["CAPEX", "OPEX"],
+        )
+        self.assertTrue(
+            all(
+                any(
+                    item.field == "hftd_tier" and item.value == "Territory"
+                    for item in plan.filters
+                )
+                for plan in plans
+            )
+        )
 
     @patch("retrieval.query.excel.channel.dimension_vocabulary", return_value={})
     @patch("retrieval.query.excel.channel.execute_plan")
