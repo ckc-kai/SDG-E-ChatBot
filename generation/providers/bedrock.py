@@ -14,6 +14,7 @@ from typing import Any, Protocol
 
 from generation.providers.base import ProviderError
 from generation.providers.capabilities import ModelCapabilities
+from generation.providers.tracing import ModelCallTrace, configured_trace_dir
 
 
 DEFAULT_REGION = "us-east-1"
@@ -50,6 +51,7 @@ class BedrockProvider:
         max_tokens: int = DEFAULT_MAX_TOKENS,
         temperature: float = DEFAULT_TEMPERATURE,
         context_tokens: int = DEFAULT_CONTEXT_TOKENS,
+        trace_dir: str | None = None,
     ) -> None:
         if not model_id.strip():
             raise ValueError("model_id must not be empty")
@@ -64,6 +66,8 @@ class BedrockProvider:
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.last_usage: BedrockUsage | None = None
+        self.last_raw_text: str | None = None
+        self.trace_dir = trace_dir
         self.context_tokens = context_tokens
         self.capabilities = ModelCapabilities(
             context_window=context_tokens,
@@ -107,26 +111,43 @@ class BedrockProvider:
             max_tokens=max_tokens,
             temperature=temperature,
             context_tokens=context_tokens,
+            trace_dir=configured_trace_dir(values),
         )
 
     def generate(self, prompt: str) -> str:
         if not prompt.strip():
             raise ProviderError("Bedrock prompt must not be empty")
         self.last_usage = None
-        try:
-            response = self.client.converse(
-                modelId=self.model_id,
-                messages=[{"role": "user", "content": [{"text": prompt}]}],
-                inferenceConfig={
-                    "maxTokens": self.max_tokens,
-                    "temperature": self.temperature,
-                },
+        self.last_raw_text = None
+        payload = {
+            "modelId": self.model_id,
+            "messages": [{"role": "user", "content": [{"text": prompt}]}],
+            "inferenceConfig": {
+                "maxTokens": self.max_tokens,
+                "temperature": self.temperature,
+            },
+        }
+        with ModelCallTrace(
+            model_id=self.model_id,
+            prompt=prompt,
+            request_payload=payload,
+            trace_dir=self.trace_dir,
+            seed=None,
+        ) as trace:
+            try:
+                response = self.client.converse(**payload)
+            except Exception as exc:
+                raise ProviderError(
+                    "Amazon Bedrock Converse request failed"
+                ) from exc
+            trace.capture_response(response)
+            self.last_usage = _extract_usage(response)
+            self.last_raw_text = _extract_text(response)
+            trace.succeed(
+                raw_output=self.last_raw_text,
+                usage=self.last_usage,
             )
-        except Exception as exc:
-            raise ProviderError("Amazon Bedrock Converse request failed") from exc
-
-        self.last_usage = _extract_usage(response)
-        return _extract_text(response)
+            return self.last_raw_text
 
 
 def _create_boto3_client(region: str) -> BedrockRuntimeClient:

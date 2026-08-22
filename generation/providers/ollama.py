@@ -13,6 +13,12 @@ from urllib.parse import urlparse
 
 from generation.providers.base import ProviderError
 from generation.providers.capabilities import ModelCapabilities
+from generation.providers.tracing import (
+    DEFAULT_MODEL_SEED,
+    ModelCallTrace,
+    configured_seed,
+    configured_trace_dir,
+)
 
 
 DEFAULT_BASE_URL = "http://127.0.0.1:11434"
@@ -102,6 +108,8 @@ class OllamaProvider:
         context_tokens: int = DEFAULT_CONTEXT_TOKENS,
         token_safety_factor: float = DEFAULT_TOKEN_SAFETY_FACTOR,
         keep_alive: str = DEFAULT_KEEP_ALIVE,
+        seed: int = DEFAULT_MODEL_SEED,
+        trace_dir: str | None = None,
     ) -> None:
         if not model.strip():
             raise ValueError("model must not be empty")
@@ -117,6 +125,8 @@ class OllamaProvider:
             raise ValueError("token_safety_factor must be at least 1")
         if not keep_alive.strip():
             raise ValueError("keep_alive must not be empty")
+        if seed < 0:
+            raise ValueError("seed must not be negative")
         normalized_url = base_url.rstrip("/")
         parsed = urlparse(normalized_url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
@@ -132,6 +142,8 @@ class OllamaProvider:
         self.context_tokens = context_tokens
         self.token_safety_factor = token_safety_factor
         self.keep_alive = keep_alive.strip()
+        self.seed = seed
+        self.trace_dir = trace_dir
         self.last_usage: OllamaUsage | None = None
         self.last_request_payload: Mapping[str, Any] | None = None
         self.last_raw_text: str | None = None
@@ -182,6 +194,8 @@ class OllamaProvider:
                 context_tokens=context_tokens,
                 token_safety_factor=token_safety_factor,
                 keep_alive=keep_alive,
+                seed=configured_seed(values, "ollama"),
+                trace_dir=configured_trace_dir(values),
             )
         except ValueError as exc:
             raise ProviderError("Invalid Ollama configuration") from exc
@@ -205,17 +219,31 @@ class OllamaProvider:
                 "num_predict": self.max_tokens,
                 "num_ctx": self.context_tokens,
                 "temperature": self.temperature,
+                "seed": self.seed,
             },
         }
         self.last_request_payload = payload
-        response = self.transport.post_json(
-            f"{self.base_url}/api/chat",
-            payload,
-            self.timeout_seconds,
-        )
-        self.last_usage = _extract_usage(response)
-        self.last_raw_text = _extract_text(response)
-        return self.last_raw_text
+        with ModelCallTrace(
+            model_id=self.model_id,
+            prompt=prompt,
+            request_payload=payload,
+            trace_dir=self.trace_dir,
+            seed=self.seed,
+            schema=schema,
+        ) as trace:
+            response = self.transport.post_json(
+                f"{self.base_url}/api/chat",
+                payload,
+                self.timeout_seconds,
+            )
+            trace.capture_response(response)
+            self.last_usage = _extract_usage(response)
+            self.last_raw_text = _extract_text(response)
+            trace.succeed(
+                raw_output=self.last_raw_text,
+                usage=self.last_usage,
+            )
+            return self.last_raw_text
 
     def warmup(self) -> None:
         """Load the configured model and keep it resident without answering."""

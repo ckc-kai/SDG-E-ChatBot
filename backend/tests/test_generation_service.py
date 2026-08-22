@@ -210,6 +210,7 @@ class GenerationServiceTests(unittest.TestCase):
             card_chunk_id=2460,
             question="Show WMP.478 across 2023-2025",
             table_number=1,
+            bound={},
             plan=ExcelQueryPlan(
                 table_number=1,
                 source=RECORDS,
@@ -274,11 +275,56 @@ class GenerationServiceTests(unittest.TestCase):
             ),
         )
 
+    def test_verified_excel_history_includes_typed_status(self):
+        answer = SimpleNamespace(
+            card_chunk_id=6655,
+            question="Show target, actual, and status for WMP.473 in 2023",
+            table_number=1,
+            bound={},
+            plan=ExcelQueryPlan(
+                table_number=1,
+                source=RECORDS,
+                operation="select",
+                group_by=("reporting_year", "record_id", "status"),
+                select_json_keys=(
+                    "annual_quant_target",
+                    "quant_actual_progress_q1_4",
+                    "quant_target_units",
+                ),
+            ),
+            result=SimpleNamespace(
+                columns=[
+                    "reporting_year",
+                    "record_id",
+                    "status",
+                    "selected_0",
+                    "selected_1",
+                    "selected_2",
+                ],
+                rows=[(2023, "r23", "Delayed", "84.43", "70.26", "Miles")],
+                provenance=[
+                    {
+                        "source_file": "2023.xlsx",
+                        "source_sheet": "Table 1",
+                        "source_row": "3",
+                    }
+                ],
+            ),
+        )
+
+        chunks = _verified_excel_chunks(answer)
+
+        self.assertEqual(len(chunks), 2)
+        self.assertIn("status=Delayed", chunks[0].content)
+        self.assertIn("status=Delayed", chunks[1].content)
+        self.assertIn("percent_complete=83.2%", chunks[0].content)
+
     def test_verified_excel_history_handles_zero_target_without_crashing(self):
         answer = SimpleNamespace(
             card_chunk_id=1,
             question="Show WMP.1 in 2025",
             table_number=1,
+            bound={},
             plan=ExcelQueryPlan(
                 table_number=1,
                 source=RECORDS,

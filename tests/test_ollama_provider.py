@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from generation.providers.base import ProviderError
@@ -62,7 +65,7 @@ class OllamaProviderTests(unittest.TestCase):
         self.assertEqual(payload["format"], ANSWER_SCHEMA)
         self.assertEqual(
             payload["options"],
-            {"num_predict": 300, "num_ctx": 4096, "temperature": 0},
+            {"num_predict": 300, "num_ctx": 4096, "temperature": 0, "seed": 42},
         )
         self.assertEqual(timeout, 30)
         self.assertEqual(provider.model_id, "ollama/qwen3:4b")
@@ -102,6 +105,7 @@ class OllamaProviderTests(unittest.TestCase):
                 "OLLAMA_CONTEXT_TOKENS": "8192",
                 "OLLAMA_TOKEN_SAFETY_FACTOR": "1.2",
                 "OLLAMA_KEEP_ALIVE": "20m",
+                "MODEL_SEED": "17",
             },
             transport=FakeOllamaTransport(),
         )
@@ -112,6 +116,25 @@ class OllamaProviderTests(unittest.TestCase):
         self.assertEqual(provider.context_tokens, 8192)
         self.assertEqual(provider.token_safety_factor, 1.2)
         self.assertEqual(provider.keep_alive, "20m")
+        self.assertEqual(provider.seed, 17)
+
+    def test_generation_writes_full_model_trace(self) -> None:
+        with tempfile.TemporaryDirectory() as trace_dir:
+            provider = OllamaProvider(
+                FakeOllamaTransport(),
+                "qwen3:4b",
+                trace_dir=trace_dir,
+            )
+            raw = provider.generate("trace this prompt")
+
+            trace_file = next(Path(trace_dir).glob("model-*.json"))
+            record = json.loads(trace_file.read_text(encoding="utf-8"))
+        self.assertEqual(record["model_id"], "ollama/qwen3:4b")
+        self.assertEqual(record["seed"], 42)
+        self.assertEqual(record["prompt"], "trace this prompt")
+        self.assertEqual(record["raw_output"], raw)
+        self.assertEqual(record["usage"]["output_tokens"], 15)
+        self.assertEqual(record["outcome"], "success")
 
     def test_from_env_requires_model(self) -> None:
         with self.assertRaisesRegex(ProviderError, "OLLAMA_MODEL is required"):
@@ -132,11 +155,18 @@ class OllamaProviderTests(unittest.TestCase):
             provider.generate("prompt")
 
     def test_transport_provider_error_is_preserved(self) -> None:
-        provider = OllamaProvider(
-            FakeOllamaTransport(error=ProviderError("Ollama request failed")), "model"
-        )
-        with self.assertRaisesRegex(ProviderError, "Ollama request failed"):
-            provider.generate("prompt")
+        with tempfile.TemporaryDirectory() as trace_dir:
+            provider = OllamaProvider(
+                FakeOllamaTransport(error=ProviderError("Ollama request failed")),
+                "model",
+                trace_dir=trace_dir,
+            )
+            with self.assertRaisesRegex(ProviderError, "Ollama request failed"):
+                provider.generate("prompt")
+            trace_file = next(Path(trace_dir).glob("model-*.json"))
+            record = json.loads(trace_file.read_text(encoding="utf-8"))
+        self.assertEqual(record["outcome"], "error")
+        self.assertEqual(record["error"]["type"], "ProviderError")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from generation.providers.base import ProviderError
@@ -58,6 +61,7 @@ class DeepSeekProviderTests(unittest.TestCase):
         self.assertEqual(payload["thinking"], {"type": "disabled"})
         self.assertNotIn("reasoning_effort", payload)
         self.assertNotIn("include_reasoning", payload)
+        self.assertNotIn("seed", payload)
         self.assertNotIn("response_format", payload)
         self.assertEqual(headers["Authorization"], "Bearer secret")
         self.assertEqual(timeout, 180)
@@ -93,6 +97,31 @@ class DeepSeekProviderTests(unittest.TestCase):
         self.assertEqual(provider.prompt_token_budget, 6_500)
         self.assertEqual(provider.max_tokens, 1_500)
         self.assertEqual(provider.thinking, "disabled")
+
+    def test_generation_trace_marks_seed_unsupported(self) -> None:
+        response = {
+            "model": "deepseek-v4-flash",
+            "system_fingerprint": "fp-ds",
+            "choices": [{
+                "finish_reason": "stop",
+                "message": {"content": '{"answer":"ok"}'},
+            }],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 4},
+        }
+        with tempfile.TemporaryDirectory() as trace_dir:
+            provider = DeepSeekProvider(
+                FakeDeepSeekTransport(response=response),
+                "secret",
+                trace_dir=trace_dir,
+            )
+            raw = provider.generate("trace deepseek")
+            trace_file = next(Path(trace_dir).glob("model-*.json"))
+            record = json.loads(trace_file.read_text(encoding="utf-8"))
+        self.assertIsNone(record["seed"])
+        self.assertEqual(record["raw_output"], raw)
+        self.assertEqual(
+            record["response_metadata"]["system_fingerprint"], "fp-ds"
+        )
 
     def test_environment_overrides_are_applied(self) -> None:
         provider = DeepSeekProvider.from_env(

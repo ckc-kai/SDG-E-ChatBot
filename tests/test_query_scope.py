@@ -190,6 +190,32 @@ class QueryScopeTests(unittest.TestCase):
             ],
         )
 
+    @patch("retrieval.query.excel.channel.dimension_vocabulary", return_value={})
+    def test_entity_history_status_selects_typed_status_column(self, _):
+        question = (
+            "What are the annual target, Q4 actual, and Q4 status for "
+            "Strategic Undergrounding (WMP.473) in 2023?"
+        )
+        card = {
+            "table_number": 1,
+            "entity_key": "WMP.473",
+            "card_type": "activity",
+        }
+
+        plan, _bound = _plan_for_card(question, card, Mock(), Mock())
+
+        self.assertEqual(
+            plan.group_by, ("reporting_year", "record_id", "status")
+        )
+        self.assertEqual(
+            plan.select_json_keys,
+            (
+                "annual_quant_target",
+                "quant_actual_progress_q1_4",
+                "quant_target_units",
+            ),
+        )
+
     @patch("retrieval.query.pdf.query._validate_embedding_mode")
     @patch("retrieval.query.pdf.query._retrieve_source_role_group")
     def test_explicit_source_roles_bypass_unscoped_group_retrieval(

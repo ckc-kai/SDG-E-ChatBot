@@ -145,6 +145,7 @@ class RetrievalService:
         grouped_retrieval_ms = 0
         excel_verification_ms = 0
         verified_excel = None
+        verified_excels: tuple[ExcelAnswer, ...] = ()
         try:
             source_roles = required_source_roles(question)
             excel_requested = (
@@ -177,14 +178,21 @@ class RetrievalService:
             ):
                 excel_started = time.perf_counter()
                 try:
-                    excel_result = answer_from_excel(question, connection)
+                    excel_result = answer_from_excel(
+                        question, connection, multiple=True
+                    )
                     excel_attempted = True
                 finally:
                     excel_verification_ms = round(
                         (time.perf_counter() - excel_started) * 1000
                     )
-                if isinstance(excel_result, ExcelAnswer):
+                if isinstance(excel_result, tuple):
+                    verified_excels = excel_result
+                    verified_excel = excel_result[0] if excel_result else None
+                elif isinstance(excel_result, ExcelAnswer):
                     verified_excel = excel_result
+                    verified_excels = (excel_result,)
+                if verified_excel is not None:
                     if only_excel_requested or (
                         content_type is None and content_types is None
                     ):
@@ -203,13 +211,19 @@ class RetrievalService:
             if should_try_excel and not excel_attempted:
                 excel_started = time.perf_counter()
                 try:
-                    excel_result = answer_from_excel(question, connection)
+                    excel_result = answer_from_excel(
+                        question, connection, multiple=True
+                    )
                 finally:
                     excel_verification_ms = round(
                         (time.perf_counter() - excel_started) * 1000
                     )
-                if isinstance(excel_result, ExcelAnswer):
+                if isinstance(excel_result, tuple):
+                    verified_excels = excel_result
+                    verified_excel = excel_result[0] if excel_result else None
+                elif isinstance(excel_result, ExcelAnswer):
                     verified_excel = excel_result
+                    verified_excels = (excel_result,)
         finally:
             connection.close()
 
@@ -218,7 +232,7 @@ class RetrievalService:
         return RetrievalBundle(
             evidence=result,
             verified_excel=verified_excel,
-            verified_excels=((verified_excel,) if verified_excel else ()),
+            verified_excels=verified_excels,
             timings=RetrievalTimings(
                 connection_ms=connection_ms,
                 grouped_retrieval_ms=grouped_retrieval_ms,
@@ -323,12 +337,12 @@ class RetrievalService:
             )
 
         verified_list: list[ExcelAnswer] = []
-        verified_keys: set[tuple[int, str]] = set()
+        verified_keys: set[tuple[int, str, str]] = set()
         for bundle in step_bundles:
             for answer in bundle.verified_excels or (
                 (bundle.verified_excel,) if bundle.verified_excel is not None else ()
             ):
-                key = (answer.card_chunk_id, answer.question)
+                key = (answer.card_chunk_id, answer.question, repr(answer.plan))
                 if key not in verified_keys:
                     verified_keys.add(key)
                     verified_list.append(answer)
@@ -352,7 +366,7 @@ class RetrievalService:
                 finally:
                     computation_conn.close()
                 for answer in computation_answers:
-                    key = (answer.card_chunk_id, answer.question)
+                    key = (answer.card_chunk_id, answer.question, repr(answer.plan))
                     if key not in verified_keys:
                         verified_keys.add(key)
                         verified_list.append(answer)

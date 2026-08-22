@@ -65,11 +65,9 @@ _SHAPE_CUE_RE = re.compile(
 )
 _EITHER_OR_RE = re.compile(r"\bmore\b.+\bor\b", re.I)
 
-PLAN_RESPONSE_SCHEMA: dict[str, Any] = {
+_PLAN_ITEM_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "action": {"type": "string", "enum": ["plan", "decline"]},
-        "reason": {"type": "string"},
         "table_number": {"type": "integer"},
         "semantic_metric_key": {"type": ["string", "null"]},
         "operation": {"type": "string", "enum": ["aggregate", "select", "rank"]},
@@ -99,6 +97,21 @@ PLAN_RESPONSE_SCHEMA: dict[str, Any] = {
         },
         "descending": {"type": "boolean"},
         "limit": {"type": "integer"},
+    },
+    "additionalProperties": False,
+}
+
+PLAN_RESPONSE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "action": {"type": "string", "enum": ["plan", "decline"]},
+        "reason": {"type": "string"},
+        "plans": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 6,
+            "items": _PLAN_ITEM_SCHEMA,
+        },
     },
     "required": ["action"],
     "additionalProperties": False,
@@ -289,8 +302,8 @@ def _render_prompt(
     entity_options: dict[int, list[tuple[str, str]]] | None = None,
 ) -> str:
     lines = [
-        "Convert this question about SDG&E quarterly wildfire data into one",
-        "typed query plan, or decline if no table can answer it.",
+        "Convert this question about SDG&E quarterly wildfire data into one or",
+        "more atomic typed query plans, or decline if no table can answer it.",
         "",
         f"Question: {question}",
         "",
@@ -345,6 +358,15 @@ def _render_prompt(
         "  when the question names a quarter), or source_vintage_year for a",
         "  submission/filing year. Use source_vintage_year ONLY when the question",
         "  says submission or filing; a bare year means reporting_year.",
+        "- Return one plan for each independently requested result that needs a",
+        "  different operation or a mutually exclusive filter. A simple question",
+        "  returns exactly one plan.",
+        "- CAPEX and OPEX requested together require separate plans with explicit",
+        "  expense_type filters. Never choose only one of the two.",
+        "- A ranking plus overall totals requires separate plans: one rank plan",
+        "  and one aggregate plan for each requested total.",
+        "- Put the plans in the top-level plans array. Use top-level action=plan",
+        "  when at least one plan is returned.",
         "- 'Compare A or B of one dimension' -> operation=rank, aggregate=sum,",
         "  group_by that dimension, optionally filter out other values.",
         "- When several values of one dimension match the question, it is a",
@@ -646,13 +668,13 @@ def _sanitize_plan(
     )
 
 
-def build_model_plan(
+def build_model_plans(
     question: str,
     cards,
     conn,
     contracts: ContractSet,
-) -> tuple[ExcelQueryPlan, ExcelExecutionResult] | None:
-    """Formulate, validate, and execute a model plan; None means fall back."""
+) -> tuple[tuple[ExcelQueryPlan, ExcelExecutionResult], ...] | None:
+    """Formulate, validate, and execute atomic model plans as one batch."""
     provider = _get_planner_provider()
     if provider is None or not cards:
         return None
@@ -676,9 +698,32 @@ def build_model_plan(
         payload = json.loads(raw)
         if not isinstance(payload, dict):
             raise _PlanRejected("plan response must be a JSON object")
-        plan = _sanitize_plan(payload, question, candidates, contexts)
-        plan = _merge_question_dimensions(plan, question, conn)
-        result = execute_plan(plan, conn, contracts=contracts)
+        if payload.get("action") != "plan":
+            raise _PlanRejected(str(payload.get("reason") or "model declined"))
+        raw_plans = payload.get("plans")
+        if raw_plans is None:
+            # Accept the former single-plan shape from unstructured providers.
+            raw_plans = [
+                {
+                    key: value
+                    for key, value in payload.items()
+                    if key not in {"action", "reason"}
+                }
+            ]
+        if not isinstance(raw_plans, list) or not 1 <= len(raw_plans) <= 6:
+            raise _PlanRejected("plan response needs between one and six plans")
+        outcomes: list[tuple[ExcelQueryPlan, ExcelExecutionResult]] = []
+        for item in raw_plans:
+            if not isinstance(item, dict):
+                raise _PlanRejected("every plan must be a JSON object")
+            atomic_payload = dict(item)
+            atomic_payload["action"] = "plan"
+            plan = _sanitize_plan(atomic_payload, question, candidates, contexts)
+            plan = _merge_question_dimensions(plan, question, conn)
+            result = execute_plan(plan, conn, contracts=contracts)
+            if not _result_is_usable(plan, result):
+                return None
+            outcomes.append((plan, result))
     except _PlanRejected as exc:
         logger.info("Excel model plan rejected: %s", exc)
         return None
@@ -689,6 +734,13 @@ def build_model_plan(
     except (ProviderError, ValueError, TypeError, json.JSONDecodeError) as exc:
         logger.warning("Excel model planning failed: %s", exc)
         return None
+    return tuple(outcomes)
+
+
+def _result_is_usable(
+    plan: ExcelQueryPlan, result: ExcelExecutionResult
+) -> bool:
+    """Apply the existing answerability guards to one atomic plan."""
     if plan.operation == "select":
         selected_indexes = [
             index
@@ -701,16 +753,16 @@ def build_model_plan(
             for index in selected_indexes
         )
         if selected_indexes and not has_selected_value:
-            return None
+            return False
         if not result.rows:
-            return None
+            return False
     elif not result.is_answer:
-        return None
+        return False
     # Mirror the heuristic channel's "nothing matched" guards: zero matching
     # evidence means the plan does not fit the question, not that the answer
     # is zero.
     if plan.source == FACTS and result.contributing_facts == 0:
-        return None
+        return False
     if (
         plan.source == RECORDS
         and plan.operation == "aggregate"
@@ -718,5 +770,16 @@ def build_model_plan(
         and result.rows
         and not result.rows[0][-1]
     ):
-        return None
-    return plan, result
+        return False
+    return True
+
+
+def build_model_plan(
+    question: str,
+    cards,
+    conn,
+    contracts: ContractSet,
+) -> tuple[ExcelQueryPlan, ExcelExecutionResult] | None:
+    """Compatibility wrapper for callers that still require one plan."""
+    outcomes = build_model_plans(question, cards, conn, contracts)
+    return outcomes[0] if outcomes else None

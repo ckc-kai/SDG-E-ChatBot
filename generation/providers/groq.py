@@ -18,6 +18,12 @@ from generation.providers.capabilities import (
     rate_limit_state_from_headers,
 )
 from generation.providers.ollama import ANSWER_SCHEMA
+from generation.providers.tracing import (
+    DEFAULT_MODEL_SEED,
+    ModelCallTrace,
+    configured_seed,
+    configured_trace_dir,
+)
 
 import httpx
 
@@ -156,6 +162,8 @@ class GroqProvider:
         token_safety_factor: float = DEFAULT_TOKEN_SAFETY_FACTOR,
         reasoning_effort: str = DEFAULT_REASONING_EFFORT,
         max_rate_limit_wait_seconds: float = DEFAULT_MAX_RATE_LIMIT_WAIT_SECONDS,
+        seed: int = DEFAULT_MODEL_SEED,
+        trace_dir: str | None = None,
     ) -> None:
         if not api_key.strip():
             raise ValueError("api_key must not be empty")
@@ -169,6 +177,8 @@ class GroqProvider:
             raise ValueError("invalid Groq rate-limit wait")
         if reasoning_effort not in {"low", "medium", "high"}:
             raise ValueError("invalid Groq reasoning effort")
+        if seed < 0:
+            raise ValueError("Groq seed must not be negative")
         normalized_url = base_url.rstrip("/")
         parsed = urlparse(normalized_url)
         if parsed.scheme != "https" or not parsed.netloc:
@@ -187,9 +197,12 @@ class GroqProvider:
         self.token_safety_factor = token_safety_factor
         self.reasoning_effort = reasoning_effort
         self.max_rate_limit_wait_seconds = max_rate_limit_wait_seconds
+        self.seed = seed
+        self.trace_dir = trace_dir
         self.last_usage: GroqUsage | None = None
         self.last_rate_limit = RateLimitState()
         self.last_request_payload: Mapping[str, Any] | None = None
+        self.last_raw_text: str | None = None
         self.capabilities = ModelCapabilities(
             context_window=context_tokens,
             max_output_tokens=DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
@@ -235,6 +248,8 @@ class GroqProvider:
                         DEFAULT_MAX_RATE_LIMIT_WAIT_SECONDS,
                     )
                 ),
+                seed=configured_seed(values, "groq"),
+                trace_dir=configured_trace_dir(values),
             )
         except ValueError as exc:
             raise ProviderError("Invalid Groq configuration") from exc
@@ -259,6 +274,7 @@ class GroqProvider:
             "max_completion_tokens": self.max_tokens,
             "reasoning_effort": self.reasoning_effort,
             "include_reasoning": False,
+            "seed": self.seed,
         }
         if schema is not None:
             payload["response_format"] = {
@@ -266,17 +282,33 @@ class GroqProvider:
                 "json_schema": {"name": "structured_response", "schema": dict(schema)},
             }
         self.last_request_payload = payload
-        try:
-            response = self.transport.post_json(
-                f"{self.base_url}/chat/completions",
-                payload,
-                self._headers(),
-                self.timeout_seconds,
+        self.last_usage = None
+        self.last_raw_text = None
+        with ModelCallTrace(
+            model_id=self.model_id,
+            prompt=prompt,
+            request_payload=payload,
+            trace_dir=self.trace_dir,
+            seed=self.seed,
+            schema=schema,
+        ) as trace:
+            try:
+                response = self.transport.post_json(
+                    f"{self.base_url}/chat/completions",
+                    payload,
+                    self._headers(),
+                    self.timeout_seconds,
+                )
+            finally:
+                self._capture_rate_limits()
+            trace.capture_response(response)
+            self.last_usage = _extract_usage(response)
+            self.last_raw_text = _extract_text(response)
+            trace.succeed(
+                raw_output=self.last_raw_text,
+                usage=self.last_usage,
             )
-        finally:
-            self._capture_rate_limits()
-        self.last_usage = _extract_usage(response)
-        return _extract_text(response)
+            return self.last_raw_text
 
     def refresh_capabilities(self) -> ModelCapabilities:
         """Discover model limits once, retaining configured fallbacks on failure."""

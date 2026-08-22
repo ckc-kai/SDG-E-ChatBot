@@ -14,6 +14,7 @@ import httpx
 
 from generation.providers.base import ProviderError
 from generation.providers.capabilities import ModelCapabilities
+from generation.providers.tracing import ModelCallTrace, configured_trace_dir
 
 
 DEFAULT_BASE_URL = "https://api.deepseek.com"
@@ -130,6 +131,7 @@ class DeepSeekProvider:
         prompt_token_budget: int = DEFAULT_PROMPT_TOKEN_BUDGET,
         token_safety_factor: float = DEFAULT_TOKEN_SAFETY_FACTOR,
         thinking: str = DEFAULT_THINKING,
+        trace_dir: str | None = None,
     ) -> None:
         if not api_key.strip():
             raise ValueError("api_key must not be empty")
@@ -167,8 +169,10 @@ class DeepSeekProvider:
         self.prompt_token_budget = prompt_token_budget
         self.token_safety_factor = token_safety_factor
         self.thinking = normalized_thinking
+        self.trace_dir = trace_dir
         self.last_usage: DeepSeekUsage | None = None
         self.last_request_payload: Mapping[str, Any] | None = None
+        self.last_raw_text: str | None = None
         self.capabilities = ModelCapabilities(
             context_window=context_tokens,
             max_output_tokens=model_max_output_tokens,
@@ -226,12 +230,13 @@ class DeepSeekProvider:
                     )
                 ),
                 thinking=values.get("DEEPSEEK_THINKING", DEFAULT_THINKING),
+                trace_dir=configured_trace_dir(values),
             )
         except ValueError as exc:
             raise ProviderError("Invalid DeepSeek configuration") from exc
 
     def generate(self, prompt: str) -> str:
-        return self._generate(prompt, structured=False)
+        return self._generate(prompt, structured=False, schema=None)
 
     def generate_structured(
         self, prompt: str, schema: Mapping[str, Any]
@@ -246,9 +251,15 @@ class DeepSeekProvider:
             "additional keys:\n"
             f"{json.dumps(dict(schema), ensure_ascii=False, separators=(',', ':'))}"
         )
-        return self._generate(schema_prompt, structured=True)
+        return self._generate(schema_prompt, structured=True, schema=schema)
 
-    def _generate(self, prompt: str, *, structured: bool) -> str:
+    def _generate(
+        self,
+        prompt: str,
+        *,
+        structured: bool,
+        schema: Mapping[str, Any] | None,
+    ) -> str:
         if not prompt.strip():
             raise ProviderError("DeepSeek prompt must not be empty")
         payload: dict[str, Any] = {
@@ -261,16 +272,32 @@ class DeepSeekProvider:
         if structured:
             payload["response_format"] = {"type": "json_object"}
         self.last_request_payload = payload
-        started = time.perf_counter()
-        response = self.transport.post_json(
-            f"{self.base_url}/chat/completions",
-            payload,
-            self._headers(),
-            self.timeout_seconds,
-        )
-        latency_ms = round((time.perf_counter() - started) * 1000)
-        self.last_usage = _extract_usage(response, latency_ms=latency_ms)
-        return _extract_text(response)
+        self.last_usage = None
+        self.last_raw_text = None
+        with ModelCallTrace(
+            model_id=self.model_id,
+            prompt=prompt,
+            request_payload=payload,
+            trace_dir=self.trace_dir,
+            seed=None,
+            schema=schema,
+        ) as trace:
+            started = time.perf_counter()
+            response = self.transport.post_json(
+                f"{self.base_url}/chat/completions",
+                payload,
+                self._headers(),
+                self.timeout_seconds,
+            )
+            trace.capture_response(response)
+            latency_ms = round((time.perf_counter() - started) * 1000)
+            self.last_usage = _extract_usage(response, latency_ms=latency_ms)
+            self.last_raw_text = _extract_text(response)
+            trace.succeed(
+                raw_output=self.last_raw_text,
+                usage=self.last_usage,
+            )
+            return self.last_raw_text
 
     def _headers(self) -> Mapping[str, str]:
         return {

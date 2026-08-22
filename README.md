@@ -445,7 +445,7 @@ commit the real key):
 TASK3_PROVIDER=deepseek
 TASK3_PLANNER_PROVIDER=ollama
 TASK3_PLANNER_MODEL=qwen3.5:9b
-TASK3_PLANNER_MAX_TOKENS=500
+TASK3_PLANNER_MAX_TOKENS=1200
 DEEPSEEK_API_KEY=your_local_key
 DEEPSEEK_MODEL=deepseek-v4-flash
 DEEPSEEK_THINKING=disabled
@@ -461,3 +461,6 @@ parsed and citation-validated by the same Task 3 code; retrieval, citation
 hydration, and the public FastAPI response do not change.
 DeepSeek API calls are billed to the configured DeepSeek account, so review the
 provider's current pricing and balance before running live tests.
+
+Planner batching, deterministic seeds, model-call traces, and planner replay are
+documented in [`docs/planner-debugging.md`](docs/planner-debugging.md).

@@ -267,7 +267,7 @@ class GenerationService:
         values["GROQ_MODEL"] = values.get(
             "TASK3_PLANNER_ESCALATION_MODEL", "openai/gpt-oss-120b"
         )
-        values["GROQ_MAX_TOKENS"] = "700"
+        values["GROQ_MAX_TOKENS"] = "1500"
         values["GROQ_REASONING_EFFORT"] = "low"
         try:
             self._escalation_provider = create_provider_from_env(
@@ -377,19 +377,19 @@ def _create_planner_provider():
     values = dict(os.environ)
     if provider_name == "ollama":
         values["OLLAMA_MODEL"] = values.get("TASK3_PLANNER_MODEL", "qwen3:4b")
-        values["OLLAMA_MAX_TOKENS"] = values.get("TASK3_PLANNER_MAX_TOKENS", "500")
+        values["OLLAMA_MAX_TOKENS"] = values.get("TASK3_PLANNER_MAX_TOKENS", "1200")
     elif provider_name == "groq":
         values["GROQ_MODEL"] = values.get(
             "TASK3_PLANNER_MODEL", "openai/gpt-oss-20b"
         )
-        values["GROQ_MAX_TOKENS"] = values.get("TASK3_PLANNER_MAX_TOKENS", "500")
+        values["GROQ_MAX_TOKENS"] = values.get("TASK3_PLANNER_MAX_TOKENS", "1200")
         values["GROQ_REASONING_EFFORT"] = "low"
     elif provider_name == "deepseek":
         values["DEEPSEEK_MODEL"] = values.get(
             "TASK3_PLANNER_MODEL", "deepseek-v4-flash"
         )
         values["DEEPSEEK_MAX_TOKENS"] = values.get(
-            "TASK3_PLANNER_MAX_TOKENS", "500"
+            "TASK3_PLANNER_MAX_TOKENS", "1200"
         )
     return create_provider_from_env(provider_name, environ=values)
 
@@ -487,6 +487,9 @@ def _verified_entity_history_chunks(
     columns = answer.result.columns
     year_index = columns.index("reporting_year")
     record_index = columns.index("record_id")
+    status_index = (
+        columns.index("status") if "status" in columns else None
+    )
     selected_indexes = {
         key: columns.index(f"selected_{index}")
         for index, key in enumerate(selected_keys)
@@ -507,6 +510,9 @@ def _verified_entity_history_chunks(
         target = _decimal(row[selected_indexes["annual_quant_target"]])
         actual = _decimal(row[selected_indexes["quant_actual_progress_q1_4"]])
         unit = str(row[selected_indexes["quant_target_units"]])
+        status = (
+            str(row[status_index]) if status_index is not None else None
+        )
         percent = _percent_complete(actual, target)
         totals_target += target
         totals_actual += actual
@@ -523,6 +529,7 @@ def _verified_entity_history_chunks(
                 f"annual_target={_format_decimal(target)}",
                 f"q4_year_end_actual={_format_decimal(actual)}",
                 f"unit={unit}",
+                *([f"status={status}"] if status is not None else []),
                 f"percent_complete={_format_percent(percent)}",
                 (
                     "calculation=undefined because target is zero"
@@ -551,6 +558,7 @@ def _verified_entity_history_chunks(
         calculation_lines.append(
             f"{year}: target={_format_decimal(target)}, "
             f"actual={_format_decimal(actual)}, percent={_format_percent(percent)}"
+            + (f", status={status}" if status is not None else "")
         )
         provenance_lines.append(
             f"{year}: {source_file}, "

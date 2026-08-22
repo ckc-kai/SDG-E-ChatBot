@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
 import httpx
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from generation.providers.base import ProviderError
@@ -47,6 +50,7 @@ class GroqProviderTests(unittest.TestCase):
         self.assertNotIn("response_format", payload)
         self.assertEqual(payload["reasoning_effort"], "low")
         self.assertFalse(payload["include_reasoning"])
+        self.assertEqual(payload["seed"], 42)
         self.assertEqual(headers["Authorization"], "Bearer secret")
         self.assertEqual(headers["User-Agent"], "SDGE-ChatBot/0.1")
         self.assertIn('"answer":"ok"', raw)
@@ -64,6 +68,34 @@ class GroqProviderTests(unittest.TestCase):
         self.assertEqual(provider.prompt_token_budget, 6_500)
         self.assertEqual(provider.temperature, 0)
         self.assertEqual(provider.reasoning_effort, "low")
+        self.assertEqual(provider.seed, 42)
+
+    def test_generation_writes_seed_and_provider_metadata_to_trace(self):
+        response = {
+            "id": "call-1",
+            "model": "openai/gpt-oss-120b",
+            "system_fingerprint": "fp-test",
+            "choices": [{
+                "finish_reason": "stop",
+                "message": {"content": '{"answer":"ok"}'},
+            }],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 4},
+        }
+        with tempfile.TemporaryDirectory() as trace_dir:
+            provider = GroqProvider(
+                FakeGroqTransport(response=response),
+                "secret",
+                trace_dir=trace_dir,
+            )
+            raw = provider.generate("trace groq")
+            trace_file = next(Path(trace_dir).glob("model-*.json"))
+            record = json.loads(trace_file.read_text(encoding="utf-8"))
+        self.assertEqual(record["seed"], 42)
+        self.assertEqual(record["raw_output"], raw)
+        self.assertEqual(
+            record["response_metadata"]["system_fingerprint"], "fp-test"
+        )
+        self.assertEqual(record["response_metadata"]["finish_reason"], "stop")
 
     def test_environment_can_override_operational_prompt_budget(self):
         provider = GroqProvider.from_env(

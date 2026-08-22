@@ -1,5 +1,9 @@
 import json
+import os
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from generation.planning import (
     CONTENT_TYPES,
@@ -105,6 +109,12 @@ class RetrievalPlanningTests(unittest.TestCase):
         self.assertIn("not automatically a request for forecast", provider.last_prompt)
         self.assertIn("For longitudinal performance questions", provider.last_prompt)
         self.assertIn("one PDF task for the filing or change", provider.last_prompt)
+        self.assertIn("calculation operands, not derived values", provider.last_prompt)
+        self.assertIn("percent complete maps to the task", provider.last_prompt)
+        self.assertIn("Do not create one task per metric", provider.last_prompt)
+        self.assertIn("MUST produce exactly one task", provider.last_prompt)
+        self.assertNotIn("optional role", provider.last_prompt)
+        self.assertNotIn("WMP.473", provider.last_prompt)
 
     def test_every_subquestion_searches_all_evidence_types(self):
         provider = FakeProvider(json.dumps({"tasks": [{
@@ -180,6 +190,52 @@ class RetrievalPlanningTests(unittest.TestCase):
         plan = build_retrieval_plan("Compare the two WMP cycles and explain why.", provider)
         self.assertEqual(plan.source, "fallback")
         self.assertEqual(plan.steps[0].content_types, CONTENT_TYPES)
+
+    def test_planner_trace_records_raw_output_and_rejection_reason(self):
+        with tempfile.TemporaryDirectory() as trace_dir, patch.dict(
+            os.environ,
+            {"TASK3_PLANNER_TRACE_DIR": trace_dir},
+        ):
+            provider = FakeProvider(response="not-json")
+            plan = build_retrieval_plan("Compare the two WMP cycles.", provider)
+
+            self.assertEqual(plan.source, "fallback")
+            traces = list(Path(trace_dir).glob("planner-*.json"))
+            self.assertEqual(len(traces), 1)
+            record = json.loads(traces[0].read_text(encoding="utf-8"))
+            self.assertEqual(record["provider_model_id"], "fake")
+            self.assertEqual(record["raw_output"], "not-json")
+            self.assertEqual(record["outcome"], "rejected")
+            self.assertEqual(record["rejection"]["type"], "JSONDecodeError")
+
+    def test_planner_can_replay_an_accepted_raw_output_without_model_call(self):
+        payload = json.dumps({"tasks": [{
+            "question": "Find the first WMP cycle.",
+            "source": "pdf",
+        }]})
+        with tempfile.TemporaryDirectory() as trace_dir, patch.dict(
+            os.environ,
+            {"TASK3_PLANNER_TRACE_DIR": trace_dir},
+        ):
+            original = build_retrieval_plan(
+                "Compare the two WMP cycles.", FakeProvider(response=payload)
+            )
+            replay_file = next(Path(trace_dir).glob("planner-*.json"))
+
+            replay_provider = FakeProvider(error=ProviderError("must not be called"))
+            with patch.dict(
+                os.environ,
+                {
+                    "TASK3_PLANNER_REPLAY_FILE": str(replay_file),
+                    "TASK3_PLANNER_TRACE_DIR": "",
+                },
+            ):
+                replayed = build_retrieval_plan(
+                    "Compare the two WMP cycles.", replay_provider
+                )
+
+        self.assertEqual(original, replayed)
+        self.assertEqual(replay_provider.calls, 0)
 
 
 if __name__ == "__main__":

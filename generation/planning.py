@@ -2,14 +2,22 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
+import os
 import re
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, is_dataclass, replace
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from generation.providers.base import ModelProvider, ProviderError
 from generation.routing import route_question
 
+
+logger = logging.getLogger(__name__)
 
 CONTENT_TYPES = ("narrative", "table", "figure", "excel_card")
 PDF_CONTENT_TYPES = ("narrative", "table", "figure")
@@ -355,6 +363,81 @@ def _legacy_tasks(payload: dict[str, Any]) -> list[dict[str, Any]] | None:
     return converted
 
 
+def _prompt_sha256(prompt: str) -> str:
+    return hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+
+
+def _jsonable_usage(provider: ModelProvider) -> dict[str, Any] | None:
+    usage = getattr(provider, "last_usage", None)
+    if usage is None:
+        return None
+    if is_dataclass(usage):
+        return asdict(usage)
+    if isinstance(usage, dict):
+        return dict(usage)
+    values = getattr(usage, "__dict__", None)
+    return dict(values) if isinstance(values, dict) else None
+
+
+def _plan_debug_payload(plan: RetrievalPlan) -> dict[str, Any]:
+    return {
+        "source": plan.source,
+        "trigger_reason": plan.trigger_reason,
+        "atomic_task_count": plan.atomic_task_count,
+        "requirements": [asdict(item) for item in plan.requirements],
+        "steps": [asdict(step) for step in plan.steps],
+    }
+
+
+def _write_planner_trace(record: dict[str, Any]) -> None:
+    trace_dir = os.getenv("TASK3_PLANNER_TRACE_DIR", "").strip()
+    if not trace_dir:
+        return
+    try:
+        directory = Path(trace_dir).expanduser()
+        directory.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+        fingerprint = str(record["prompt_sha256"])[:12]
+        path = directory / (
+            f"planner-{timestamp}-{fingerprint}-{uuid4().hex[:8]}.json"
+        )
+        path.write_text(
+            json.dumps(record, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        logger.info("planner_trace path=%s outcome=%s", path, record["outcome"])
+    except (OSError, TypeError, ValueError):
+        # Debug tracing must never take down retrieval.
+        logger.exception("planner_trace_write_failed")
+
+
+def _replayed_raw_output(provider: ModelProvider, prompt: str) -> str | None:
+    replay_file = os.getenv("TASK3_PLANNER_REPLAY_FILE", "").strip()
+    if not replay_file:
+        return None
+    path = Path(replay_file).expanduser()
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ProviderError(f"planner replay could not be read: {path}") from exc
+    if not isinstance(record, dict):
+        raise ProviderError("planner replay must contain a JSON object")
+    expected_model = str(record.get("provider_model_id") or "")
+    actual_model = str(getattr(provider, "model_id", type(provider).__name__))
+    if expected_model != actual_model:
+        raise ProviderError(
+            f"planner replay model mismatch: expected {expected_model}, got {actual_model}"
+        )
+    expected_prompt = str(record.get("prompt_sha256") or "")
+    actual_prompt = _prompt_sha256(prompt)
+    if expected_prompt != actual_prompt:
+        raise ProviderError("planner replay prompt hash does not match current prompt")
+    raw = record.get("raw_output")
+    if not isinstance(raw, str):
+        raise ProviderError("planner replay does not contain a raw model output")
+    return raw
+
+
 def build_retrieval_plan(
     question: str,
     provider: ModelProvider,
@@ -399,25 +482,19 @@ def build_retrieval_plan(
 
     exact_shape = {
         "requirements": [
-            {"id": "R1", "text": "one factual requirement from the user"}
+            {"id": "R1", "text": "one result requested by the user"},
         ],
         "tasks": [
             {
-                "question": "standalone factual search question",
+                "question": "standalone search for the required source facts",
                 "source": "pdf",
-                "document_role": "optional role",
-                "table_role": "optional role",
-                "entity": "optional entity",
-                "metric": "optional metric",
-                "period": "optional period",
-                "need_table": False,
-                "need_figure": False,
                 "requirement_ids": ["R1"],
             }
         ]
     }
     prompt = f"""Create a typed evidence plan for this California utility regulatory-data question.
-List every factual requirement before creating at most {max_tasks} retrieval
+List every requested result, including source facts and derived calculations,
+before creating at most {max_tasks} retrieval
 tasks. Requirements must not be dropped merely because retrieval is limited to
 {max_branches} branches. A task may serve multiple requirement IDs. Return
 exactly this JSON shape:
@@ -457,16 +534,29 @@ quarterly workbook (QDR tables): activity targets, actuals, status (Table 1);
 spend/CAPEX/OPEX (Table 11); circuit-mile inventories and upgrades (Tables
 7-9); ignitions, events, findings, weather days (Tables 2-6, 10); risk by
 tier or segment (Tables 14-15); work orders (Table 13). Use "pdf" for filings,
-guidelines, decisions, and narrative content. Use only the keys shown above;
-never use source_type, narrative_needed, calculations, or explanatory text.
+guidelines, decisions, and narrative content. Use only the task keys defined by
+the response schema: question, source, document_role, table_role, entity, metric,
+period, need_table, need_figure, and requirement_ids. Never use source_type,
+narrative_needed, calculations, or explanatory text.
 For PDF, narrative is automatic; set need_table or need_figure only when
 needed. Excel tasks do not need PDF support flags. Preserve entities (keep
-exact ids like WMP.473 in task questions), periods, metrics, document roles,
-and table roles from the question. Do not assume an answer or a cause.
+exact activity IDs from the question in task questions), periods, metrics,
+document roles, and table roles from the question. Never invent an entity,
+activity ID, table, or filing identifier. Do not assume an answer or a cause.
 Every requirement MUST have a stable ID such as R1, R2, and every ID MUST
 appear in at least one task's requirement_ids. Closely related requirements
 that use the same source, document scope, entity, period, or table should share
 one retrieval task rather than being omitted.
+Retrieval tasks fetch source facts and calculation operands, not derived values.
+For each calculation requirement, add its requirement ID to every task that
+retrieves its operands. For example, percent complete maps to the task retrieving
+target and actual; combined spend maps to the task retrieving CAPEX and OPEX.
+For one Excel entity and period, combine all requested metrics into one task,
+including metrics stored in different QDR tables. Do not create one task per metric.
+An Excel-only question with one entity and period MUST produce exactly one task,
+whose question retrieves every requested source fact and calculation operand and
+whose requirement_ids contains every requirement ID. NEVER create a retrieval
+task that asks to calculate, compute, divide, add, or otherwise derive a value.
 
 For longitudinal performance questions, including repeated outcomes across
 years, target-versus-actual comparisons, completion status, or a complete list
@@ -481,13 +571,41 @@ tasks the same broad document scope.
 
 Original question:
 {question}"""
+    provider_model_id = str(
+        getattr(provider, "model_id", type(provider).__name__)
+    )
+    trace: dict[str, Any] = {
+        "schema_version": 1,
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "question": question,
+        "planning_reason": reason,
+        "provider_model_id": provider_model_id,
+        "provider_class": type(provider).__name__,
+        "provider_parameters": {
+            "max_tokens": getattr(provider, "max_tokens", None),
+            "temperature": getattr(provider, "temperature", None),
+            "context_tokens": getattr(provider, "context_tokens", None),
+        },
+        "prompt": prompt,
+        "prompt_sha256": _prompt_sha256(prompt),
+        "raw_source": "provider",
+        "raw_output": None,
+        "usage": None,
+    }
     try:
-        structured = getattr(provider, "generate_structured", None)
-        raw = (
-            structured(prompt, PLAN_SCHEMA)
-            if callable(structured)
-            else provider.generate(prompt)
-        )
+        replayed = _replayed_raw_output(provider, prompt)
+        if replayed is not None:
+            raw = replayed
+            trace["raw_source"] = "replay"
+        else:
+            structured = getattr(provider, "generate_structured", None)
+            raw = (
+                structured(prompt, PLAN_SCHEMA)
+                if callable(structured)
+                else provider.generate(prompt)
+            )
+        trace["raw_output"] = raw
+        trace["usage"] = _jsonable_usage(provider)
         payload = json.loads(_FENCE_RE.sub("", raw.strip()).strip())
         if not isinstance(payload, dict):
             raise ValueError("plan must be an object")
@@ -525,7 +643,7 @@ Original question:
             seen[signature] = len(deduplicated)
             deduplicated.append(step)
         selected = _bounded_merge(deduplicated, max_branches)
-        return RetrievalPlan(
+        plan = RetrievalPlan(
             tuple(selected),
             "model",
             reason,
@@ -533,5 +651,16 @@ Original question:
             dropped_task_count=0,
             requirements=requirements,
         )
-    except (ProviderError, ValueError, TypeError, json.JSONDecodeError):
+        trace["outcome"] = "accepted"
+        trace["accepted_plan"] = _plan_debug_payload(plan)
+        _write_planner_trace(trace)
+        return plan
+    except (ProviderError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        trace["usage"] = _jsonable_usage(provider)
+        trace["outcome"] = "rejected"
+        trace["rejection"] = {
+            "type": type(exc).__name__,
+            "message": str(exc),
+        }
+        _write_planner_trace(trace)
         return fallback_plan(question)

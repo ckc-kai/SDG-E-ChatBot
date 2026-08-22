@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from typing import Any
 
 from generation.providers.base import ProviderError
@@ -83,6 +86,20 @@ class BedrockProviderTests(unittest.TestCase):
         )
         provider = BedrockProvider(client, "model")
         self.assertEqual(provider.generate("prompt"), '{"answer":"ok"}')
+
+    def test_generation_trace_records_result_without_seed(self) -> None:
+        with tempfile.TemporaryDirectory() as trace_dir:
+            provider = BedrockProvider(
+                FakeBedrockClient(),
+                "model",
+                trace_dir=trace_dir,
+            )
+            raw = provider.generate("trace bedrock")
+            trace_file = next(Path(trace_dir).glob("model-*.json"))
+            record = json.loads(trace_file.read_text(encoding="utf-8"))
+        self.assertIsNone(record["seed"])
+        self.assertEqual(record["raw_output"], raw)
+        self.assertEqual(record["usage"]["total_tokens"], 120)
 
     def test_client_failure_becomes_provider_error_without_exposing_detail(self) -> None:
         client = FakeBedrockClient(error=TimeoutError("private AWS detail"))
