@@ -1,13 +1,6 @@
 import SourceCard from './SourceCard';
 
-function ChatMessage({
-  role,
-  content,
-  citations,
-  requestId,
-  onSave,
-  saved,
-}) {
+function ChatMessage({ role, content, sources, onToggleSave, saved }) {
   if (role === 'user') {
     return (
       <div className="message-row user">
@@ -20,18 +13,17 @@ function ChatMessage({
     <div className="message-row assistant">
       <div className="bubble assistant">
         {content}
-        {citations && citations.length > 0 && (
+        {sources && sources.length > 0 && (
           <div className="sources-row">
-            {citations.map((citation) => (
-              <SourceCard key={citation.chunk_id} source={citation} />
+            {sources.map((source) => (
+              <SourceCard key={`${source.doc_id}-${source.page_start}`} source={source} />
             ))}
           </div>
         )}
-        {requestId && <span className="request-id">Request: {requestId}</span>}
       </div>
-      {onSave && (
-        <button className="save-button" onClick={onSave} disabled={saved}>
-          {saved ? '★ Saved' : '☆ Save this answer'}
+      {onToggleSave && (
+        <button className="save-button" onClick={onToggleSave}>
+          {saved ? '★ Saved (click to remove)' : '☆ Save this answer'}
         </button>
       )}
     </div>

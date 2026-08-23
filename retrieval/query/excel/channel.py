@@ -84,6 +84,15 @@ _ENTITY_HISTORY_CUES = (
     "completion",
     "cumulative",
 )
+_ENTITY_SERIES_CUES = (
+    *_ENTITY_HISTORY_CUES,
+    "reported",
+    "numbers",
+    "values",
+    "trend",
+    "chart",
+    "graph",
+)
 _TABLE1_HISTORY_FIELDS = (
     "annual_quant_target",
     "quant_actual_progress_q1_4",
@@ -319,6 +328,35 @@ def answer_from_excel_all(
         exact = _exact_history_answer(question, entity_key, conn, contracts)
         return (exact,) if isinstance(exact, ExcelAnswer) else exact
 
+    years = bind_years(question)
+    if years:
+        if any(cue in question.casefold() for cue in _ENTITY_SERIES_CUES):
+            entity_card = _resolve_entity_card(question, conn)
+            if entity_card is not None and len(years) >= 2:
+                entity_key = str(
+                    entity_card.query_object.structured_data.get("entity_key")
+                    or ""
+                )
+                history = _card_entity_history_answer(
+                    question, entity_card, entity_key, years, conn, contracts
+                )
+                if history is not None:
+                    return history
+        resolved = _resolve_metric_card(question, conn)
+        if resolved is not None:
+            if len(years) >= 2:
+                history = _card_fact_history_answer(
+                    question, resolved, years, conn, contracts
+                )
+                if history is not None:
+                    return history
+            else:
+                exact = _card_answer(
+                    question, (resolved,), conn, contracts, min_card_score
+                )
+                if isinstance(exact, ExcelAnswer):
+                    return exact
+
     cards = retrieve(question, conn, rewrite_mode="off", lanes=(EXCEL,))
     if not cards:
         return ExcelDecline("no Excel card retrieved")
@@ -488,6 +526,9 @@ def _card_entity_history_answer(
     _keep_requested_years(bound, result)
     if not result.rows or not _has_complete_history_values(result):
         return None
+    missing_years = _missing_requested_years(bound, result)
+    if missing_years:
+        bound["missing_reporting_years"] = missing_years
     return ExcelAnswer(
         question=question,
         card_chunk_id=card.query_object.chunk_id,
@@ -540,6 +581,231 @@ def _question_names_card_entity(question: str, card) -> bool:
     return len(matched) >= max(2, (len(terms) + 1) // 2)
 
 
+_FACT_HISTORY_CUES = (
+    "reported",
+    "reporting",
+    "from",
+    "through",
+    "between",
+    "across",
+    "trend",
+    "total",
+    "how many",
+    "how much",
+)
+_METRIC_GENERIC_TOKENS = {
+    "all",
+    "amount",
+    "count",
+    "metric",
+    "number",
+    "of",
+    "reported",
+    "total",
+    "value",
+    "wmp",
+    "activity",
+}
+
+
+@dataclass(frozen=True)
+class _ResolvedMetricQueryObject:
+    chunk_id: int
+    caption: str
+    structured_data: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class _ResolvedMetricCard:
+    query_object: _ResolvedMetricQueryObject
+    rerank_score: float = 1.0
+
+
+def _resolve_entity_card(question: str, conn) -> _ResolvedMetricCard | None:
+    """Resolve one reviewed Table 1 activity by its official display name.
+
+    Matching is catalog-driven rather than tied to individual WMP IDs. Exact
+    short names beat broader activities, while equally specific matches decline
+    so ambiguous phrases never select an arbitrary inspection program.
+    """
+    question_tokens = _metric_tokens(question)
+    if not question_tokens:
+        return None
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id, caption, structured_data
+            FROM chunks
+            WHERE content_type = 'excel_card'
+              AND structured_data ->> 'table_number' = '1'
+              AND structured_data ->> 'entity_key' IS NOT NULL
+            ORDER BY id
+            """
+        )
+        rows = cur.fetchall()
+
+    by_entity: dict[str, tuple[float, int, int, str, dict[str, Any]]] = {}
+    for chunk_id, caption, structured_data in rows:
+        data = structured_data or {}
+        entity_key = str(data.get("entity_key") or "")
+        if not entity_key or entity_key in by_entity:
+            continue
+        display = re.split(
+            r"\s+[\u2013\u2014-]\s+", str(caption or ""), maxsplit=1
+        )[-1]
+        label_tokens = _metric_tokens(display)
+        if not label_tokens:
+            continue
+        overlap = label_tokens & question_tokens
+        coverage = len(overlap) / len(label_tokens)
+        by_entity[entity_key] = (
+            coverage,
+            len(overlap),
+            int(chunk_id),
+            str(caption or ""),
+            data,
+        )
+
+    ranked = sorted(
+        by_entity.values(), key=lambda item: (-item[0], -item[1], item[2])
+    )
+    if not ranked or ranked[0][0] < 0.75:
+        return None
+    best_signature = ranked[0][:2]
+    if len(ranked) > 1 and ranked[1][:2] == best_signature:
+        return None
+    coverage, _overlap, chunk_id, caption, data = ranked[0]
+    return _ResolvedMetricCard(
+        _ResolvedMetricQueryObject(chunk_id, caption, data), coverage
+    )
+
+
+def _metric_tokens(value: str) -> set[str]:
+    tokens = set(re.findall(r"[a-z0-9]+", value.casefold().replace("_", " ")))
+    normalized = {
+        token[:-1] if len(token) > 4 and token.endswith("s") else token
+        for token in tokens
+        if token not in _METRIC_GENERIC_TOKENS
+    }
+    return {token for token in normalized if len(token) >= 3}
+
+
+def _resolve_metric_card(question: str, conn) -> _ResolvedMetricCard | None:
+    """Resolve an unambiguous reviewed metric card without vector ranking."""
+    question_tokens = _metric_tokens(question)
+    if not question_tokens:
+        return None
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id, caption, structured_data
+            FROM chunks
+            WHERE content_type = 'excel_card'
+              AND structured_data ->> 'semantic_metric_key' IS NOT NULL
+            ORDER BY id
+            """
+        )
+        rows = cur.fetchall()
+    ranked: list[tuple[float, int, str, dict[str, Any]]] = []
+    for chunk_id, caption, structured_data in rows:
+        data = structured_data or {}
+        tokens = _metric_tokens(str(data.get("semantic_metric_key") or ""))
+        if not tokens:
+            continue
+        overlap = tokens & question_tokens
+        if not overlap:
+            continue
+        ranked.append(
+            (len(overlap) / len(tokens), int(chunk_id), str(caption or ""), data)
+        )
+    ranked.sort(key=lambda item: (-item[0], item[1]))
+    if not ranked or ranked[0][0] < 0.75:
+        return None
+    if len(ranked) > 1 and ranked[1][0] == ranked[0][0]:
+        return None
+    score, chunk_id, caption, data = ranked[0]
+    return _ResolvedMetricCard(
+        _ResolvedMetricQueryObject(chunk_id, caption, data), score
+    )
+
+
+def _card_fact_history_answer(
+    question: str,
+    card,
+    years: tuple[int, ...],
+    conn,
+    contracts: ContractSet,
+) -> ExcelAnswer | None:
+    """Execute a comparable fact metric across an explicit year interval.
+
+    Unlike Table 1 entity history, reviewed QDR fact tables carry the value in
+    ``value_numeric``.  Grouping one semantic metric by reporting year provides
+    exact partial evidence while recording any requested year absent from the
+    active corpus; the generator can then answer what is known without silently
+    claiming full-period coverage.
+    """
+    if len(years) < 2 or not any(
+        cue in question.casefold() for cue in _FACT_HISTORY_CUES
+    ):
+        return None
+    card_data = card.query_object.structured_data or {}
+    table_number = card_data.get("table_number")
+    semantic_key = card_data.get("semantic_metric_key")
+    if table_number in ENTITY_TABLES or not isinstance(table_number, int):
+        return None
+    if not semantic_key:
+        return None
+    try:
+        vocabulary = dimension_vocabulary(conn, table_number, source=FACTS)
+        dimensions = bind_dimensions(question, vocabulary)
+        filters = [
+            Filter("reporting_year", operator="gte", value=years[0]),
+            Filter("reporting_year", operator="lte", value=years[-1]),
+            *(
+                Filter(
+                    field,
+                    value=value,
+                    json_key=field not in {"hftd_tier", "line_type"},
+                )
+                for field, value in dimensions.items()
+            ),
+        ]
+        plan = ExcelQueryPlan(
+            table_number=table_number,
+            source=FACTS,
+            semantic_metric_key=str(semantic_key),
+            operation="aggregate",
+            aggregate="sum",
+            filters=tuple(filters),
+            group_by=("reporting_year",),
+            descending=False,
+            limit=max(3, len(years)),
+        )
+        result = execute_plan(plan, conn, contracts=contracts)
+    except (PlanError, KeyError, TypeError, ValueError):
+        return None
+    if not result.is_answer:
+        return None
+    bound: dict[str, Any] = {
+        "reporting_years": years,
+        "dimensions": dimensions,
+    }
+    missing_years = _missing_requested_years(bound, result)
+    if missing_years:
+        bound["missing_reporting_years"] = missing_years
+    return ExcelAnswer(
+        question=question,
+        card_chunk_id=card.query_object.chunk_id,
+        card_caption=card.query_object.caption or "",
+        card_score=card.rerank_score,
+        table_number=table_number,
+        semantic_metric_key=str(semantic_key),
+        plan=plan,
+        result=result,
+        bound=bound,
+    )
+
+
 def _card_answer(
     question: str,
     cards,
@@ -564,6 +830,13 @@ def _card_answer(
         )
 
     table_number = card_data.get("table_number")
+    years = bind_years(question)
+    if table_number not in ENTITY_TABLES and years:
+        history = _card_fact_history_answer(
+            question, best, years, conn, contracts
+        )
+        if history is not None:
+            return history
     is_entity_history = (
         table_number == 1
         and bind_entity_key(question) is not None
@@ -580,7 +853,7 @@ def _card_answer(
     # first, and reported as execution-verified. A property question is a scan,
     # not a lookup.
     card_entity_key = card_data.get("entity_key")
-    card_years = bind_years(question)
+    card_years = years
     if (
         table_number == 1
         and not is_entity_history

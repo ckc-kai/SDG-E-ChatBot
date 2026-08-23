@@ -27,9 +27,9 @@ class RetrievalServiceTests(unittest.TestCase):
 
     @patch("services.retrieval_service.retrieve_configured")
     @patch("services.retrieval_service.connect_db")
-    @patch("services.retrieval_service.answer_from_excel")
+    @patch("services.retrieval_service.answer_from_excel_all")
     def test_returns_grouped_result_and_closes_connection(
-        self, answer_from_excel, connect_db, retrieve
+        self, answer_from_excel_all, connect_db, retrieve
     ):
         connection = MagicMock()
         connect_db.return_value = connection
@@ -46,9 +46,9 @@ class RetrievalServiceTests(unittest.TestCase):
 
     @patch("services.retrieval_service.retrieve_configured")
     @patch("services.retrieval_service.connect_db")
-    @patch("services.retrieval_service.answer_from_excel")
+    @patch("services.retrieval_service.answer_from_excel_all")
     def test_content_filter_maps_to_evidence_group(
-        self, answer_from_excel, connect_db, retrieve
+        self, answer_from_excel_all, connect_db, retrieve
     ):
         retrieve.return_value = EvidenceRetrievalResult(question="q", groups={})
         RetrievalService().retrieve("q", content_type="excel_card")
@@ -56,9 +56,9 @@ class RetrievalServiceTests(unittest.TestCase):
 
     @patch("services.retrieval_service.retrieve_configured")
     @patch("services.retrieval_service.connect_db")
-    @patch("services.retrieval_service.answer_from_excel")
+    @patch("services.retrieval_service.answer_from_excel_all")
     def test_multiple_content_filters_map_to_unique_groups(
-        self, answer_from_excel, connect_db, retrieve
+        self, answer_from_excel_all, connect_db, retrieve
     ):
         retrieve.return_value = EvidenceRetrievalResult(question="q", groups={})
         RetrievalService().retrieve(
@@ -68,17 +68,38 @@ class RetrievalServiceTests(unittest.TestCase):
             retrieve.call_args.kwargs["groups"], ("narrative", "table", "figure")
         )
 
-    def test_planned_step_preserves_original_required_document_scope(self):
+    @patch("services.retrieval_service.retrieve_configured")
+    @patch("services.retrieval_service.connect_db")
+    @patch("services.retrieval_service.answer_from_excel_all")
+    def test_verified_excel_only_request_skips_semantic_cards(
+        self, answer_from_excel_all, connect_db, retrieve
+    ):
+        answer_from_excel_all.return_value = (self._excel_answer(),)
+        retrieve.return_value = EvidenceRetrievalResult(question="q", groups={})
+
+        result = RetrievalService().retrieve(
+            "reported values from 2022-2025",
+            content_types=("excel_card",),
+        )
+
+        self.assertIsNotNone(result.verified_excel)
+        self.assertEqual(retrieve.call_args.kwargs["groups"], ())
+
+    def test_planned_step_does_not_reintroduce_broad_original_scope(self):
         original = (
             "Compare the 2023-2025 WMP, 2026-2028 WMP, and corresponding "
             "guidelines."
         )
         step = "How is risk methodology explained in the 2023-2025 WMP?"
 
-        scoped = _scoped_step_question(original, step)
+        planned = RetrievalStep(
+            step, ("narrative",), "pdf", document_role="2023-2025 WMP"
+        )
+        scoped = _scoped_step_question(original, step, planned)
 
         self.assertIn(step, scoped)
-        self.assertIn(original, scoped)
+        self.assertNotIn(original, scoped)
+        self.assertIn("2023-2025 WMP", scoped)
 
     @patch(
         "services.retrieval_service.feature_enabled",
@@ -90,6 +111,8 @@ class RetrievalServiceTests(unittest.TestCase):
             evidence=EvidenceRetrievalResult(question="q", groups={}),
             verified_excel=None,
             verified_excels=(),
+            excel_rows=(),
+            excel_trace=(),
             timings=SimpleNamespace(
                 connection_ms=0,
                 grouped_retrieval_ms=0,
@@ -106,8 +129,42 @@ class RetrievalServiceTests(unittest.TestCase):
         result = service.retrieve_plan("compound", plan)
 
         self.assertEqual(service.retrieve.call_count, 3)
+        self.assertIs(result.plan, plan)
+        self.assertEqual(len(result.step_bundles), 2)
         self.assertEqual(result.plan_diagnostics["retry_count"], 1)
         self.assertEqual(result.plan_diagnostics["coverage"]["missing_steps"], [0, 1])
+
+    @patch(
+        "services.retrieval_service.feature_enabled",
+        side_effect=lambda name: name == "coverage_retry",
+    )
+    def test_confirmed_reporting_gap_is_not_retried(self, _feature):
+        service = RetrievalService()
+        partial = self._excel_answer()
+        partial.bound = {"missing_reporting_years": (2022,)}
+        bundle = SimpleNamespace(
+            evidence=EvidenceRetrievalResult(question="q", groups={}),
+            verified_excel=partial,
+            verified_excels=(partial,),
+            excel_rows=(),
+            excel_trace=(),
+            timings=SimpleNamespace(
+                connection_ms=0,
+                grouped_retrieval_ms=0,
+                excel_verification_ms=0,
+                total_ms=0,
+            ),
+        )
+        service.retrieve = MagicMock(return_value=bundle)
+        plan = RetrievalPlan((
+            RetrievalStep("history", ("excel_card",), "excel"),
+        ))
+
+        result = service.retrieve_plan("history", plan)
+
+        self.assertEqual(service.retrieve.call_count, 1)
+        self.assertEqual(result.plan_diagnostics["retry_count"], 0)
+        self.assertEqual(result.plan_diagnostics["coverage"]["missing_steps"], [0])
 
 
 if __name__ == "__main__":

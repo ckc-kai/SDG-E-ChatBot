@@ -45,6 +45,7 @@ class _Answer:
     card_caption: str = "Table 1"
     card_score: float = 0.5
     semantic_metric_key: str | None = None
+    bound: dict = field(default_factory=dict)
 
 
 def _answer(columns: list[str], rows: list[tuple]) -> _Answer:

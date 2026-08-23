@@ -222,10 +222,10 @@ def expand_to_parent_sections(
     try:
         sections_by_anchor = _fetch_section_siblings(conn, anchor_ids)
     except Exception:
-        logger.warning(
-            "Parent expansion query failed; returning un-expanded results",
-            exc_info=True,
-        )
+        # PostgreSQL leaves the whole transaction aborted after a missing
+        # compatibility column or any other SQL error. Retrieval is read-only,
+        # so rolling back here is safe and lets the caller continue with the
+        # original child chunks as this fallback promises.
         # Degrading gracefully means degrading the *connection* too. A failed
         # statement leaves psycopg2 in an aborted transaction, so without this
         # rollback every subsequent query on the same connection dies with
@@ -233,9 +233,12 @@ def expand_to_parent_sections(
         # into a hard failure several questions later, far from the cause.
         try:
             conn.rollback()
-        except Exception:
-            logger.warning("Rollback after failed parent expansion failed",
-                           exc_info=True)
+        except Exception:  # pragma: no cover - a closed connection will fail later
+            logger.debug("Could not roll back failed parent expansion", exc_info=True)
+        logger.warning(
+            "Parent expansion query failed; returning un-expanded results",
+            exc_info=True,
+        )
         return results
 
     expanded = []

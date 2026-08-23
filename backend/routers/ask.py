@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 
 from generation.planning import needs_planning
 from generation.features import feature_enabled
+from generation.followup import is_followup_candidate
 from generation.routing import RouteDecision
 from generation.schemas import ErrorResponse as GenerationErrorResponse
 from models.schemas import AskRequest, AskResponse
@@ -43,6 +44,12 @@ def ask(
 ):
     pipeline_started = time.perf_counter()
     request_id = payload.request_id or f"req_{uuid4().hex}"
+    plan = None
+    question = payload.question
+    if payload.history and is_followup_candidate(question):
+        question = generation_service.resolve_followup(question, payload.history)
+        if question != payload.question:
+            logger.info("followup_resolved request_id=%s", request_id)
     try:
         filters = payload.filters
         single_type = filters.content_type if filters else None
@@ -64,43 +71,43 @@ def ask(
         }
         if single_type or multiple_types:
             bundle = retrieval_service.retrieve(
-                payload.question,
+                question,
                 content_type=single_type,
                 content_types=multiple_types,
                 **retrieval_kwargs,
             )
-        elif is_entity_history_question(payload.question) and not needs_planning(
-            payload.question
+        elif is_entity_history_question(question) and not needs_planning(
+            question
         ):
             # Preserve the exact, validated Excel fast path for single-intent
             # history questions; multi-part questions still decompose so their
             # non-history parts retrieve evidence too.
-            bundle = retrieval_service.retrieve(payload.question, **retrieval_kwargs)
+            bundle = retrieval_service.retrieve(question, **retrieval_kwargs)
         elif payload.rewrite_mode == "off" or (
             payload.rewrite_mode != "always"
-            and not needs_planning(payload.question)
+            and not needs_planning(question)
         ):
             if feature_enabled("two_resource_router"):
-                route = generation_service.route_retrieval(payload.question)
+                route = generation_service.route_retrieval(question)
             else:
                 route = None
             if isinstance(route, RouteDecision):
                 bundle = retrieval_service.retrieve(
-                    payload.question,
+                    question,
                     content_types=route.content_types,
                     **retrieval_kwargs,
                 )
             else:
-                bundle = retrieval_service.retrieve(payload.question, **retrieval_kwargs)
+                bundle = retrieval_service.retrieve(question, **retrieval_kwargs)
         else:
             if feature_enabled("typed_planner"):
-                plan = generation_service.plan_retrieval(payload.question)
+                plan = generation_service.plan_retrieval(question)
                 bundle = retrieval_service.retrieve_plan(
-                    payload.question, plan, **retrieval_kwargs
+                    question, plan, **retrieval_kwargs
                 )
             else:
                 bundle = retrieval_service.retrieve(
-                    payload.question, **retrieval_kwargs
+                    question, **retrieval_kwargs
                 )
     except Exception:
         logger.exception(
@@ -113,7 +120,13 @@ def ask(
             content={"request_id": request_id, "error": "retrieval_failed"},
         )
 
-    result = generation_service.generate(request_id, payload.question, bundle)
+    result = (
+        generation_service.generate_mixed(
+            request_id, question, bundle, plan
+        )
+        if plan is not None
+        else generation_service.generate(request_id, question, bundle)
+    )
     if isinstance(bundle.plan_diagnostics, dict):
         logger.info(
             "retrieval_plan request_id=%s diagnostics=%s",

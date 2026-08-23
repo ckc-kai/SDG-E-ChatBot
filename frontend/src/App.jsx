@@ -2,109 +2,191 @@ import { useEffect, useState } from 'react';
 import './App.css';
 import ChatMessage from './components/ChatMessage';
 import ChatInput from './components/ChatInput';
-import SavedQueriesSidebar from './components/SavedQueriesSidebar';
-import { askQuestion, checkHealth, warmupModels } from './api/client';
+import Sidebar from './components/Sidebar';
+import { askQuestion, checkHealth } from './api/client';
+
+const STORAGE_KEY_CONVERSATIONS = 'sdge_chat_conversations';
+const STORAGE_KEY_SAVED = 'sdge_chat_saved';
+
+function makeId() {
+  return typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function makeEmptyConversation() {
+  return { id: makeId(), title: '', messages: [] };
+}
+
+function loadFromStorage(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 function App() {
-  const [messages, setMessages] = useState([]);
-  const [saved, setSaved] = useState([]);
+  const [conversations, setConversations] = useState(() => {
+    const stored = loadFromStorage(STORAGE_KEY_CONVERSATIONS, null);
+    return stored && stored.length > 0 ? stored : [makeEmptyConversation()];
+  });
+  const [activeConversationId, setActiveConversationId] = useState(
+    () => conversations[0].id
+  );
+  const [saved, setSaved] = useState(() => loadFromStorage(STORAGE_KEY_SAVED, []));
   const [loading, setLoading] = useState(false);
   const [backendOnline, setBackendOnline] = useState(true);
-  const [modelsReady, setModelsReady] = useState(false);
 
   useEffect(() => {
-    const prepareBackend = async () => {
-      try {
-        const online = await checkHealth();
-        setBackendOnline(online);
-        if (online) {
-          setModelsReady(await warmupModels());
-        }
-      } catch {
-        setBackendOnline(false);
-        setModelsReady(false);
-      }
-    };
-    prepareBackend();
+    checkHealth().then(setBackendOnline).catch(() => setBackendOnline(false));
   }, []);
 
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY_CONVERSATIONS, JSON.stringify(conversations));
+  }, [conversations]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY_SAVED, JSON.stringify(saved));
+  }, [saved]);
+
+  const activeConversation =
+    conversations.find((c) => c.id === activeConversationId) || conversations[0];
+
+  const updateActiveConversation = (updater) => {
+    setConversations((prev) =>
+      prev.map((c) => (c.id === activeConversationId ? updater(c) : c))
+    );
+  };
+
+  const handleNewChat = () => {
+    if (activeConversation.messages.length === 0) return;
+    const fresh = makeEmptyConversation();
+    setConversations((prev) => [fresh, ...prev]);
+    setActiveConversationId(fresh.id);
+  };
+
+  const handleSelectConversation = (id) => {
+    setActiveConversationId(id);
+  };
+
+  const handleDeleteConversation = (id) => {
+    setConversations((prev) => {
+      const remaining = prev.filter((c) => c.id !== id);
+      const next = remaining.length > 0 ? remaining : [makeEmptyConversation()];
+      if (id === activeConversationId) {
+        setActiveConversationId(next[0].id);
+      }
+      return next;
+    });
+  };
+
   const handleAsk = async (question) => {
-    setMessages((prev) => [...prev, { role: 'user', content: question }]);
+    const isFirstMessage = activeConversation.messages.length === 0;
+
+    updateActiveConversation((c) => ({
+      ...c,
+      title: isFirstMessage ? question.slice(0, 48) : c.title,
+      messages: [...c.messages, { id: makeId(), role: 'user', content: question }],
+    }));
+
     setLoading(true);
     try {
-      const result = await askQuestion(question);
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: result.answer,
-          citations: result.citations,
-          insufficientContext: result.insufficient_context,
-          requestId: result.request_id,
-        },
-      ]);
+      const history = activeConversation.messages.slice(-2).map(({ role, content }) => ({
+        role,
+        content,
+      }));
+      const result = await askQuestion(question, history);
+      updateActiveConversation((c) => ({
+        ...c,
+        messages: [
+          ...c.messages,
+          {
+            id: makeId(),
+            role: 'assistant',
+            content: result.answer,
+            sources: result.sources,
+          },
+        ],
+      }));
     } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: `The request could not be completed: ${err.message}`,
-          citations: [],
-          insufficientContext: true,
-        },
-      ]);
+      updateActiveConversation((c) => ({
+        ...c,
+        messages: [
+          ...c.messages,
+          {
+            id: makeId(),
+            role: 'assistant',
+            content: `Sorry, couldn't reach the backend: ${err.message}`,
+            sources: [],
+          },
+        ],
+      }));
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSave = (message, question) => {
-    setSaved((prev) => [
-      ...prev,
-      { question, answer: message.content, citations: message.citations },
-    ]);
+  const handleToggleSave = (message, question) => {
+    setSaved((prev) => {
+      const existingIndex = prev.findIndex((s) => s.sourceMessageId === message.id);
+      if (existingIndex !== -1) {
+        return prev.filter((_, i) => i !== existingIndex);
+      }
+      return [
+        ...prev,
+        {
+          sourceMessageId: message.id,
+          question,
+          answer: message.content,
+          sources: message.sources,
+        },
+      ];
+    });
   };
 
-  const isSaved = (message) => saved.some((s) => s.answer === message.content);
+  const isSaved = (message) => saved.some((s) => s.sourceMessageId === message.id);
 
   return (
     <div className="app-shell">
       <header className="app-header">
         <h1>SDG&E Wildfire Mitigation Plan — Filing Assistant</h1>
         <span className={`status-dot ${backendOnline ? '' : 'offline'}`} />
-        <span className="status-label">
-          {!backendOnline
-            ? 'backend unreachable'
-            : modelsReady
-              ? 'models ready'
-              : 'preparing models...'}
-        </span>
+        <span className="status-label">{backendOnline ? 'backend online' : 'backend unreachable'}</span>
       </header>
 
-      <SavedQueriesSidebar
+      <Sidebar
+        conversations={conversations}
+        activeConversationId={activeConversationId}
+        onSelectConversation={handleSelectConversation}
+        onNewChat={handleNewChat}
+        onDeleteConversation={handleDeleteConversation}
         saved={saved}
-        onRemove={(i) => setSaved((prev) => prev.filter((_, idx) => idx !== i))}
+        onRemoveSaved={(i) => setSaved((prev) => prev.filter((_, idx) => idx !== i))}
       />
 
       <div className="chat-column">
         <div className="chat-scroll">
-          {messages.length === 0 && (
+          {activeConversation.messages.length === 0 && (
             <p className="chat-empty">Ask a question below to get started.</p>
           )}
-          {messages.map((m, i) => (
+          {activeConversation.messages.map((m, i) => (
             <ChatMessage
-              key={i}
+              key={m.id}
               role={m.role}
               content={m.content}
-              citations={m.citations}
-              insufficientContext={m.insufficientContext}
-              requestId={m.requestId}
-              onSave={m.role === 'assistant' ? () => handleSave(m, messages[i - 1]?.content) : null}
+              sources={m.sources}
+              onToggleSave={
+                m.role === 'assistant'
+                  ? () => handleToggleSave(m, activeConversation.messages[i - 1]?.content)
+                  : null
+              }
               saved={m.role === 'assistant' ? isSaved(m) : false}
             />
           ))}
         </div>
-        <ChatInput onSubmit={handleAsk} disabled={loading || !modelsReady} />
+        <ChatInput onSubmit={handleAsk} disabled={loading} />
       </div>
     </div>
   );

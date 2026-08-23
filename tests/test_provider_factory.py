@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import unittest
 
-from generation.providers import GroqProvider, OllamaProvider, ProviderError, create_provider_from_env
+from generation.providers import (
+    DeepSeekProvider,
+    GroqProvider,
+    OllamaProvider,
+    ProviderError,
+    create_provider_from_env,
+)
 
 
 class ProviderFactoryTests(unittest.TestCase):
@@ -26,6 +32,13 @@ class ProviderFactoryTests(unittest.TestCase):
         )
         self.assertIsInstance(provider, GroqProvider)
         self.assertEqual(provider.model_id, "groq/openai/gpt-oss-120b")
+
+    def test_selects_deepseek_without_calling_api(self) -> None:
+        provider = create_provider_from_env(
+            environ={"TASK3_PROVIDER": "deepseek", "DEEPSEEK_API_KEY": "test-key"}
+        )
+        self.assertIsInstance(provider, DeepSeekProvider)
+        self.assertEqual(provider.model_id, "deepseek/deepseek-v4-flash")
 
     def test_missing_selection_is_rejected(self) -> None:
         with self.assertRaisesRegex(ProviderError, "TASK3_PROVIDER is required"):

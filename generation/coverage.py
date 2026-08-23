@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from generation.planning import RetrievalPlan
+from retrieval.source_manifest import filenames_for_document_scope
 
 
 _TYPE_TO_GROUP = {
@@ -62,16 +63,43 @@ def assess_plan_coverage(plan: RetrievalPlan, bundles: tuple) -> CoverageLedger:
     for index, (step, bundle) in enumerate(zip(plan.steps, bundles, strict=True)):
         covered: list[str] = []
         missing: list[str] = []
+        expected_sources = {
+            filename.casefold()
+            for filename in filenames_for_document_scope(
+                step.document_role,
+                step.period,
+                document_type="pdf",
+            )
+        } if step.source == "pdf" else set()
         for content_type in step.content_types:
-            if content_type == "excel_card" and (
-                getattr(bundle, "verified_excel", None) is not None
-                or getattr(bundle, "verified_excels", ())
-            ):
-                covered.append(content_type)
-                continue
+            if content_type == "excel_card":
+                verified = tuple(getattr(bundle, "verified_excels", ())) or (
+                    (getattr(bundle, "verified_excel", None),)
+                    if getattr(bundle, "verified_excel", None) is not None
+                    else ()
+                )
+                complete = any(
+                    not tuple(getattr(answer, "bound", {}).get(
+                        "missing_reporting_years", ()
+                    ))
+                    for answer in verified
+                )
+                if complete:
+                    covered.append(content_type)
+                elif verified:
+                    missing.append(content_type)
+                if verified:
+                    continue
             group_name = _TYPE_TO_GROUP.get(content_type)
             group = getattr(bundle.evidence, "groups", {}).get(group_name)
-            if group is not None and bool(group.results):
+            results = tuple(getattr(group, "results", ())) if group is not None else ()
+            if expected_sources:
+                results = tuple(
+                    result for result in results
+                    if str(result.query_object.source_pdf).casefold()
+                    in expected_sources
+                )
+            if results:
                 covered.append(content_type)
             else:
                 missing.append(content_type)

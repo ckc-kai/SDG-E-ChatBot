@@ -22,6 +22,7 @@ from retrieval.query.excel.rows import ExcelRowSlice, fetch_card_rows
 from retrieval.query.excel.trace import outcome_trace
 from retrieval.query.pdf import EvidenceGroup, EvidenceRetrievalResult, retrieve_configured
 from retrieval.query.pdf.query import required_source_roles
+from retrieval.source_manifest import filenames_for_document_scope
 from retrieval.utils import connect_db
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,8 @@ class RetrievalBundle:
     timings: RetrievalTimings = RetrievalTimings()
     plan_diagnostics: dict | None = None
     calculations: tuple[CalculationResult, ...] = ()
+    plan: RetrievalPlan | None = None
+    step_bundles: tuple["RetrievalBundle", ...] = ()
     computation_notes: tuple[str, ...] = ()
     excel_rows: tuple[ExcelRowSlice, ...] = ()
     # Diagnostic only: what the Excel channel attempted and what came back.
@@ -67,7 +70,26 @@ def _groups_for_types(content_types) -> tuple[str, ...]:
     return tuple(dict.fromkeys(_CONTENT_TYPE_TO_GROUP[value] for value in content_types))
 
 
-def _scoped_step_question(original_question: str, step_question: str) -> str:
+def _has_confirmed_reporting_gap(bundle: RetrievalBundle) -> bool:
+    """True when verified execution proved a requested year is absent.
+
+    Repeating the same query cannot fill a known corpus gap, so this condition
+    remains visible in coverage diagnostics but is excluded from retry.
+    """
+    verified = tuple(getattr(bundle, "verified_excels", ())) or (
+        (getattr(bundle, "verified_excel", None),)
+        if getattr(bundle, "verified_excel", None) is not None
+        else ()
+    )
+    return any(
+        bool(getattr(answer, "bound", {}).get("missing_reporting_years"))
+        for answer in verified
+    )
+
+
+def _scoped_step_question(
+    original_question: str, step_question: str, step=None
+) -> str:
     """Keep explicit document roles and entity ids a model planner may drop.
 
     A step missing the original question's WMP.### entity id is dangerous
@@ -76,12 +98,17 @@ def _scoped_step_question(original_question: str, step_question: str) -> str:
     declining. Re-append the id whenever a step omits it.
     """
     step_question = _reattach_entity_key(original_question, step_question)
-    if not required_source_roles(original_question):
-        return step_question
-    return (
-        f"{step_question} Required source scope from the original question: "
-        f"{original_question}"
-    )
+    scope = []
+    for label, value in (
+        ("document role", getattr(step, "document_role", None)),
+        ("table role", getattr(step, "table_role", None)),
+        ("period", getattr(step, "period", None)),
+    ):
+        if value and str(value).casefold() not in step_question.casefold():
+            scope.append(f"{label}: {value}")
+    if scope:
+        return f"{step_question} Required source scope: {'; '.join(scope)}."
+    return step_question
 
 
 def _reattach_entity_key(original_question: str, step_question: str) -> str:
@@ -100,6 +127,7 @@ class RetrievalService:
         rewrite_mode: str | None = None,
         content_type: str | None = None,
         content_types: tuple[str, ...] | None = None,
+        source_patterns: tuple[str, ...] | None = None,
     ) -> RetrievalBundle:
         started = time.perf_counter()
         kwargs = {"output_mode": "grouped"}
@@ -107,6 +135,8 @@ class RetrievalService:
             kwargs["embedding_mode"] = embedding_mode
         if rewrite_mode is not None:
             kwargs["rewrite_mode"] = rewrite_mode
+        if source_patterns:
+            kwargs["source_patterns"] = source_patterns
         if content_type is not None and content_types is not None:
             raise ValueError("content_type and content_types are mutually exclusive")
         if content_type is not None:
@@ -146,8 +176,17 @@ class RetrievalService:
                 excel_requested = True
             should_try_excel = excel_requested and not source_roles
             excel_attempted = False
+            only_excel_requested = (
+                content_type == "excel_card"
+                or (
+                    content_types is not None
+                    and set(content_types) == {"excel_card"}
+                )
+            )
 
-            if should_try_excel and is_entity_history_question(question):
+            if should_try_excel and (
+                is_entity_history_question(question) or only_excel_requested
+            ):
                 excel_started = time.perf_counter()
                 try:
                     excel_result = answer_from_excel_all(question, connection)
@@ -160,7 +199,9 @@ class RetrievalService:
                 if isinstance(excel_result, tuple) and excel_result:
                     verified_excels = excel_result
                     verified_excel = excel_result[0]
-                    if content_type is None and content_types is None:
+                    if only_excel_requested or (
+                        content_type is None and content_types is None
+                    ):
                         # Exact execution is stronger than semantic cards. Avoid
                         # spending retrieval/context budget after it succeeds.
                         kwargs["groups"] = ()
@@ -219,9 +260,19 @@ class RetrievalService:
         """Retrieve each planned subquestion and preserve per-step coverage."""
         started = time.perf_counter()
         def retrieve_step(step):
+            source_patterns = (
+                filenames_for_document_scope(
+                    step.document_role,
+                    step.period,
+                    document_type="pdf",
+                )
+                if step.source == "pdf"
+                else ()
+            )
             return self.retrieve(
-                _scoped_step_question(question, step.question),
+                _scoped_step_question(question, step.question, step),
                 content_types=step.content_types,
+                source_patterns=source_patterns or None,
                 **kwargs,
             )
 
@@ -250,13 +301,15 @@ class RetrievalService:
         initial_coverage = assess_plan_coverage(plan, tuple(step_bundles))
         retry_count = 0
         retry_step_index = None
-        if (
-            initial_coverage.missing_step_indexes
-            and feature_enabled("coverage_retry")
-        ):
+        retryable_missing = tuple(
+            index
+            for index in initial_coverage.missing_step_indexes
+            if not _has_confirmed_reporting_gap(step_bundles[index])
+        )
+        if retryable_missing and feature_enabled("coverage_retry"):
             # One precise retry for the first uncovered atomic task. There is
             # intentionally no loop and no second planner/model call.
-            retry_step_index = initial_coverage.missing_step_indexes[0]
+            retry_step_index = retryable_missing[0]
             step_bundles[retry_step_index] = retrieve_step(
                 plan.steps[retry_step_index]
             )
@@ -413,4 +466,6 @@ class RetrievalService:
                     )
                 ],
             },
+            plan=plan,
+            step_bundles=tuple(step_bundles),
         )

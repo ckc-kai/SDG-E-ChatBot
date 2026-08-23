@@ -69,6 +69,8 @@ class OllamaProviderTests(unittest.TestCase):
         self.assertEqual(provider.last_usage, OllamaUsage(80, 15, 250))
         self.assertEqual(provider.last_raw_text, raw)
         self.assertEqual(provider.last_request_payload, payload)
+        self.assertEqual(provider.capabilities.context_window, 4096)
+        self.assertEqual(provider.capabilities.prompt_token_budget, 3796)
 
     def test_warmup_loads_model_without_requesting_an_answer(self) -> None:
         transport = FakeOllamaTransport(response={"done": True})

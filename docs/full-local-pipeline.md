@@ -31,7 +31,7 @@ Run from the repository root in PowerShell:
 $env:PYTHONUTF8 = "1"
 $env:TORCHDYNAMO_DISABLE = "1"
 $env:TORCH_COMPILE_DISABLE = "1"
-python -m uv run python -X utf8 scripts/ingest_all_local.py --pdf-mode narrative --skip-existing-pdfs
+uv run python -X utf8 scripts/ingest_all_local.py --pdf-mode narrative --skip-existing-pdfs
 ```
 
 The command discovers every PDF/XLSX/XLSM below `files/` and every reviewed

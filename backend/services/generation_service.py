@@ -5,23 +5,39 @@ from __future__ import annotations
 import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from generation.adapters import adapt_ranked_results
 from generation.computation import CalculationResult
 from generation.features import feature_enabled
-from generation.planning import RetrievalPlan, build_retrieval_plan
+from generation.followup import resolve_followup_question
+from generation.multistep import (
+    PlannedSubanswer,
+    build_synthesis_prompt,
+    protect_synthesis_coverage,
+)
+from generation.planning import (
+    RetrievalPlan,
+    build_retrieval_plan,
+    supports_multistep_generation,
+)
 from generation.providers import create_provider_from_env
+from generation.providers.base import ProviderError
+from generation.providers.ollama import ANSWER_SCHEMA
 from generation.routing import RouteDecision, route_question
 from generation.schemas import (
     AnswerRequest,
     AnswerResponse,
+    AnswerTimings,
     Chunk,
     ChunkMetadata,
     ErrorResponse,
+    ModelAnswer,
 )
-from generation.service import AnswerService
+from generation.service import AnswerService, ModelOutputError, parse_model_answer
+from generation.citation_validation import validate_and_hydrate_citations
 from generation.excel_rollup import display_columns, roll_up
 from retrieval.query.excel.manifest import load_manifest
 from retrieval.query.pdf import EVIDENCE_GROUPS, EvidenceRetrievalResult
@@ -64,10 +80,16 @@ class GenerationService:
         self,
         answer_service: AnswerService | None = None,
         planner_provider=None,
+        answer_service_factory=None,
     ):
-        self._answer_service = answer_service or AnswerService(
-            create_provider_from_env()
-        )
+        self._answer_service_factory = answer_service_factory
+        if answer_service is None:
+            self._answer_service_factory = (
+                answer_service_factory
+                or (lambda: AnswerService(create_provider_from_env()))
+            )
+            answer_service = self._answer_service_factory()
+        self._answer_service = answer_service
         self._planner_provider = planner_provider
 
     def generate(
@@ -78,52 +100,7 @@ class GenerationService:
     ) -> AnswerResponse | ErrorResponse:
         started = time.perf_counter()
         adapter_started = time.perf_counter()
-        ranked_results = interleave_grouped_results(bundle.evidence)
-        chunks = list(adapt_ranked_results(ranked_results))
-        if feature_enabled("cross_resource_computation"):
-            for index, note in reversed(
-                tuple(enumerate(getattr(bundle, "computation_notes", ()), start=1))
-            ):
-                chunks.insert(0, _computation_note_chunk(note, index))
-            for index, calculation in reversed(
-                tuple(enumerate(bundle.calculations, start=1))
-            ):
-                chunks.insert(0, _calculation_chunk(calculation, index))
-        # Row windows lead the ranked evidence, with verified executions above
-        # them. Moving them after the ranked evidence was measured and reverted:
-        # 48.24 against 51.37, with refusals back up from 6 to 9 of 27. Evidence
-        # the model has to scroll past is evidence it declines to use.
-        for row_slice in reversed(getattr(bundle, "excel_rows", ())):
-            chunks.insert(0, _excel_rows_chunk(row_slice))
-        verified_items = bundle.verified_excels or (
-            (bundle.verified_excel,) if bundle.verified_excel is not None else ()
-        )
-        for answer in reversed(verified_items):
-            chunks[0:0] = _verified_excel_chunks(answer)
-        # The corpus's shape, above everything derived from it. Several
-        # questions are answerable only from coverage and schema -- a year the
-        # workbooks do not reach, a field a table does not carry, two tables
-        # that share no key -- and with none of it in the prompt the model
-        # estimated instead of saying so.
-        manifest_chunk = _workbook_manifest_chunk(bundle)
-        if manifest_chunk is not None:
-            chunks.insert(0, manifest_chunk)
-        chunks = deduplicate_chunks(chunks)
-        # Two verified executions of one card (different plan shapes) share a
-        # card id; keep every distinct result citable under a unique id.
-        seen_ids: dict[str, int] = {}
-        unique_chunks: list[Chunk] = []
-        for chunk in chunks:
-            count = seen_ids.get(chunk.chunk_id)
-            if count is None:
-                seen_ids[chunk.chunk_id] = 0
-            else:
-                seen_ids[chunk.chunk_id] = count + 1
-                chunk = replace(
-                    chunk, chunk_id=f"{chunk.chunk_id}-v{count + 1}"
-                )
-            unique_chunks.append(chunk)
-        chunks = unique_chunks
+        chunks = _chunks_from_bundle(bundle)
         request = AnswerRequest(
             request_id=request_id,
             question=question,
@@ -143,6 +120,127 @@ class GenerationService:
                     (time.perf_counter() - started) * 1000
                 ),
             ),
+        )
+
+    def generate_mixed(
+        self,
+        request_id: str,
+        question: str,
+        bundle: RetrievalBundle,
+        plan: RetrievalPlan,
+    ) -> AnswerResponse | ErrorResponse:
+        """Use parallel subanswers only for a complete multi-step model plan."""
+        if (
+            not feature_enabled("multistep_generation")
+            or not supports_multistep_generation(plan)
+            or len(bundle.step_bundles) != len(plan.steps)
+        ):
+            return self.generate(request_id, question, bundle)
+
+        started = time.perf_counter()
+
+        def answer_step(index_bundle):
+            index, step_bundle = index_bundle
+            service = (
+                self._answer_service_factory()
+                if self._answer_service_factory is not None
+                else self._answer_service
+            )
+            worker = GenerationService(answer_service=service)
+            return worker.generate(
+                f"{request_id}_step_{index + 1}",
+                plan.steps[index].question,
+                step_bundle,
+            )
+
+        with ThreadPoolExecutor(max_workers=len(plan.steps)) as executor:
+            responses = tuple(executor.map(
+                answer_step, enumerate(bundle.step_bundles)
+            ))
+        if any(isinstance(response, ErrorResponse) for response in responses):
+            return self.generate(request_id, question, bundle)
+
+        subanswers = tuple(
+            PlannedSubanswer(
+                requirement_ids=plan.steps[index].requirement_ids,
+                answer=ModelAnswer(
+                    answer=response.answer,
+                    cited_chunk_ids=response.cited_chunk_ids,
+                    insufficient_context=response.insufficient_context,
+                    answered_requirements=response.answered_requirements,
+                    missing_requirements=response.missing_requirements,
+                ),
+            )
+            for index, response in enumerate(responses)
+        )
+        synthesis_service = (
+            self._answer_service_factory()
+            if self._answer_service_factory is not None
+            else self._answer_service
+        )
+        provider = synthesis_service.provider
+        prompt = build_synthesis_prompt(question, plan.requirements, subanswers)
+        try:
+            structured = getattr(provider, "generate_structured", None)
+            raw = (
+                structured(prompt, ANSWER_SCHEMA)
+                if callable(structured)
+                else provider.generate(prompt)
+            )
+            synthesized = protect_synthesis_coverage(
+                parse_model_answer(raw), plan.requirements, subanswers
+            )
+            chunks = _chunks_from_bundle(bundle)
+            registry = {chunk.chunk_id: chunk for chunk in chunks}
+            allowed_ids = tuple(dict.fromkeys(
+                chunk_id
+                for item in subanswers
+                for chunk_id in item.answer.cited_chunk_ids
+                if chunk_id in registry
+            ))
+            validation_request = AnswerRequest(
+                request_id=request_id,
+                question=question,
+                chunks=tuple(registry[chunk_id] for chunk_id in allowed_ids),
+            )
+            valid_ids, citations, warnings = validate_and_hydrate_citations(
+                validation_request, synthesized
+            )
+        except (
+            ProviderError,
+            ModelOutputError,
+            TimeoutError,
+            ConnectionError,
+        ):
+            return self.generate(request_id, question, bundle)
+
+        latency_ms = round((time.perf_counter() - started) * 1000)
+        input_tokens = sum(
+            response.timings.model_input_tokens or 0
+            for response in responses
+            if response.timings is not None
+        ) + (getattr(getattr(provider, "last_usage", None), "input_tokens", 0) or 0)
+        output_tokens = sum(
+            response.timings.model_output_tokens or 0
+            for response in responses
+            if response.timings is not None
+        ) + (getattr(getattr(provider, "last_usage", None), "output_tokens", 0) or 0)
+        return AnswerResponse(
+            request_id=request_id,
+            answer=synthesized.answer,
+            cited_chunk_ids=valid_ids,
+            citations=citations,
+            insufficient_context=synthesized.insufficient_context,
+            model_id=provider.model_id,
+            latency_ms=latency_ms,
+            warnings=warnings,
+            timings=AnswerTimings(
+                generation_total_ms=latency_ms,
+                model_input_tokens=input_tokens,
+                model_output_tokens=output_tokens,
+            ),
+            answered_requirements=synthesized.answered_requirements,
+            missing_requirements=synthesized.missing_requirements,
         )
 
     def plan_retrieval(self, question: str) -> RetrievalPlan:
@@ -192,6 +290,12 @@ class GenerationService:
             self._planner_provider = _create_planner_provider()
         return route_question(question, judge=self._planner_provider)
 
+    def resolve_followup(self, question: str, history) -> str:
+        """Resolve an underspecified follow-up without treating history as evidence."""
+        if self._planner_provider is None:
+            self._planner_provider = _create_planner_provider()
+        return resolve_followup_question(question, history, self._planner_provider)
+
     def warmup(self) -> None:
         """Warm providers that expose a no-answer local preload hook."""
         warmup = getattr(self._answer_service.provider, "warmup", None)
@@ -204,6 +308,53 @@ def _int_or_none(value) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _chunks_from_bundle(bundle: RetrievalBundle) -> list[Chunk]:
+    ranked_results = interleave_grouped_results(bundle.evidence)
+    chunks = list(adapt_ranked_results(ranked_results))
+    if feature_enabled("cross_resource_computation"):
+        for index, note in reversed(
+            tuple(enumerate(getattr(bundle, "computation_notes", ()), start=1))
+        ):
+            chunks.insert(0, _computation_note_chunk(note, index))
+        for index, calculation in reversed(
+            tuple(enumerate(bundle.calculations, start=1))
+        ):
+            chunks.insert(0, _calculation_chunk(calculation, index))
+    # Row windows lead the ranked evidence, with verified executions above
+    # them. Moving them after the ranked evidence was measured and reverted:
+    # 48.24 against 51.37, with refusals back up from 6 to 9 of 27. Evidence
+    # the model has to scroll past is evidence it declines to use.
+    for row_slice in reversed(getattr(bundle, "excel_rows", ())):
+        chunks.insert(0, _excel_rows_chunk(row_slice))
+    verified_items = bundle.verified_excels or (
+        (bundle.verified_excel,) if bundle.verified_excel is not None else ()
+    )
+    for answer in reversed(verified_items):
+        chunks[0:0] = _verified_excel_chunks(answer)
+    # The corpus's shape, above everything derived from it. Several
+    # questions are answerable only from coverage and schema -- a year the
+    # workbooks do not reach, a field a table does not carry, two tables
+    # that share no key -- and with none of it in the prompt the model
+    # estimated instead of saying so.
+    manifest_chunk = _workbook_manifest_chunk(bundle)
+    if manifest_chunk is not None:
+        chunks.insert(0, manifest_chunk)
+    chunks = deduplicate_chunks(chunks)
+    # Different verified executions can share one card id. Preserve each
+    # distinct result under a unique id so citation validation is unambiguous.
+    seen_ids: dict[str, int] = {}
+    unique_chunks: list[Chunk] = []
+    for chunk in chunks:
+        count = seen_ids.get(chunk.chunk_id)
+        if count is None:
+            seen_ids[chunk.chunk_id] = 0
+        else:
+            seen_ids[chunk.chunk_id] = count + 1
+            chunk = replace(chunk, chunk_id=f"{chunk.chunk_id}-v{count + 1}")
+        unique_chunks.append(chunk)
+    return unique_chunks
 
 
 def _calculation_chunk(result: CalculationResult, index: int) -> Chunk:
@@ -281,6 +432,13 @@ def _create_planner_provider():
         )
         values["GROQ_MAX_TOKENS"] = values.get("TASK3_PLANNER_MAX_TOKENS", "500")
         values["GROQ_REASONING_EFFORT"] = "low"
+    elif provider_name == "deepseek":
+        values["DEEPSEEK_MODEL"] = values.get(
+            "TASK3_PLANNER_MODEL", "deepseek-v4-flash"
+        )
+        values["DEEPSEEK_MAX_TOKENS"] = values.get(
+            "TASK3_PLANNER_MAX_TOKENS", "500"
+        )
     return create_provider_from_env(provider_name, environ=values)
 
 
@@ -366,6 +524,19 @@ def _verified_excel_chunks(answer) -> list[Chunk]:
                 else []
             ),
             *[f"Note: {warning}" for warning in answer.result.warnings],
+            *(
+                [
+                    "Missing requested reporting years: "
+                    + ", ".join(
+                        str(year)
+                        for year in answer.bound.get(
+                            "missing_reporting_years", ()
+                        )
+                    )
+                ]
+                if answer.bound.get("missing_reporting_years")
+                else []
+            ),
         ]
     )
     source_file = first.get("source_file") or f"sdge_table{answer.table_number:02d}.csv"
@@ -524,6 +695,19 @@ def _verified_entity_history_chunks(
                 ),
                 "Row provenance:",
                 *provenance_lines,
+                *(
+                    [
+                        "Missing requested reporting years: "
+                        + ", ".join(
+                            str(year)
+                            for year in answer.bound.get(
+                                "missing_reporting_years", ()
+                            )
+                        )
+                    ]
+                    if answer.bound.get("missing_reporting_years")
+                    else []
+                ),
             ]
         ),
         metadata=ChunkMetadata(

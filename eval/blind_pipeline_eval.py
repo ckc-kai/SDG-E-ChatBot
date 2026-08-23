@@ -255,6 +255,7 @@ def capture_answers(
             plan_diagnostics = None
             verified_excel = False
             excel_trace: list = []
+            plan = None
             if pipeline_variant == "legacy_flat":
                 ranked_results = retrieve(case["question"], connection)
                 evidence_payload: Any = [
@@ -300,8 +301,15 @@ def capture_answers(
                 )
                 response = answer_service.answer(request)
             else:
-                response = generation_service.generate(
-                    str(uuid.uuid4()), case["question"], bundle
+                request_id = str(uuid.uuid4())
+                response = (
+                    generation_service.generate_mixed(
+                        request_id, case["question"], bundle, plan
+                    )
+                    if plan is not None
+                    else generation_service.generate(
+                        request_id, case["question"], bundle
+                    )
                 )
             last_model_call_finished = time.monotonic()
             total_ms = round((time.perf_counter() - total_started) * 1000)

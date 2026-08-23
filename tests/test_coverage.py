@@ -33,6 +33,43 @@ class CoverageLedgerTests(unittest.TestCase):
         ledger = assess_plan_coverage(plan, (self._bundle({}, verified=True),))
         self.assertTrue(ledger.covered)
 
+    def test_wrong_wmp_cycle_does_not_cover_scoped_step(self):
+        plan = RetrievalPlan((RetrievalStep(
+            "Find the model.",
+            ("narrative",),
+            "pdf",
+            document_role="2026-2028 WMP",
+            period="2026-2028",
+        ),))
+        wrong = SimpleNamespace(
+            query_object=SimpleNamespace(
+                source_pdf="SDG&E_2023-2023_Base-WMP_R5-redacted.pdf"
+            )
+        )
+        narrative = EvidenceGroup(
+            "narrative", ("narrative",), [wrong], SimpleNamespace()
+        )
+
+        ledger = assess_plan_coverage(
+            plan, (self._bundle({"narrative": narrative}),)
+        )
+
+        self.assertFalse(ledger.covered)
+        self.assertEqual(ledger.missing_step_indexes, (0,))
+
+    def test_partial_verified_excel_does_not_claim_full_coverage(self):
+        plan = RetrievalPlan((RetrievalStep(
+            "reported metric from 2022-2025", ("excel_card",), "excel"
+        ),))
+        verified = SimpleNamespace(bound={"missing_reporting_years": (2022,)})
+        bundle = SimpleNamespace(
+            evidence=EvidenceRetrievalResult(question="q", groups={}),
+            verified_excel=verified,
+            verified_excels=(verified,),
+        )
+
+        self.assertFalse(assess_plan_coverage(plan, (bundle,)).covered)
+
 
 if __name__ == "__main__":
     unittest.main()
