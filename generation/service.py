@@ -116,7 +116,20 @@ class AnswerService:
         if self.token_safety_factor < 1:
             raise ValueError("token_safety_factor must be at least 1")
 
-    def answer(self, request: AnswerRequest) -> AnswerResponse | ErrorResponse:
+    def answer(
+        self,
+        request: AnswerRequest,
+        *,
+        prompt_token_budget: int | None = None,
+    ) -> AnswerResponse | ErrorResponse:
+        """Answer one request, optionally under a tighter budget than configured.
+
+        Structured workbook rows and narrative passages are not interchangeable
+        at the same budget: a cumulative-target question needs every row it
+        asked for, while a narrative question measurably degrades when the
+        prompt is flooded. The caller knows which kind of evidence it holds, so
+        it may lower the ceiling for this call.
+        """
         started = time.perf_counter()
         prompt_build_ms = 0
         model_call_ms = 0
@@ -131,11 +144,12 @@ class AnswerService:
             "prompt_token_budget",
             self.prompt_token_budget,
         )
-        active_prompt_budget = (
-            capability_budget
-            if self._prompt_token_budget_override is None
-            else min(self._prompt_token_budget_override, capability_budget)
-        )
+        overrides = [
+            value
+            for value in (self._prompt_token_budget_override, prompt_token_budget)
+            if value is not None
+        ]
+        active_prompt_budget = min([capability_budget, *overrides])
         if not request.chunks:
             latency_ms = round((time.perf_counter() - started) * 1000)
             return AnswerResponse(

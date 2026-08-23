@@ -11,6 +11,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from generation.adapters import adapt_ranked_results
 from generation.computation import CalculationResult
+from generation.evidence_audit import evidence_snapshot
 from generation.features import feature_enabled
 from generation.followup import resolve_followup_question
 from generation.multistep import (
@@ -75,6 +76,44 @@ def deduplicate_chunks(chunks: list[Chunk]) -> list[Chunk]:
     return unique
 
 
+# Below this a text-only refusal stands: a couple of weak passages is not a
+# record that contradicts the model. Verified workbook rows bypass it entirely,
+# because those are facts the system executed, not passages it ranked.
+_REFUSAL_REVIEW_MIN_CHUNKS = int(
+    os.getenv("SDGE_REFUSAL_REVIEW_MIN_CHUNKS", "3")
+)
+# Narrative evidence and structured workbook rows do not want the same budget.
+# Measured on the frozen beta set: dropping the shared ceiling from 60000 to
+# 20000 moved single_pdf and multi_pdf up while multi_excel fell 63.25 -> 47.25,
+# because the row-heavy questions (three-year cumulative targets, cost per mile
+# by segment) are exactly the ones a tight budget truncates. The provider
+# ceiling now serves the workbook lane; a bundle carrying no structured rows is
+# answered under the narrower one.
+_PDF_PROMPT_TOKEN_BUDGET = int(
+    os.getenv("SDGE_PDF_PROMPT_TOKEN_BUDGET", "25000")
+)
+
+
+def _lane_prompt_budget(bundle) -> int | None:
+    """The tighter narrative budget, or None to use the provider ceiling.
+
+    Rows, not cards. An ``excel_card`` is a description of what a table holds;
+    it is the size of a paragraph and needs no more room than one. Only an
+    executed result -- verified rows, or the row window behind a card -- can
+    consume the wide budget, and only that earns it. Keying on the card instead
+    sent narrative questions down the wide path merely because retrieval
+    surfaced one card among twenty passages.
+
+    Decided by what the bundle carries, not by which question it is, so it
+    applies unchanged to questions this corpus has never seen.
+    """
+    snapshot = evidence_snapshot(bundle)
+    carries_rows = (
+        snapshot["verified_rows"] > 0 or snapshot["excel_row_slices"] > 0
+    )
+    return None if carries_rows else _PDF_PROMPT_TOKEN_BUDGET
+
+
 class GenerationService:
     def __init__(
         self,
@@ -107,7 +146,11 @@ class GenerationService:
             chunks=tuple(chunks),
         )
         adapter_ms = round((time.perf_counter() - adapter_started) * 1000)
-        result = self._answer_service.answer(request)
+        lane_budget = _lane_prompt_budget(bundle)
+        result = self._answer_service.answer(
+            request, prompt_token_budget=lane_budget
+        )
+        result = self._review_refusal(request, result, bundle, lane_budget)
         timings = result.timings
         if timings is None:
             return result
@@ -121,6 +164,50 @@ class GenerationService:
                 ),
             ),
         )
+
+
+    # One review, never a loop: a second refusal is the model's answer.
+    def _review_refusal(self, request, result, bundle, lane_budget=None):
+        """Re-ask once when a refusal contradicts the evidence on record.
+
+        The answer model decides sufficiency on its own and is measurably wrong
+        about it: on the 2026-08-23 beta run it refused 10 of 27 answerable
+        questions, ``real_004`` among them while holding 128 execution-verified
+        rows of the exact target-versus-actual data asked for. This checks the
+        refusal against what was actually retrieved -- no model involved in the
+        check -- and only re-asks when the record contradicts it. A question
+        with nothing behind it is left refused.
+        """
+        if not feature_enabled("refusal_review"):
+            return result
+        if not getattr(result, "insufficient_context", False):
+            return result
+        if request.evidence_notice is not None:
+            return result
+        snapshot = evidence_snapshot(bundle)
+        verified_rows = snapshot["verified_rows"]
+        ranked = snapshot["ranked_chunks"]
+        if verified_rows <= 0 and ranked < _REFUSAL_REVIEW_MIN_CHUNKS:
+            return result
+        held = []
+        if verified_rows:
+            held.append(f"{verified_rows} execution-verified workbook rows")
+        if ranked:
+            held.append(f"{ranked} ranked passages")
+        notice = (
+            "A first pass reported insufficient context, but the evidence "
+            f"above holds {' and '.join(held)}. Answer every part of the "
+            "question this evidence does support, and state plainly which "
+            "parts it does not. Report insufficient context only if none of "
+            "the question can be answered from it."
+        )
+        reviewed = self._answer_service.answer(
+            replace(request, evidence_notice=notice),
+            prompt_token_budget=lane_budget,
+        )
+        if getattr(reviewed, "insufficient_context", True):
+            return result
+        return reviewed
 
     def generate_mixed(
         self,
@@ -246,7 +333,10 @@ class GenerationService:
     def plan_retrieval(self, question: str) -> RetrievalPlan:
         if self._planner_provider is None:
             self._planner_provider = _create_planner_provider()
-        plan = build_retrieval_plan(question, self._planner_provider)
+        plan = _stamp_planner_model(
+            build_retrieval_plan(question, self._planner_provider),
+            self._planner_provider,
+        )
         if plan.source != "fallback":
             return plan
         # Local planner failure would silently degrade a multi-part question
@@ -254,7 +344,9 @@ class GenerationService:
         escalation = self._escalation_planner_provider()
         if escalation is None:
             return plan
-        escalated = build_retrieval_plan(question, escalation)
+        escalated = _stamp_planner_model(
+            build_retrieval_plan(question, escalation), escalation
+        )
         return escalated if escalated.source == "model" else plan
 
     _escalation_provider = None
@@ -418,6 +510,19 @@ def _computation_note_chunk(note: str, index: int) -> Chunk:
             content_type="calculation",
         ),
     )
+
+
+def _stamp_planner_model(plan: RetrievalPlan, provider) -> RetrievalPlan:
+    """Record which model produced a plan, including the escalation model.
+
+    ``plan.source == "model"`` is identical whether the configured planner or
+    the Groq escalation built the plan, so without this a planner comparison
+    can silently measure the same model twice.
+    """
+    model_id = getattr(provider, "model_id", None)
+    if plan.planner_model is not None or model_id is None:
+        return plan
+    return replace(plan, planner_model=str(model_id))
 
 
 def _create_planner_provider():
