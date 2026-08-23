@@ -22,7 +22,10 @@ from generation.schemas import (
     ErrorResponse,
 )
 from generation.service import AnswerService
+from generation.excel_rollup import display_columns, roll_up
+from retrieval.query.excel.manifest import load_manifest
 from retrieval.query.pdf import EVIDENCE_GROUPS, EvidenceRetrievalResult
+from retrieval.utils import connect_db
 from services.retrieval_service import RetrievalBundle
 
 
@@ -97,6 +100,14 @@ class GenerationService:
         )
         for answer in reversed(verified_items):
             chunks[0:0] = _verified_excel_chunks(answer)
+        # The corpus's shape, above everything derived from it. Several
+        # questions are answerable only from coverage and schema -- a year the
+        # workbooks do not reach, a field a table does not carry, two tables
+        # that share no key -- and with none of it in the prompt the model
+        # estimated instead of saying so.
+        manifest_chunk = _workbook_manifest_chunk(bundle)
+        if manifest_chunk is not None:
+            chunks.insert(0, manifest_chunk)
         chunks = deduplicate_chunks(chunks)
         # Two verified executions of one card (different plan shapes) share a
         # card id; keep every distinct result citable under a unique id.
@@ -214,6 +225,37 @@ def _calculation_chunk(result: CalculationResult, index: int) -> Chunk:
     )
 
 
+def _workbook_manifest_chunk(bundle) -> Chunk | None:
+    """Coverage and schema for the workbooks, when the question touched them."""
+    if not feature_enabled("workbook_manifest"):
+        return None
+    touched_excel = bool(
+        bundle.verified_excels
+        or bundle.verified_excel
+        or getattr(bundle, "excel_rows", ())
+        or getattr(bundle.evidence, "groups", {}).get("excel")
+    )
+    if not touched_excel:
+        return None
+    connection = connect_db()
+    try:
+        rendered = load_manifest(connection).render()
+    finally:
+        connection.close()
+    if not rendered:
+        return None
+    return Chunk(
+        source_id="SDG&E quarterly data report",
+        chunk_id="workbook-manifest",
+        content=rendered,
+        metadata=ChunkMetadata(
+            source_file="SDG&E quarterly data report",
+            breadcrumb="Quarterly Data Report > coverage and schema",
+            content_type="excel_card",
+        ),
+    )
+
+
 def _computation_note_chunk(note: str, index: int) -> Chunk:
     return Chunk(
         source_id="Computation status",
@@ -259,6 +301,16 @@ def _excel_rows_chunk(row_slice) -> Chunk:
     )
 
 
+# Rendering a result as one table chunk with a header row, instead of one
+# chunk per row, was measured over three replicates and reverted: 51.23 against
+# 54.79 on the sixteen workbook cases, every replicate worse. The compact form
+# is cheaper in tokens and easier to read, and it scored worse anyway -- a row
+# that is its own chunk is separately citable and carries its own provenance,
+# and the per-row path also computes percent-complete arithmetically per row.
+# This is the same result the previous session got when it moved row windows
+# after the ranked evidence. Do not re-try this without a measurement.
+
+
 def _verified_excel_chunks(answer) -> list[Chunk]:
     """Turn an executed Excel result into explicit, cited evidence chunks."""
     selected_keys = tuple(getattr(answer.plan, "select_json_keys", ()))
@@ -277,13 +329,25 @@ def _verified_excel_chunks(answer) -> list[Chunk]:
         for item in provenance
         if (number := _int_or_none(item.get("source_row"))) is not None
     ]
+    # Generated jsonb group aliases are named back for the reader; see
+    # ``generation.excel_rollup.display_columns``.
+    display = display_columns(answer.result, answer.plan)
     rendered_rows = [
         ", ".join(
             f"{column}={value}"
-            for column, value in zip(answer.result.columns, row, strict=False)
+            for column, value in zip(display, row, strict=False)
         )
         for row in answer.result.rows
     ]
+    # Components without their total is the single largest recoverable Excel
+    # loss: 20% of gold figures were fetched as groups and never combined,
+    # because the only deterministic roll-up in the system fired for one table
+    # read one way. These figures are computed here, never by the model.
+    rolled = (
+        roll_up(answer.result, answer.plan)
+        if feature_enabled("excel_rollups")
+        else []
+    )
     content = "\n".join(
         [
             "Execution-verified Excel result:",
@@ -292,6 +356,16 @@ def _verified_excel_chunks(answer) -> list[Chunk]:
             *rendered_rows,
             f"Unit: {answer.unit or 'not specified'}",
             f"Contributing facts: {answer.result.contributing_facts}",
+            *(
+                [
+                    "Deterministic roll-ups over the rows above "
+                    "(already calculated; quote them, do not recompute):",
+                    *[f"  {item.render()}" for item in rolled],
+                ]
+                if rolled
+                else []
+            ),
+            *[f"Note: {warning}" for warning in answer.result.warnings],
         ]
     )
     source_file = first.get("source_file") or f"sdge_table{answer.table_number:02d}.csv"
@@ -312,25 +386,34 @@ def _verified_excel_chunks(answer) -> list[Chunk]:
     ]
 
 
-def _decimal(value) -> Decimal:
+def _decimal(value) -> Decimal | None:
+    """The value as a Decimal, or None when the workbook left it blank.
+
+    A blank target or actual is a reportable fact -- an activity carried no
+    target that year -- not a malformed row. Raising here aborted the whole
+    answer once plans widened beyond single-activity histories, where every
+    value happened to be populated.
+    """
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
     try:
         return Decimal(str(value))
-    except (InvalidOperation, TypeError, ValueError) as exc:
-        raise ValueError(f"Excel history value is not numeric: {value!r}") from exc
+    except (InvalidOperation, TypeError, ValueError):
+        return None
 
 
-def _format_decimal(value: Decimal) -> str:
-    return format(value.normalize(), "f")
+def _format_decimal(value: Decimal | None) -> str:
+    return "not reported" if value is None else format(value.normalize(), "f")
 
 
-def _percent_complete(actual: Decimal, target: Decimal) -> Decimal | None:
-    if target == 0:
+def _percent_complete(actual: Decimal | None, target: Decimal | None) -> Decimal | None:
+    if target is None or actual is None or target == 0:
         return None
     return (actual / target * 100).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
 
 
 def _format_percent(value: Decimal | None) -> str:
-    return "not defined (target is zero)" if value is None else f"{value}%"
+    return "not defined (target is zero or absent)" if value is None else f"{value}%"
 
 
 def _verified_entity_history_chunks(
@@ -338,7 +421,17 @@ def _verified_entity_history_chunks(
 ) -> list[Chunk]:
     columns = answer.result.columns
     year_index = columns.index("reporting_year")
-    record_index = columns.index("record_id")
+    # The plan chooses its own grouping now, so the row identifier may be
+    # record_id, entity_key, or title. Any of them names the row for a reader;
+    # only the absence of all three is a problem.
+    record_index = next(
+        (
+            columns.index(name)
+            for name in ("record_id", "entity_key", "title")
+            if name in columns
+        ),
+        None,
+    )
     selected_indexes = {
         key: columns.index(f"selected_{index}")
         for index, key in enumerate(selected_keys)
@@ -360,8 +453,8 @@ def _verified_entity_history_chunks(
         actual = _decimal(row[selected_indexes["quant_actual_progress_q1_4"]])
         unit = str(row[selected_indexes["quant_target_units"]])
         percent = _percent_complete(actual, target)
-        totals_target += target
-        totals_actual += actual
+        totals_target += target or Decimal(0)
+        totals_actual += actual or Decimal(0)
         source_file = (
             provenance.get("source_file")
             or f"sdge_table{answer.table_number:02d}.csv"
@@ -371,15 +464,16 @@ def _verified_entity_history_chunks(
             [
                 "Execution-verified Excel row:",
                 f"reporting_year={year}",
-                f"record_id={row[record_index]}",
+                f"record={row[record_index] if record_index is not None else 'unnamed'}",
                 f"annual_target={_format_decimal(target)}",
                 f"q4_year_end_actual={_format_decimal(actual)}",
                 f"unit={unit}",
                 f"percent_complete={_format_percent(percent)}",
                 (
-                    "calculation=undefined because target is zero"
+                    "calculation=undefined because the target is zero or absent"
                     if percent is None
-                    else f"calculation={_format_decimal(actual)} / {_format_decimal(target)} x 100"
+                    else f"calculation={_format_decimal(actual)} / "
+                         f"{_format_decimal(target)} x 100"
                 ),
             ]
         )

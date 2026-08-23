@@ -16,6 +16,18 @@ DEFAULTS = {
     "parent_child_expansion": True,
     "model_excel_planner": True,
     "excel_row_evidence": True,
+    # Coverage and schema for the workbooks, injected as standing evidence.
+    "workbook_manifest": True,
+    # Deterministic totals, shares, and per-year subtotals over a grouped
+    # Excel result. Closes the measured "fetched as components and never
+    # combined" bucket without the answer model doing arithmetic.
+    "excel_rollups": True,
+    # Pin an overlapping scope column (table 11's Territory/HFTD) that the
+    # plan left open, instead of summing across it and double-counting.
+    "excel_canonical_scope": True,
+    # More requirements per question, each labelled with the part of the
+    # question it answers, and a required-output ledger in the answer prompt.
+    "excel_wide_fanout": True,
 }
 
 

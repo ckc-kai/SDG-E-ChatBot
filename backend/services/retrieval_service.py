@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -18,9 +19,12 @@ from retrieval.query.excel.channel import (
 )
 from retrieval.query.excel.query import bind_entity_key
 from retrieval.query.excel.rows import ExcelRowSlice, fetch_card_rows
+from retrieval.query.excel.trace import outcome_trace
 from retrieval.query.pdf import EvidenceGroup, EvidenceRetrievalResult, retrieve_configured
 from retrieval.query.pdf.query import required_source_roles
 from retrieval.utils import connect_db
+
+logger = logging.getLogger(__name__)
 
 
 _CONTENT_TYPE_TO_GROUP = {
@@ -54,6 +58,9 @@ class RetrievalBundle:
     calculations: tuple[CalculationResult, ...] = ()
     computation_notes: tuple[str, ...] = ()
     excel_rows: tuple[ExcelRowSlice, ...] = ()
+    # Diagnostic only: what the Excel channel attempted and what came back.
+    # Never rendered into a prompt; read by eval/excel_lane_report.py.
+    excel_trace: tuple[dict, ...] = ()
 
 
 def _groups_for_types(content_types) -> tuple[str, ...]:
@@ -119,6 +126,7 @@ class RetrievalService:
         verified_excel = None
         verified_excels: tuple[ExcelAnswer, ...] = ()
         excel_rows: tuple[ExcelRowSlice, ...] = ()
+        excel_trace: tuple[dict, ...] = ()
         try:
             source_roles = required_source_roles(question)
             excel_requested = (
@@ -148,6 +156,7 @@ class RetrievalService:
                     excel_verification_ms = round(
                         (time.perf_counter() - excel_started) * 1000
                     )
+                excel_trace = tuple(outcome_trace(excel_result))
                 if isinstance(excel_result, tuple) and excel_result:
                     verified_excels = excel_result
                     verified_excel = excel_result[0]
@@ -172,6 +181,7 @@ class RetrievalService:
                     excel_verification_ms = round(
                         (time.perf_counter() - excel_started) * 1000
                     )
+                excel_trace = tuple(outcome_trace(excel_result))
                 if isinstance(excel_result, tuple) and excel_result:
                     verified_excels = excel_result
                     verified_excel = excel_result[0]
@@ -194,6 +204,7 @@ class RetrievalService:
             excel_rows=excel_rows,
             verified_excel=verified_excel,
             verified_excels=verified_excels,
+            excel_trace=excel_trace,
             timings=RetrievalTimings(
                 connection_ms=connection_ms,
                 grouped_retrieval_ms=grouped_retrieval_ms,
@@ -296,6 +307,33 @@ class RetrievalService:
                     verified_keys.add(key)
                     verified_list.append(answer)
 
+        plan_excel_trace = [
+            trace for bundle in step_bundles for trace in bundle.excel_trace
+        ]
+        # A decomposed question whose every step was labelled "pdf" never
+        # reached the workbooks, even when the figures it asked for -- unit
+        # targets missed across the cycle, inspection counts by year -- are
+        # held only there. Rather than teach the step router to predict this,
+        # attempt the workbooks once on the whole question. The channel is
+        # generate-and-verify, so a question the workbooks cannot answer costs
+        # one bounded query and contributes nothing to the prompt.
+        if not verified_list and not required_source_roles(question):
+            excel_connection = connect_db()
+            try:
+                whole_question = answer_from_excel_all(question, excel_connection)
+            except Exception:  # pragma: no cover - defensive, never fatal
+                logger.warning("Whole-question Excel attempt failed", exc_info=True)
+                whole_question = None
+            finally:
+                excel_connection.close()
+            plan_excel_trace.extend(outcome_trace(whole_question))
+            if isinstance(whole_question, tuple):
+                for answer in whole_question:
+                    key = (answer.card_chunk_id, answer.question)
+                    if key not in verified_keys:
+                        verified_keys.add(key)
+                        verified_list.append(answer)
+
         merged_excel_rows: tuple[ExcelRowSlice, ...] = ()
         seen_row_scopes: set[tuple] = set()
         for bundle in step_bundles:
@@ -344,6 +382,7 @@ class RetrievalService:
             excel_rows=merged_excel_rows,
             verified_excel=verified_items[0] if verified_items else None,
             verified_excels=verified_items,
+            excel_trace=tuple(plan_excel_trace),
             timings=timings,
             calculations=calculations,
             computation_notes=computation_notes,

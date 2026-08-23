@@ -254,6 +254,7 @@ def capture_answers(
             retrieval_started = time.perf_counter()
             plan_diagnostics = None
             verified_excel = False
+            excel_trace: list = []
             if pipeline_variant == "legacy_flat":
                 ranked_results = retrieve(case["question"], connection)
                 evidence_payload: Any = [
@@ -283,6 +284,7 @@ def capture_answers(
                 evidence_count = len(ranked_results)
                 plan_diagnostics = bundle.plan_diagnostics
                 verified_excel = bool(bundle.verified_excels or bundle.verified_excel)
+                excel_trace = list(bundle.excel_trace)
             retrieval_ms = round((time.perf_counter() - retrieval_started) * 1000)
             print(
                 f"[{position}/{len(remaining)}] generating {case['case_id']} "
@@ -323,6 +325,7 @@ def capture_answers(
                     "total_ms": total_ms,
                     "retrieved_evidence": evidence_payload,
                     "verified_excel": verified_excel,
+                    "excel_trace": excel_trace,
                     "plan_diagnostics": plan_diagnostics,
                     "response": response_payload,
                 }

@@ -226,6 +226,16 @@ def expand_to_parent_sections(
             "Parent expansion query failed; returning un-expanded results",
             exc_info=True,
         )
+        # Degrading gracefully means degrading the *connection* too. A failed
+        # statement leaves psycopg2 in an aborted transaction, so without this
+        # rollback every subsequent query on the same connection dies with
+        # InFailedSqlTransaction -- turning a recoverable "narrower context"
+        # into a hard failure several questions later, far from the cause.
+        try:
+            conn.rollback()
+        except Exception:
+            logger.warning("Rollback after failed parent expansion failed",
+                           exc_info=True)
         return results
 
     expanded = []

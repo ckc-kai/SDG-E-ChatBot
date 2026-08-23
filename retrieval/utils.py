@@ -270,8 +270,15 @@ QUERY_PROMPT_NAME = "query"
 
 
 def model_encodes_asymmetrically(model: SentenceTransformer) -> bool:
-    """True when the model ships a dedicated query prompt."""
-    return QUERY_PROMPT_NAME in (getattr(model, "prompts", None) or {})
+    """True when the model ships a NON-EMPTY dedicated query prompt.
+
+    Presence of the key is not enough. bge-base-en-v1.5 ships
+    ``prompts={'query': '', 'document': ''}`` -- both empty -- so a membership
+    test called it asymmetric and then prompted every query with the empty
+    string, which is exactly the same vector as no prompt at all. Requiring a
+    non-empty prompt makes the predicate mean what its callers assume.
+    """
+    return bool((getattr(model, "prompts", None) or {}).get(QUERY_PROMPT_NAME))
 
 
 def encode_query(model: SentenceTransformer, text: str):

@@ -24,13 +24,15 @@ instead. Generate-and-verify, not classify-and-hope.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, replace
 from typing import Any
 
 from generation.features import feature_enabled
 from retrieval.ingest.excel.contracts import ContractSet, load_contracts
 from retrieval.query.excel.nl_planner import (
     build_model_plans,
+    last_rejections,
     question_needs_model_shapes,
 )
 from retrieval.query.excel.query import (
@@ -146,6 +148,10 @@ class ExcelDecline:
     reason: str
     card_caption: str | None = None
     card_score: float | None = None
+    # Why each model plan was thrown out, when one was attempted. A decline
+    # that only says "entity-table card" hides the fact that the planner had
+    # already produced something and the executor refused it.
+    planner_rejections: tuple[str, ...] = ()
 
 
 def _exact_entity_card(conn, entity_key: str) -> tuple[int, str, dict] | None:
@@ -318,14 +324,18 @@ def answer_from_excel_all(
         return ExcelDecline("no Excel card retrieved")
 
     model_allowed = feature_enabled("model_excel_planner")
-    if model_allowed and (
-        question_needs_model_shapes(question)
-        # A question naming an exact activity id without a history intent
-        # needs an entity-scoped fact query the heuristics cannot build.
-        or entity_key is not None
-    ):
-        # Comparisons, trends, and rankings need plan shapes the heuristics
-        # never emit; a validated model plan answers them exactly.
+    if model_allowed:
+        # Formerly gated on a keyword regex for comparison/trend/ranking cues.
+        # That regex excluded eleven of the sixteen workbook-dependent beta
+        # questions -- every "break down by", "did we ever", "is it possible
+        # that" -- and sent them to card heuristics that cannot express a
+        # GROUP BY or a predicate scan. It was the same failure as the
+        # ``_EXCEL_RE`` routing gate and the ``MIN_CARD_SCORE`` floor: a hand
+        # written classifier starving the one component able to answer.
+        #
+        # The channel is generate-and-verify, so attempting costs one bounded
+        # query when the planner has nothing useful to say. ``question_needs_
+        # model_shapes`` survives only as a hint in the prompt.
         answers = _model_plan_answers(question, cards, conn, contracts)
         if answers:
             return tuple(answers)
@@ -333,13 +343,9 @@ def answer_from_excel_all(
     outcome = _card_answer(question, cards, conn, contracts, min_card_score)
     if isinstance(outcome, ExcelAnswer):
         return (outcome,)
-    if not model_allowed:
-        return outcome
-    if outcome.reason.startswith("plan refused"):
-        # Keep the deliberate dual-year-axis clarification deterministic.
-        return outcome
-    answers = _model_plan_answers(question, cards, conn, contracts)
-    return tuple(answers) if answers else outcome
+    if model_allowed and last_rejections:
+        outcome = replace(outcome, planner_rejections=tuple(last_rejections))
+    return outcome
 
 
 def _model_plan_answer(
@@ -495,6 +501,45 @@ def _card_entity_history_answer(
     )
 
 
+# Words too generic to identify one activity out of 128.
+_ENTITY_TITLE_STOPWORDS = frozenset(
+    {
+        "and", "the", "of", "for", "in", "to", "a", "an", "or", "with", "on",
+        "wmp", "program", "programme", "programs", "activity", "activities",
+        "work", "system", "total", "annual", "quarterly", "sdge", "sdg",
+        "inspection", "inspections", "assessment", "assessments", "other",
+    }
+)
+
+
+def _question_names_card_entity(question: str, card) -> bool:
+    """True when the question itself identifies the card's activity.
+
+    Retrieval ranking is not a claim that the user asked about this entity --
+    only that the text was nearby. Requiring the question to carry the
+    activity's own distinguishing words keeps an entity lookup from standing in
+    for a question about the whole table.
+    """
+    data = card.query_object.structured_data or {}
+    entity_key = str(data.get("entity_key") or "")
+    lowered = question.casefold()
+    if entity_key and entity_key.casefold() in lowered:
+        return True
+    title = str(data.get("title") or card.query_object.caption or "")
+    # Strip the card's boilerplate prefix so it cannot supply the match.
+    title = re.sub(r"(?i)^\s*wmp activity\s*[-\u2014:]*\s*", "", title)
+    terms = {
+        term
+        for term in re.findall(r"[a-z0-9]+", title.casefold())
+        if len(term) > 3 and term not in _ENTITY_TITLE_STOPWORDS
+    }
+    if not terms:
+        return False
+    matched = {term for term in terms if re.search(rf"(?<!\w){term}", lowered)}
+    # Most of the activity's distinguishing words, not merely one shared noun.
+    return len(matched) >= max(2, (len(terms) + 1) // 2)
+
+
 def _card_answer(
     question: str,
     cards,
@@ -527,12 +572,20 @@ def _card_answer(
 
     # The question names an activity without its WMP id; the retrieved entity
     # card resolves the id, so the same deterministic history select applies.
+    #
+    # Only when the question actually names that activity. The cue test alone
+    # fires on any question containing "target" or "actual", so "is it possible
+    # we reported completed work against a zero target?" -- a scan over all 128
+    # activities -- was answered with the history of whichever activity ranked
+    # first, and reported as execution-verified. A property question is a scan,
+    # not a lookup.
     card_entity_key = card_data.get("entity_key")
     card_years = bind_years(question)
     if (
         table_number == 1
         and not is_entity_history
         and card_entity_key
+        and _question_names_card_entity(question, best)
         and any(cue in lowered for cue in _ENTITY_HISTORY_CUES)
     ):
         answer = _card_entity_history_answer(
