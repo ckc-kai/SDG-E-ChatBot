@@ -29,6 +29,14 @@ DEFAULTS = {
     # More requirements per question, each labelled with the part of the
     # question it answers, and a required-output ledger in the answer prompt.
     "excel_wide_fanout": True,
+    # Check a refusal against the evidence actually in hand before accepting
+    # it. The 2026-08-23 beta run refused 10 of 27 answerable questions, one
+    # holding 128 execution-verified rows of exactly what was asked for.
+    "refusal_review": True,
+    # Guarantee every arm a comparison names has evidence. Both weak lanes fail
+    # the same way -- multi_excel compares a number across periods, multi_pdf a
+    # policy across filing cycles -- so one flag governs both.
+    "comparison_arm_coverage": True,
 }
 
 

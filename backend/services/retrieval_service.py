@@ -8,6 +8,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
+from generation.comparison import asks_for_comparison, missing_arms
+from generation.evidence_audit import evidence_snapshot
 from generation.coverage import assess_plan_coverage
 from generation.computation import CalculationResult
 from generation.features import feature_enabled
@@ -116,6 +118,50 @@ def _reattach_entity_key(original_question: str, step_question: str) -> str:
     if original_key is None or bind_entity_key(step_question) is not None:
         return step_question
     return f"{step_question} ({original_key})"
+
+
+
+# How many passages one uncovered arm may contribute. Small on purpose: the
+# arm needs representation, not parity, and the budget is fixed.
+_ARM_COVERAGE_TOP_K = 5
+
+
+def _arm_source_patterns(arm: str) -> tuple[str, ...]:
+    """ILIKE patterns matching documents that belong to one comparison arm.
+
+    Filenames encode the cycle (``sdge__wmp__2023-2025__r5-...``), so a cycle
+    arm matches directly. A bare year arm has no filename to match, which is
+    correct: workbook years are a column, not a document, and the Excel lane
+    covers those arms with its own plan per arm.
+    """
+    cleaned = arm.strip()
+    if not cleaned:
+        return ()
+    return (f"%{cleaned}%",) if "-" in cleaned else ()
+
+
+def _evidence_source_text(groups) -> str:
+    """Every source filename behind the current evidence, as one blob."""
+    names: list[str] = []
+    for group in (groups or {}).values():
+        for result in getattr(group, "results", ()):
+            names.append(str(result.query_object.source_pdf))
+    return " ".join(names)
+
+
+class _SnapshotView:
+    """Adapt the assembled pieces to what ``evidence_snapshot`` reads.
+
+    ``plan_diagnostics`` is built before the ``RetrievalBundle`` exists, so the
+    snapshot is taken over the merged groups, row slices, and verified answers
+    that will go into it.
+    """
+
+    def __init__(self, merged_groups, excel_rows, verified_items):
+        self.evidence = type("_Ev", (), {"groups": merged_groups})()
+        self.excel_rows = excel_rows
+        self.verified_excels = tuple(verified_items)
+        self.verified_excel = verified_items[0] if verified_items else None
 
 
 class RetrievalService:
@@ -254,6 +300,68 @@ class RetrievalService:
             ),
         )
 
+
+    # One retrieval per uncovered arm, never a loop.
+    def _cover_missing_arms(self, question: str, merged: dict) -> tuple[str, ...]:
+        """Fetch evidence for a named comparison arm that retrieved nothing.
+
+        A comparison whose evidence all came from one side cannot be answered,
+        and the model answers it anyway rather than reporting the gap. Ranking
+        cannot prevent that, because every passage it returned really is
+        relevant -- what is missing is the other arm, and the arm that dominates
+        the corpus wins the ranking on its own merits.
+
+        Arms come from the question text, so this holds for a cycle, year, or
+        quarter the corpus has never seen. It is a floor, not a rebalance: an
+        arm gets representation, not parity.
+        """
+        if not feature_enabled("comparison_arm_coverage"):
+            return ()
+        if not asks_for_comparison(question):
+            return ()
+        absent = missing_arms(question, _evidence_source_text(merged))
+        covered: list[str] = []
+        for arm in absent:
+            patterns = _arm_source_patterns(arm)
+            if not patterns:
+                continue
+            try:
+                extra = self.retrieve(
+                    question,
+                    rewrite_mode="off",
+                    content_types=("narrative", "table"),
+                    source_patterns=patterns,
+                )
+            except Exception:  # noqa: BLE001 - a missing arm must not fail the turn
+                logger.warning("arm retrieval failed for %s", arm, exc_info=True)
+                continue
+            added = False
+            for name, group in (extra.evidence.groups or {}).items():
+                target = merged.get(name)
+                if target is None or not group.results:
+                    continue
+                seen = {str(r.query_object.chunk_id) for r in target.results}
+                fresh = [
+                    result for result in group.results[:_ARM_COVERAGE_TOP_K]
+                    if str(result.query_object.chunk_id) not in seen
+                ]
+                if not fresh:
+                    continue
+                # Replace the tail rather than append: the prompt budget is
+                # fixed, and one side's surplus is what crowded the other out.
+                keep = max(len(target.results) - len(fresh), 0)
+                merged[name] = EvidenceGroup(
+                    name=target.name,
+                    content_types=target.content_types,
+                    results=[*target.results[:keep], *fresh],
+                    diagnostics=target.diagnostics,
+                )
+                added = True
+            if added:
+                covered.append(arm)
+                logger.info("covered missing comparison arm %s", arm)
+        return tuple(covered)
+
     def retrieve_plan(
         self, question: str, plan: RetrievalPlan, **kwargs
     ) -> RetrievalBundle:
@@ -349,6 +457,8 @@ class RetrievalService:
                 diagnostics=exemplar.diagnostics,
             )
 
+        arm_retry_arms = self._cover_missing_arms(question, merged)
+
         verified_list: list[ExcelAnswer] = []
         verified_keys: set[tuple[int, str]] = set()
         for bundle in step_bundles:
@@ -441,6 +551,7 @@ class RetrievalService:
             computation_notes=computation_notes,
             plan_diagnostics={
                 "source": plan.source,
+                "planner_model": plan.planner_model,
                 "trigger_reason": plan.trigger_reason,
                 "subquestion_count": len(plan.steps),
                 "atomic_task_count": plan.atomic_task_count,
@@ -448,6 +559,10 @@ class RetrievalService:
                 "retry_count": retry_count,
                 "retry_step_index": retry_step_index,
                 "coverage": coverage.to_dict(),
+                "covered_missing_arms": list(arm_retry_arms),
+                "evidence_snapshot": evidence_snapshot(
+                    _SnapshotView(merged, merged_excel_rows, verified_items)
+                ),
                 "steps": [
                     {
                         "question": step.question,
