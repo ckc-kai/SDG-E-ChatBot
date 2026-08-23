@@ -649,3 +649,78 @@ class TestTruncationIsDisclosed:
         sql, params = _sql(plan, contracts)
         assert sql.rstrip().endswith("LIMIT %s")
         assert params[-1] == 8
+
+
+class TestMisfiledGroupKey:
+    """A json attribute named in group_by is repaired, not rejected.
+
+    "Break our work orders down by GO 95 priority" names a real attribute that
+    lives in the json payload rather than in a typed column. Rejecting the plan
+    discarded a correct intent over a misplaced key -- the same
+    discard-instead-of-repair mistake already fixed for invented attributes.
+    """
+
+    CONTEXTS = {
+        13: {
+            "source": "excel_records",
+            "semantic_keys": [],
+            "json_keys": ["equipment_type", "annual_quant_target"],
+            "vocabulary": {},
+            "full_vocabulary": {},
+            "title": "Table 13",
+        }
+    }
+
+    def _sanitize(self, payload):
+        from retrieval.query.excel import nl_planner
+
+        return nl_planner._sanitize_plan(
+            payload,
+            "break down work orders by equipment type for 2025",
+            [(13, "card", None)],
+            self.CONTEXTS,
+        )
+
+    def test_json_attribute_in_group_by_moves_to_group_by_json_keys(self):
+        plan = self._sanitize(
+            {
+                "action": "plan",
+                "table_number": 13,
+                "operation": "aggregate",
+                "aggregate": "count",
+                "group_by": ["reporting_year", "equipment_type"],
+                "filters": [
+                    {"field": "reporting_year", "operator": "eq", "value": 2025}
+                ],
+            }
+        )
+        # json keys reach the plan as GroupKey(json_key=True); typed columns
+        # stay plain, so the two must not be confused.
+        json_grouped = {
+            entry.field for entry in plan.group_by
+            if getattr(entry, "json_key", False)
+        }
+        typed_grouped = {
+            getattr(entry, "field", entry) for entry in plan.group_by
+            if not getattr(entry, "json_key", False)
+        }
+        assert "equipment_type" in json_grouped
+        assert "equipment_type" not in typed_grouped
+        assert "reporting_year" in typed_grouped
+
+    def test_a_name_that_is_neither_column_nor_attribute_is_still_rejected(self):
+        from retrieval.query.excel import nl_planner
+
+        with pytest.raises(nl_planner._PlanRejected):
+            self._sanitize(
+                {
+                    "action": "plan",
+                    "table_number": 13,
+                    "operation": "aggregate",
+                    "aggregate": "count",
+                    "group_by": ["invented_column"],
+                    "filters": [
+                        {"field": "reporting_year", "operator": "eq", "value": 2025}
+                    ],
+                }
+            )

@@ -74,13 +74,33 @@ class WorkbookManifest:
     def render(self) -> str:
         if not self.tables:
             return ""
+        # A single span over the union of every table misreports the corpus
+        # whenever coverage is ragged, and it is: the metric tables run a year
+        # further than the activity records. Answers repeated the union back as
+        # though every table reached it, and were marked down for claiming a
+        # year the records do not hold. State the envelope, then say plainly
+        # that it is an envelope, and let the per-table years below govern.
+        spans = {
+            (min(table.years), max(table.years))
+            for table in self.tables
+            if table.years
+        }
         span = (
             f"{min(self.years)}-{max(self.years)}" if self.years else "unknown"
         )
-        lines = [
+        coverage = [
             "WORKBOOK COVERAGE AND SCHEMA (the quarterly data report tables).",
             "This is the complete inventory. A year, table, or field absent",
-            f"here is absent from the corpus. Reported years: {span}.",
+            f"here is absent from the corpus. Reported years across all tables: {span}.",
+        ]
+        if len(spans) > 1:
+            coverage.append(
+                "Coverage is NOT uniform: each table's own years are listed "
+                "below and only those govern. Do not state the range above as "
+                "the coverage of any single table."
+            )
+        lines = [
+            *coverage,
             "Fields marked [col] are typed columns; the rest are attributes.",
             "",
         ]

@@ -24,7 +24,10 @@ class SchemaTests(unittest.TestCase):
         follow_up = PLAN_RESPONSE_SCHEMA["properties"]["follow_up_plans"]["items"][
             "properties"
         ]
-        body_only = set(primary) - {"action", "reason", "follow_up_plans"}
+        # ``decline_reason`` is envelope, not body: it describes the response,
+        # like ``action`` and ``reason``, and a follow-up carries only a body.
+        envelope = {"action", "reason", "decline_reason", "follow_up_plans"}
+        body_only = set(primary) - envelope
 
         self.assertEqual(body_only, set(follow_up))
         for name in body_only:

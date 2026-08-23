@@ -101,3 +101,40 @@ class TestAgainstCorpus:
         # is why undergrounding cost per segment cannot be produced.
         assert not any("segment" in name for name in by_number[11].dimensions)
         assert any("segment_id" in name for name in by_number[15].dimensions)
+
+
+class TestRaggedCoverageIsNotReportedAsUniform:
+    """A union span over tables with different years must not read as coverage.
+
+    The metric tables run a year further than the activity records, so the
+    union (2023-2026) is not true of any single table. Answers repeated it back
+    as the corpus range and were marked down for naming a year the records do
+    not hold.
+    """
+
+    def _manifest(self, spans):
+        from retrieval.query.excel.manifest import TableFacts, WorkbookManifest
+
+        tables = tuple(
+            TableFacts(
+                table_number=number,
+                title=f"Table {number}",
+                family="excel_facts",
+                row_count=10,
+                years=tuple(years),
+                quarters=(),
+                dimensions=(),
+                metric_keys=(),
+            )
+            for number, years in enumerate(spans, start=1)
+        )
+        years = tuple(sorted({y for _, s in enumerate(spans) for y in s}))
+        return WorkbookManifest(tables=tables, years=years)
+
+    def test_ragged_coverage_is_flagged(self):
+        rendered = self._manifest([(2023, 2024, 2025), (2023, 2024, 2025, 2026)]).render()
+        assert "Coverage is NOT uniform" in rendered
+
+    def test_uniform_coverage_is_not_flagged(self):
+        rendered = self._manifest([(2023, 2024, 2025), (2023, 2024, 2025)]).render()
+        assert "Coverage is NOT uniform" not in rendered

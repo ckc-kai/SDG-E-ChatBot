@@ -165,10 +165,77 @@ _PLAN_BODY_PROPERTIES: dict[str, Any] = {
     "limit": {"type": "integer"},
 }
 
+# A decline used to be free prose that seven prompt rules argued against and a
+# regex tried to classify after the fact. Both were probabilistic. These are the
+# only reasons the planner may give, and exactly one of them is accepted: the
+# rest name work the system already does (derived figures, several plans per
+# question, partly-covered ranges), so they are rejected in code rather than
+# argued against in the prompt.
+LEGITIMATE_DECLINE = "no_table_covers_subject"
+# Retrieval, not the data: the subject exists but its table was not offered.
+# Handled by re-asking against every manifest table rather than by accepting.
+RETRIEVAL_DECLINE = "retrieval_missing_table"
+DECLINE_REASONS = frozenset({
+    LEGITIMATE_DECLINE,
+    RETRIEVAL_DECLINE,
+    "derived_figure_not_a_column",
+    "period_or_entity_missing",
+    "one_query_insufficient",
+    "table_incomplete",
+    "no_numeric_field",
+})
+# Why each rejected reason is wrong, quoted back when the planner is re-asked.
+_DECLINE_CORRECTIONS = {
+    "derived_figure_not_a_column": (
+        "cumulative totals, percent complete, variance, share of total and "
+        "per-year subtotals are computed by the system from the rows you "
+        "return -- return the components"
+    ),
+    "period_or_entity_missing": (
+        "filter the plan to the periods the table actually lists and return "
+        "them; the answer states the gap. A request that starts before, or "
+        "ends after, a table's own year range is that table's range plus a "
+        "sentence naming the years it does not hold -- never a decline, and "
+        "never a claim that the missing years exist"
+    ),
+    "one_query_insufficient": (
+        "put each additional figure in follow_up_plans; several plans per "
+        "question is the normal case"
+    ),
+    "table_incomplete": (
+        "use follow_up_plans against the table holding the rest"
+    ),
+    "no_numeric_field": (
+        "entity-record tables hold their numbers in the json payload; set "
+        "value_json_key to the attribute"
+    ),
+}
+
+
+def _decline_reason(payload: dict[str, Any]) -> str:
+    """The declared reason, falling back to prose classification.
+
+    A planner that ignores the enum still declines, so the free-text reason is
+    still read; it just no longer decides anything a code path can decide.
+    """
+    declared = str(payload.get("decline_reason") or "").strip().casefold()
+    if declared in DECLINE_REASONS:
+        return declared
+    if _blames_retrieval(str(payload.get("reason") or "")):
+        return RETRIEVAL_DECLINE
+    return "" if declared else ""
+
+
+def illegitimate_decline(reason_key: str) -> bool:
+    """True when the system should refuse this decline and ask again."""
+    return reason_key not in {LEGITIMATE_DECLINE, ""}
+
+
 PLAN_RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "action": {"type": "string", "enum": ["plan", "decline"]},
+        "decline_reason": {"type": "string", "enum": sorted(DECLINE_REASONS)},
         "reason": {"type": "string"},
         **_PLAN_BODY_PROPERTIES,
         "follow_up_plans": {
@@ -487,26 +554,16 @@ def _render_prompt(
         "  ('what was the Tier 3 total, and which segments were highest' ->",
         "  plan: operation=aggregate filtered to the tier; follow_up:",
         "  operation=rank group_by record_id); the same metric on two tables;",
-        "  or two different metrics. NEVER decline because one query is not",
-        "  enough. Use one plan when one plan genuinely answers the question.",
-        "- A plan MUST set top-level table_number, and for metric-fact tables a",
-        "  top-level semantic_metric_key naming the metric concept. Neither is",
-        "  a filter.",
-        "- Use only listed tables, columns, keys, and dimension values. Never invent values.",
+        "  or two different metrics. Use one plan when one plan genuinely",
+        "  answers the question.",
         "- Several semantic_metric_key values can share a topic (e.g. duration_of_X,",
         "  frequency_of_X, scope_of_X for the same event type). Match the",
         "  question's own word: 'how many'/'number of'/'total X events' means",
         "  frequency_of_X; 'how long' means duration_of_X; 'how many circuits/",
         "  customers affected' means scope_of_X. Never substitute a different",
         "  key from the same family.",
-        "- Every plan needs a time filter: reporting_year (plus reporting_quarter",
-        "  when the question names a quarter), or source_vintage_year for a",
-        "  submission/filing year. Use source_vintage_year ONLY when the question",
-        "  says submission or filing; a bare year means reporting_year.",
         "- 'Compare A or B of one dimension' -> operation=rank, aggregate=sum,",
         "  group_by that dimension, optionally filter out other values.",
-        "- When several values of one dimension match the question, it is a",
-        "  comparison: group_by that dimension; never filter to just one value.",
         "- 'How did X change across quarters of YEAR' -> operation=aggregate,",
         "  aggregate=sum, group_by ['reporting_quarter'], filter reporting_year.",
         "- 'Which N <things> had highest/lowest X' -> operation=rank,",
@@ -520,91 +577,53 @@ def _render_prompt(
         "  caption names it) and reporting_year, select_json_keys=[the",
         "  attribute]. Example attributes: annual_quant_target,",
         "  quant_actual_progress_q1_4, quant_target_units, status.",
-        "- Counting entities: operation=aggregate, aggregate=count on records.",
-        "  On metric-fact tables never use count: one fact row is one metric",
-        "  observation for one period, so counting rows counts reporting slots",
-        "  rather than events. 'How many ignitions/outages/events' is",
-        "  aggregate=sum over the metric's own value.",
+        "- 'How many ignitions/outages/events' on a metric-fact table is",
+        "  aggregate=sum over the metric's own value, not a row count.",
         "- 'Which activities did not meet / repeatedly missed targets':",
         "  operation=select on the activity records table with select_json_keys",
         "  ['annual_quant_target','quant_actual_progress_q1_4',",
         "  'quant_target_units'], group_by ['reporting_year','record_id',",
         "  'title'], filters covering the requested years, limit 200; the",
         "  target-versus-actual comparison happens downstream.",
-        "- Filters default to equality; use operator gte/lte for ranges,",
-        "  ne to exclude a value (e.g. exclude 'Non-HFTD' when comparing tiers).",
+        "- Use ne to exclude a value (e.g. exclude 'Non-HFTD' when comparing",
+        "  tiers).",
         "- For 'A or B' of one field use operator 'in' with a list value:",
         "  {field:'status', operator:'in', value:['Delayed','Cancelled']}.",
         "  Use 'not_in' for 'everything except'. Do not emit one plan per",
         "  value, and do not filter to just one of them.",
-        "- Do not set limit on a select that asks 'which ...' or 'what ...':",
-        "  the answer is every matching row. Set limit only for an explicit",
-        "  top-N request.",
-        "- A json attribute holding a NUMBER (targets, actuals, spend, miles,",
-        "  counts) must set cast='numeric' whenever the filter compares",
-        "  magnitude (gt/gte/lt/lte) or tests zero. Without it the comparison",
-        "  is textual and '2.0' sorts above '1000'. Example: find work reported",
-        "  against no target -> filters [{field:'annual_quant_target',",
-        "  operator:'eq', value:0, cast:'numeric'},",
-        "  {field:'quant_actual_progress_q1_4', operator:'gt', value:0,",
-        "  cast:'numeric'}] with operation=select.",
         "- To break a figure down by an attribute inside the json payload",
         "  (spend by initiative, work orders by priority, miles by activity)",
-        "  put that key in group_by_json_keys, NOT in group_by. group_by is",
-        "  only for the typed columns listed above. Grouping by record_id",
-        "  returns opaque hashes and is almost never what a person asked for.",
+        "  use group_by_json_keys. Grouping by record_id returns opaque",
+        "  hashes and is almost never what a person asked for.",
         "- Entity-record tables (WMP activities, work orders) DO hold numbers:",
         "  they live in the json payload, so set value_json_key to the",
-        "  attribute and the executor sums or averages it. Never decline",
-        "  saying a table has no numeric field before checking the attribute",
-        "  list above. Example: delivered miles per year ->",
+        "  attribute and the executor sums or averages it. Example:",
+        "  delivered miles per year ->",
         "  operation=aggregate, aggregate=sum,",
         "  value_json_key='quant_actual_progress_q1_4',",
         "  group_by ['reporting_year'].",
-        "- A plan does NOT need a year filter when it groups by",
-        "  reporting_year, or when it is a select narrowed by another",
-        "  predicate. Questions like 'did we ever...' cover the whole cycle,",
-        "  and adding a year to them answers a narrower question than asked.",
         "- When one table holds part of the answer and another holds the rest",
         "  (delivered quantity in the activities table, spend in the spend",
-        "  table), use follow_up_plans with the other table_number rather than",
-        "  declining because one table is incomplete.",
+        "  table), use follow_up_plans with the other table_number.",
         "- Blanks are part of the answer. When breaking down by a field that",
         "  is often unpopulated, group by it anyway: a NULL group reports the",
         "  unpopulated cohort, which must be stated rather than dropped. Use",
         "  aggregate=count_null with value_column to count blanks directly.",
         "- 'Did any group exceed / fall short of a threshold' -> aggregate the",
-        "  group and add having {operator, value}; having needs a group_by.",
-        "- A question about a PROPERTY of the data rather than one entity",
-        "  ('did we ever...', 'is it possible that...', 'which activities",
-        "  had...') is a scan over the whole table with predicates, NOT a",
-        "  lookup of the entity named on the top card. Never filter to a",
-        "  single entity_key unless the question itself names that entity.",
-        # The four zero-evidence beta cases all declined for one of these two
-        # reasons: a derived figure has no column of its own, or one requested
-        # period is missing. Both are answerable from components, and both were
-        # being thrown away wholesale. See the decline analysis in
-        # logs/progress/2026-08-21-excel.md.
-        "- NEVER decline because the figure the question names is not stored as",
-        "  a column. Cumulative totals, percent complete, variance, share of",
-        "  total, per-year subtotals and running totals are all COMPUTED",
-        "  DETERMINISTICALLY by the system from the rows you return. Your job",
-        "  is to return the components. 'Cumulative three-year target per",
-        "  activity' -> operation=aggregate, aggregate=sum,",
-        "  value_json_key='annual_quant_target', group_by ['entity_key'] over",
-        "  the cycle years; the system adds the years and computes the",
-        "  percentage. Returning the components is always better than",
-        "  declining.",
-        "- NEVER decline because ONE requested period or entity is missing.",
-        "  Return the periods that DO exist and let the answer state the gap.",
-        "  A question asking 2022-2025 of a corpus holding 2023-2025 is a plan",
-        "  filtered to 2023-2025, not a decline: the reader needs the three",
-        "  years that exist plus a sentence saying 2022 is not in the",
-        "  workbooks. Declining returns neither.",
-        "- Use action=decline ONLY when no listed table holds the subject",
-        "  matter at all -- not when the arithmetic, the derivation, or one",
-        "  period is missing.",
-        "- If the question cannot be answered by these tables, action=decline.",
+        "  group and add having {operator, value}.",
+        # Seven separate prose rules used to plead against declining. Pleading
+        # is probabilistic; the enum is not. ``decline_reason`` is now a closed
+        # set and ``_illegitimate_decline`` rejects every value except the one
+        # legitimate case, so the guarantee lives in code and the prompt only
+        # has to name the vocabulary.
+        "- To decline you MUST set decline_reason to one of:",
+        f"  {', '.join(sorted(DECLINE_REASONS))}.",
+        "  Only no_table_covers_subject is accepted. Every other value is",
+        "  rejected by the system and you will be asked again, because the",
+        "  system computes derived figures (cumulative, percent complete,",
+        "  variance, share, subtotals) from the rows you return, runs several",
+        "  plans per question, and reports a partly-covered range as a gap.",
+        "  Return the components instead of declining.",
         "Return JSON only.",
     ]
     return "\n".join(lines)
@@ -817,14 +836,29 @@ def _sanitize_plan(
         # Ranked "which segments/circuits" intents group by the fact's entity
         # row; models name the concept (segment_id) rather than the column.
         group_by = ("record_id",)
-    for column in group_by:
-        if column not in typed_columns:
-            raise _PlanRejected(f"{column!r} is not groupable")
     json_group_keys = tuple(
         str(key)
         for key in payload.get("group_by_json_keys") or ()
         if str(key).strip()
     )
+    # "Break work orders down by priority" names a real attribute that simply
+    # lives in the json payload rather than in a typed column. Rejecting the
+    # plan threw away a correct intent over a misplaced key, which is the same
+    # discard-instead-of-repair mistake the invented-attribute handling above
+    # was fixed for. Move it to the grouping that can express it.
+    misfiled = tuple(
+        column for column in group_by
+        if column not in typed_columns and column in json_keys
+    )
+    if misfiled:
+        group_by = tuple(column for column in group_by if column not in misfiled)
+        json_group_keys = tuple(
+            dict.fromkeys((*json_group_keys, *misfiled))
+        )
+        logger.info("moved %r from group_by into group_by_json_keys", misfiled)
+    for column in group_by:
+        if column not in typed_columns:
+            raise _PlanRejected(f"{column!r} is not groupable")
     unknown_group_keys = [key for key in json_group_keys if key not in json_keys]
     if unknown_group_keys:
         raise _PlanRejected(f"unknown group attributes {unknown_group_keys!r}")
@@ -1180,21 +1214,20 @@ def _ask_planner(provider, prompt: str) -> dict[str, Any] | None:
         return None
 
 
-def _retry_prompt(prompt: str, reason: str) -> str:
+def _retry_prompt(prompt: str, reason: str, reason_key: str = "") -> str:
     """The same prompt, with the model's own decline reason challenged.
 
-    Deliberately not a free re-ask: it names the reason, restates the two
-    rules that decline most often violates, and asks for the components. The
-    schema and every downstream guard are unchanged, so a retry can only
-    produce a plan that would have been accepted the first time.
+    Deliberately not a free re-ask. When the planner declared a ``reason_key``
+    the challenge is the one correction that answers it, rather than three
+    generic bullets the model has to match against itself. The schema and every
+    downstream guard are unchanged, so a retry can only produce a plan that
+    would have been accepted the first time.
     """
-    return "\n".join(
-        [
-            prompt,
-            "",
-            "You already answered this question with action=decline, saying:",
-            f"  {reason or '(no reason given)'}",
-            "",
+    correction = _DECLINE_CORRECTIONS.get(reason_key)
+    challenge = (
+        [f"The system rejects decline_reason={reason_key}: {correction}."]
+        if correction
+        else [
             "That is very likely wrong. Before declining again, check:",
             "- Is the missing thing a DERIVED figure (cumulative, total,",
             "  percent complete, variance, share, running total)? The system",
@@ -1203,6 +1236,16 @@ def _retry_prompt(prompt: str, reason: str) -> str:
             "  that exists; the answer states the gap.",
             "- Does any listed table hold the underlying subject at all, even",
             "  under a different name? If so, plan against it.",
+        ]
+    )
+    return "\n".join(
+        [
+            prompt,
+            "",
+            "You already answered this question with action=decline, saying:",
+            f"  {reason or '(no reason given)'}",
+            "",
+            *challenge,
             "Decline again only if no listed table holds this subject matter.",
             "Return JSON only.",
         ]
@@ -1270,6 +1313,9 @@ def build_model_plans(
     # the model's own reason, before accepting that there is nothing to run.
     if payload.get("action") != "plan" and feature_enabled("excel_wide_fanout"):
         reason = str(payload.get("reason") or "").strip()
+        reason_key = _decline_reason(payload)
+        if illegitimate_decline(reason_key):
+            logger.info("Excel planner declined illegitimately: %s", reason_key)
         # Some declines are honest reports of a *retrieval* failure -- real_009
         # declined saying "the relevant WMP activities table is not retrieved",
         # which was true. Offering every table as selectable on the normal path
@@ -1278,7 +1324,7 @@ def build_model_plans(
         # here is a different trade: the narrow path has already returned
         # nothing, so the downside is bounded by "still nothing".
         retry_candidates, retry_contexts = candidates, contexts
-        if _blames_retrieval(reason) and manifest:
+        if reason_key == RETRIEVAL_DECLINE and manifest:
             widened, widened_contexts = _all_table_candidates(
                 manifest, contexts, conn, contracts
             )
@@ -1293,6 +1339,7 @@ def build_model_plans(
                 manifest,
             ),
             reason,
+            reason_key,
         )
         retried = _ask_planner(provider, retry_prompt)
         if retried is not None and retried.get("action") == "plan":
@@ -1301,7 +1348,10 @@ def build_model_plans(
             candidates, contexts = retry_candidates, retry_contexts
         else:
             last_rejections.clear()
-            last_rejections.append(f"declined, and declined again on retry: {reason}")
+            last_rejections.append(
+                f"declined ({reason_key or 'unclassified'}), and declined "
+                f"again on retry: {reason}"
+            )
             return []
 
     executed: list[tuple[ExcelQueryPlan, ExcelExecutionResult]] = []
