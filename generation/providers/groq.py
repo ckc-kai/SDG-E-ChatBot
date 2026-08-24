@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib.parse import quote, urlparse
 
-from generation.providers.base import ProviderError
+from generation.providers.base import ProviderError, TransientProviderError
 from generation.providers.capabilities import (
     ModelCapabilities,
     RateLimitState,
@@ -34,6 +34,9 @@ DEFAULT_MODEL_MAX_OUTPUT_TOKENS = 65_536
 DEFAULT_PROMPT_TOKEN_BUDGET = 6_500
 DEFAULT_TOKEN_SAFETY_FACTOR = 1.2
 DEFAULT_REASONING_EFFORT = "low"
+# Three attempts clears an isolated bad sample without masking a real outage.
+DEFAULT_MAX_ATTEMPTS = 3
+DEFAULT_RETRY_BACKOFF_SECONDS = 2.0
 # User-facing requests may wait for a short provider reset, but should not
 # remain blocked for a long quota window.
 DEFAULT_MAX_RATE_LIMIT_WAIT_SECONDS = 15.0
@@ -76,18 +79,27 @@ class HttpxGroqTransport:
             response.raise_for_status()
             decoded = response.json()
         except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
             error_code = _safe_http_error_code(exc.response)
             suffix = f" ({error_code})" if error_code else ""
-            if exc.response.status_code == 429:
-                raise ProviderError(
-                    "Groq free-tier rate limit reached; no automatic retry was made"
-                    f"{suffix}"
+            if status == 429:
+                raise TransientProviderError(
+                    f"Groq rate limit reached{suffix}"
+                ) from exc
+            # json_validate_failed means the model returned content that did
+            # not satisfy the response schema -- commonly an empty completion
+            # when reasoning consumed the budget. It is a property of one
+            # sampled generation, not of the request, so the same request can
+            # succeed on a retry.
+            if status >= 500 or error_code == "json_validate_failed":
+                raise TransientProviderError(
+                    f"Groq request failed with HTTP {status}{suffix}"
                 ) from exc
             raise ProviderError(
-                f"Groq request failed with HTTP {exc.response.status_code}{suffix}"
+                f"Groq request failed with HTTP {status}{suffix}"
             ) from exc
         except (httpx.HTTPError, TimeoutError, OSError) as exc:
-            raise ProviderError("Groq request failed") from exc
+            raise TransientProviderError("Groq request failed") from exc
         except json.JSONDecodeError as exc:
             raise ProviderError("Groq returned invalid JSON") from exc
         if not isinstance(decoded, Mapping):
@@ -155,6 +167,8 @@ class GroqProvider:
         prompt_token_budget: int = DEFAULT_PROMPT_TOKEN_BUDGET,
         token_safety_factor: float = DEFAULT_TOKEN_SAFETY_FACTOR,
         reasoning_effort: str = DEFAULT_REASONING_EFFORT,
+        max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+        retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
         max_rate_limit_wait_seconds: float = DEFAULT_MAX_RATE_LIMIT_WAIT_SECONDS,
     ) -> None:
         if not api_key.strip():
@@ -169,6 +183,8 @@ class GroqProvider:
             raise ValueError("invalid Groq rate-limit wait")
         if reasoning_effort not in {"low", "medium", "high"}:
             raise ValueError("invalid Groq reasoning effort")
+        if max_attempts < 1 or retry_backoff_seconds < 0:
+            raise ValueError("invalid Groq retry configuration")
         normalized_url = base_url.rstrip("/")
         parsed = urlparse(normalized_url)
         if parsed.scheme != "https" or not parsed.netloc:
@@ -179,6 +195,8 @@ class GroqProvider:
         self.model_id = f"groq/{self.model}"
         self.base_url = normalized_url
         self.max_tokens = max_tokens
+        self.max_attempts = max_attempts
+        self.retry_backoff_seconds = retry_backoff_seconds
         self.temperature = temperature
         self.timeout_seconds = timeout_seconds
         self.context_tokens = context_tokens
@@ -216,6 +234,9 @@ class GroqProvider:
                 values.get("GROQ_MODEL", DEFAULT_MODEL),
                 base_url=values.get("GROQ_BASE_URL", DEFAULT_BASE_URL),
                 max_tokens=int(values.get("GROQ_MAX_TOKENS", DEFAULT_MAX_TOKENS)),
+                max_attempts=int(
+                    values.get("GROQ_MAX_ATTEMPTS", DEFAULT_MAX_ATTEMPTS)
+                ),
                 temperature=float(values.get("GROQ_TEMPERATURE", DEFAULT_TEMPERATURE)),
                 timeout_seconds=float(values.get("GROQ_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS)),
                 context_tokens=int(values.get("GROQ_CONTEXT_TOKENS", DEFAULT_CONTEXT_TOKENS)),
@@ -246,6 +267,22 @@ class GroqProvider:
         return self._generate(prompt, schema)
 
     def _generate(self, prompt: str, schema: Mapping[str, Any] | None) -> str:
+        """Send one request, retrying only failures a retry can actually clear.
+
+        A single transient failure used to abort a whole evaluation run and, in
+        service, to fail a user's question outright.
+        """
+        last_error: TransientProviderError | None = None
+        for attempt in range(self.max_attempts):
+            if attempt:
+                time.sleep(self.retry_backoff_seconds * (2 ** (attempt - 1)))
+            try:
+                return self._generate_once(prompt, schema)
+            except TransientProviderError as error:
+                last_error = error
+        raise last_error
+
+    def _generate_once(self, prompt: str, schema: Mapping[str, Any] | None) -> str:
         if not prompt.strip():
             raise ProviderError("Groq prompt must not be empty")
         self.refresh_capabilities()

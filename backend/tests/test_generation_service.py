@@ -252,6 +252,7 @@ class GenerationServiceTests(unittest.TestCase):
                     },
                 ],
             ),
+            bound={},
         )
 
         chunks = _verified_excel_chunks(answer)
@@ -300,6 +301,7 @@ class GenerationServiceTests(unittest.TestCase):
                 rows=[(2025, "r25", "0", "0", "Structures")],
                 provenance=[],
             ),
+            bound={},
         )
 
         chunks = _verified_excel_chunks(answer)

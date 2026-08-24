@@ -1,0 +1,463 @@
+{
+  "min_similarity": 0.72,
+  "pairs": [
+    {
+      "role": "wmp",
+      "earlier": {
+        "cycle": "2023-2025",
+        "filename": "sdge__wmp__2023-2025__r5-redacted__2025-07-25.pdf"
+      },
+      "later": {
+        "cycle": "2026-2028",
+        "filename": "sdge__wmp__2026-2028__r2__2025-05-23.pdf"
+      },
+      "sections_earlier": 34,
+      "sections_later": 40,
+      "sections_paired": 15,
+      "alignments": [
+        {
+          "section": "8 Wildfire Mitigations",
+          "chunks": 736,
+          "title": "Wildfire Mitigations",
+          "targets": [
+            {
+              "section": "6 Wildfire Mitigation Strategy",
+              "chunks": 142,
+              "similarity": 0.9411
+            }
+          ],
+          "best_similarity": 0.9411
+        },
+        {
+          "section": "Covered Conductor Testing Cumulative Report FINAL_Redacted 2-22-23",
+          "chunks": 327,
+          "title": "Covered Conductor Testing Cumulative Report FINAL_Redacted 2-22-23",
+          "targets": [],
+          "best_similarity": 0.4944
+        },
+        {
+          "section": "Covered Conductor Testing Cumulative Report Redacted",
+          "chunks": 230,
+          "title": "Covered Conductor Testing Cumulative Report Redacted",
+          "targets": [],
+          "best_similarity": 0.6708
+        },
+        {
+          "section": "6 Risk Methodology and Assessment",
+          "chunks": 140,
+          "title": "Risk Methodology and Assessment",
+          "targets": [
+            {
+              "section": "5 Risk Methodology and Assessment",
+              "chunks": 141,
+              "similarity": 1.0055
+            }
+          ],
+          "best_similarity": 1.0055
+        },
+        {
+          "section": "7 Wildfire Mitigation Strategy Development",
+          "chunks": 71,
+          "title": "Wildfire Mitigation Strategy Development",
+          "targets": [
+            {
+              "section": "6 Wildfire Mitigation Strategy",
+              "chunks": 142,
+              "similarity": 0.9753
+            }
+          ],
+          "best_similarity": 0.9753
+        },
+        {
+          "section": "5 Overview of the Service Territory",
+          "chunks": 67,
+          "title": "Overview of the Service Territory",
+          "targets": [
+            {
+              "section": "4 Overview of the Service Territory",
+              "chunks": 17,
+              "similarity": 1.0057
+            }
+          ],
+          "best_similarity": 1.0057
+        },
+        {
+          "section": "4 Authorities and References",
+          "chunks": 54,
+          "title": "Authorities and References",
+          "targets": [],
+          "best_similarity": 0.6596
+        },
+        {
+          "section": "9 Public Safety Power Shutoff",
+          "chunks": 50,
+          "title": "Public Safety Power Shutoff",
+          "targets": [
+            {
+              "section": "7 Public Safety Power Shutoff",
+              "chunks": 10,
+              "similarity": 0.9976
+            }
+          ],
+          "best_similarity": 0.9976
+        },
+        {
+          "section": "1 Appendix A: Definitions",
+          "chunks": 50,
+          "title": "Appendix A: Definitions",
+          "targets": [],
+          "best_similarity": 0.6894
+        },
+        {
+          "section": "2 Concept of Operations | HOW",
+          "chunks": 47,
+          "title": "Concept of Operations | HOW",
+          "targets": [],
+          "best_similarity": 0.628
+        },
+        {
+          "section": "11 Costs",
+          "chunks": 37,
+          "title": "Costs",
+          "targets": [],
+          "best_similarity": 0.5626
+        },
+        {
+          "section": "4 Recorded Effectiveness",
+          "chunks": 27,
+          "title": "Recorded Effectiveness",
+          "targets": [],
+          "best_similarity": 0.6692
+        },
+        {
+          "section": "8 Estimated Effectiveness:",
+          "chunks": 26,
+          "title": "Estimated Effectiveness:",
+          "targets": [],
+          "best_similarity": 0.7022
+        },
+        {
+          "section": "10 Lessons Learned",
+          "chunks": 25,
+          "title": "Lessons Learned",
+          "targets": [
+            {
+              "section": "13 Lessons Learned",
+              "chunks": 25,
+              "similarity": 1.0001
+            }
+          ],
+          "best_similarity": 1.0001
+        },
+        {
+          "section": "4 Overview of WMP",
+          "chunks": 23,
+          "title": "Overview of WMP",
+          "targets": [
+            {
+              "section": "3 Overview of Base WMP",
+              "chunks": 27,
+              "similarity": 0.9096
+            }
+          ],
+          "best_similarity": 0.9096
+        },
+        {
+          "section": "1 Executive Summary",
+          "chunks": 23,
+          "title": "Executive Summary",
+          "targets": [
+            {
+              "section": "1 Executive Summary",
+              "chunks": 15,
+              "similarity": 1.0017
+            }
+          ],
+          "best_similarity": 1.0017
+        },
+        {
+          "section": "1 Introduction",
+          "chunks": 21,
+          "title": "Introduction",
+          "targets": [
+            {
+              "section": "1 Executive Summary",
+              "chunks": 15,
+              "similarity": 0.758
+            }
+          ],
+          "best_similarity": 0.758
+        },
+        {
+          "section": "4 OEIS Table 9-2: Frequently De-energized Circuits",
+          "chunks": 17,
+          "title": "OEIS Table 9-2: Frequently De-energized Circuits",
+          "targets": [
+            {
+              "section": "1 OEIS Table 4-3: Frequently De-energized Circuits",
+              "chunks": 15,
+              "similarity": 0.9828
+            }
+          ],
+          "best_similarity": 0.9828
+        },
+        {
+          "section": "3 Testing",
+          "chunks": 17,
+          "title": "Testing",
+          "targets": [],
+          "best_similarity": 0.6119
+        },
+        {
+          "section": "1 Summary Documentation",
+          "chunks": 17,
+          "title": "Summary Documentation",
+          "targets": [
+            {
+              "section": "2 Summary Documentation",
+              "chunks": 15,
+              "similarity": 0.9969
+            }
+          ],
+          "best_similarity": 0.9969
+        },
+        {
+          "section": "7 M&I Practices",
+          "chunks": 16,
+          "title": "M&I Practices",
+          "targets": [],
+          "best_similarity": 0.6145
+        },
+        {
+          "section": "2 OEIS Table 8-46: High-Level Communication Protocols, Procedures, and Systems with Public Safety Partners - Redacted",
+          "chunks": 14,
+          "title": "OEIS Table 8-46: High-Level Communication Protocols, Procedures, and Systems with Public Safety Partners - Redacted",
+          "targets": [
+            {
+              "section": "6 OEIS Table 11-3: High-Level Communication Protocols, Procedures, and Systems with Public Safety Partners",
+              "chunks": 27,
+              "similarity": 0.9593
+            }
+          ],
+          "best_similarity": 0.9593
+        },
+        {
+          "section": "11 Corrective Action Program",
+          "chunks": 13,
+          "title": "Corrective Action Program",
+          "targets": [],
+          "best_similarity": 0.6863
+        },
+        {
+          "section": "5 Alternatives",
+          "chunks": 9,
+          "title": "Alternatives",
+          "targets": [],
+          "best_similarity": 0.6512
+        },
+        {
+          "section": "12 Lessons Learned",
+          "chunks": 9,
+          "title": "Lessons Learned",
+          "targets": [
+            {
+              "section": "13 Lessons Learned",
+              "chunks": 25,
+              "similarity": 1.0001
+            }
+          ],
+          "best_similarity": 1.0001
+        },
+        {
+          "section": "3 OEIS Table 8-61: Collaboration in Local Wildfire Mitigation Planning",
+          "chunks": 8,
+          "title": "OEIS Table 8-61: Collaboration in Local Wildfire Mitigation Planning",
+          "targets": [
+            {
+              "section": "7 OEIS Table 11-5: Collaboration in Local Wildfire Mitigation Planning",
+              "chunks": 5,
+              "similarity": 0.9728
+            }
+          ],
+          "best_similarity": 0.9728
+        },
+        {
+          "section": "3 Statutory Requirements Checklist",
+          "chunks": 8,
+          "title": "Statutory Requirements Checklist",
+          "targets": [],
+          "best_similarity": 0.6422
+        },
+        {
+          "section": "6 New Technologies",
+          "chunks": 7,
+          "title": "New Technologies",
+          "targets": [],
+          "best_similarity": 0.597
+        },
+        {
+          "section": "2 Responsible Persons",
+          "chunks": 5,
+          "title": "Responsible Persons",
+          "targets": [
+            {
+              "section": "2 Responsible Persons",
+              "chunks": 6,
+              "similarity": 1.0049
+            }
+          ],
+          "best_similarity": 1.0049
+        },
+        {
+          "section": "9 Animal Contact Model",
+          "chunks": 5,
+          "title": "Animal Contact Model",
+          "targets": [],
+          "best_similarity": 0.5744
+        },
+        {
+          "section": "4 Vehicle Contact Model",
+          "chunks": 5,
+          "title": "Vehicle Contact Model",
+          "targets": [],
+          "best_similarity": 0.5821
+        },
+        {
+          "section": "5 AWS Model Deployment",
+          "chunks": 5,
+          "title": "AWS Model Deployment",
+          "targets": [],
+          "best_similarity": 0.568
+        },
+        {
+          "section": "2 Conductor Model PoF",
+          "chunks": 5,
+          "title": "Conductor Model PoF",
+          "targets": [],
+          "best_similarity": 0.5736
+        },
+        {
+          "section": "9 PSPS",
+          "chunks": 5,
+          "title": "PSPS",
+          "targets": [],
+          "best_similarity": 0.6452
+        }
+      ]
+    },
+    {
+      "role": "wmp_guidelines",
+      "earlier": {
+        "cycle": "2023-2025",
+        "filename": "sdge__wmp_guidelines__2023-2025__final__2022-12-06.pdf"
+      },
+      "later": {
+        "cycle": "2026-2028",
+        "filename": "sdge__wmp_guidelines__2026-2028__final__2025-02-24.pdf"
+      },
+      "sections_earlier": 8,
+      "sections_later": 16,
+      "sections_paired": 7,
+      "alignments": [
+        {
+          "section": "8. Wildfire Mitigations",
+          "chunks": 208,
+          "title": "Wildfire Mitigations",
+          "targets": [
+            {
+              "section": "6. Wildfire Mitigation Strategy",
+              "chunks": 26,
+              "similarity": 0.9411
+            }
+          ],
+          "best_similarity": 0.9411
+        },
+        {
+          "section": "Appendix A: Definitions",
+          "chunks": 55,
+          "title": "Appendix A: Definitions",
+          "targets": [
+            {
+              "section": "Appendix A: Definitions",
+              "chunks": 60,
+              "similarity": 1.006
+            }
+          ],
+          "best_similarity": 1.006
+        },
+        {
+          "section": "6. Risk Methodology and Assessment",
+          "chunks": 47,
+          "title": "Risk Methodology and Assessment",
+          "targets": [
+            {
+              "section": "5. Risk Methodology and Assessment",
+              "chunks": 49,
+              "similarity": 1.0055
+            }
+          ],
+          "best_similarity": 1.0055
+        },
+        {
+          "section": "5. Overview of the Service Territory",
+          "chunks": 33,
+          "title": "Overview of the Service Territory",
+          "targets": [
+            {
+              "section": "4. Overview of the Service Territory",
+              "chunks": 9,
+              "similarity": 1.0057
+            }
+          ],
+          "best_similarity": 1.0057
+        },
+        {
+          "section": "Appendix B: Supporting Documentation for Risk Methodolgy and Assesment",
+          "chunks": 30,
+          "title": "Appendix B: Supporting Documentation for Risk Methodolgy and Assesment",
+          "targets": [
+            {
+              "section": "Appendix B: Supporting Documentation for Risk Methodology and Assessment",
+              "chunks": 38,
+              "similarity": 0.9587
+            }
+          ],
+          "best_similarity": 0.9587
+        },
+        {
+          "section": "7. Wildfire Mitigation Strategy Development",
+          "chunks": 26,
+          "title": "Wildfire Mitigation Strategy Development",
+          "targets": [
+            {
+              "section": "6. Wildfire Mitigation Strategy",
+              "chunks": 26,
+              "similarity": 0.9753
+            }
+          ],
+          "best_similarity": 0.9753
+        },
+        {
+          "section": "9. Public Safety Power Shutoff",
+          "chunks": 20,
+          "title": "Public Safety Power Shutoff",
+          "targets": [],
+          "best_similarity": 0.6457
+        },
+        {
+          "section": "4. Overview of WMP",
+          "chunks": 10,
+          "title": "Overview of WMP",
+          "targets": [
+            {
+              "section": "3. Overview of Base WMP",
+              "chunks": 16,
+              "similarity": 0.9091
+            }
+          ],
+          "best_similarity": 0.9091
+        }
+      ]
+    }
+  ]
+}

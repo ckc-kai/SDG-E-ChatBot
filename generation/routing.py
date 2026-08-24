@@ -85,23 +85,31 @@ class RouteDecision:
 
 
 def _rule_route(question: str) -> RouteDecision:
-    normalized = " ".join(question.split())
-    excel = bool(_EXCEL_RE.search(normalized))
-    explicit_pdf = bool(_PDF_RE.search(normalized))
-    table = bool(_TABLE_RE.search(normalized))
-    figure = bool(_FIGURE_RE.search(normalized))
-    ambiguous = bool(_AMBIGUOUS_SUPPORT_RE.search(normalized)) and not (table or figure)
+    """Request every evidence group; keep the cues only as diagnostics.
 
-    # An explicit workbook/QDR request stays in Excel unless the question also
-    # names a PDF source.  Every other question is a PDF question by default.
-    need_pdf = not excel or explicit_pdf
+    This deliberately no longer predicts which resource a question needs.
+    Grouped retrieval ranks each content type independently and merges without
+    mixing scores, so an extra group cannot displace another group's results --
+    the guarantee ``retrieve_evidence`` documents. Withholding a group can
+    therefore only lose evidence, and it did: ``_EXCEL_RE`` demanded a literal
+    "workbook", "QDR" or "Q3", which no stakeholder question in the beta set
+    uses, so the Excel lane was requested for none of them while eleven of them
+    are answerable only from the workbook.
+
+    The remaining cost of a group is prompt tokens, which the answering model's
+    context window covers with room to spare. Recall is the scarce resource
+    here, not context.
+    """
+    normalized = " ".join(question.split())
     return RouteDecision(
-        need_pdf=need_pdf,
-        need_excel=excel,
-        need_narrative=need_pdf,
-        need_table=need_pdf and table,
-        need_figure=need_pdf and figure,
-        uncertain=need_pdf and ambiguous,
+        need_pdf=True,
+        need_excel=True,
+        need_narrative=True,
+        need_table=True,
+        need_figure=True,
+        # Retained so the judge route and its callers keep working, and so the
+        # cue is still visible in diagnostics.
+        uncertain=bool(_AMBIGUOUS_SUPPORT_RE.search(normalized)),
     )
 
 

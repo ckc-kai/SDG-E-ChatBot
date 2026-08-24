@@ -11,6 +11,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from generation.adapters import adapt_ranked_results
 from generation.computation import CalculationResult
+from generation.evidence_audit import evidence_snapshot
 from generation.features import feature_enabled
 from generation.followup import resolve_followup_question
 from generation.multistep import (
@@ -38,7 +39,10 @@ from generation.schemas import (
 )
 from generation.service import AnswerService, ModelOutputError, parse_model_answer
 from generation.citation_validation import validate_and_hydrate_citations
+from generation.excel_rollup import display_columns, roll_up
+from retrieval.query.excel.manifest import load_manifest
 from retrieval.query.pdf import EVIDENCE_GROUPS, EvidenceRetrievalResult
+from retrieval.utils import connect_db
 from services.retrieval_service import RetrievalBundle
 
 
@@ -70,6 +74,44 @@ def deduplicate_chunks(chunks: list[Chunk]) -> list[Chunk]:
         seen.add(key)
         unique.append(chunk)
     return unique
+
+
+# Below this a text-only refusal stands: a couple of weak passages is not a
+# record that contradicts the model. Verified workbook rows bypass it entirely,
+# because those are facts the system executed, not passages it ranked.
+_REFUSAL_REVIEW_MIN_CHUNKS = int(
+    os.getenv("SDGE_REFUSAL_REVIEW_MIN_CHUNKS", "3")
+)
+# Narrative evidence and structured workbook rows do not want the same budget.
+# Measured on the frozen beta set: dropping the shared ceiling from 60000 to
+# 20000 moved single_pdf and multi_pdf up while multi_excel fell 63.25 -> 47.25,
+# because the row-heavy questions (three-year cumulative targets, cost per mile
+# by segment) are exactly the ones a tight budget truncates. The provider
+# ceiling now serves the workbook lane; a bundle carrying no structured rows is
+# answered under the narrower one.
+_PDF_PROMPT_TOKEN_BUDGET = int(
+    os.getenv("SDGE_PDF_PROMPT_TOKEN_BUDGET", "25000")
+)
+
+
+def _lane_prompt_budget(bundle) -> int | None:
+    """The tighter narrative budget, or None to use the provider ceiling.
+
+    Rows, not cards. An ``excel_card`` is a description of what a table holds;
+    it is the size of a paragraph and needs no more room than one. Only an
+    executed result -- verified rows, or the row window behind a card -- can
+    consume the wide budget, and only that earns it. Keying on the card instead
+    sent narrative questions down the wide path merely because retrieval
+    surfaced one card among twenty passages.
+
+    Decided by what the bundle carries, not by which question it is, so it
+    applies unchanged to questions this corpus has never seen.
+    """
+    snapshot = evidence_snapshot(bundle)
+    carries_rows = (
+        snapshot["verified_rows"] > 0 or snapshot["excel_row_slices"] > 0
+    )
+    return None if carries_rows else _PDF_PROMPT_TOKEN_BUDGET
 
 
 class GenerationService:
@@ -104,7 +146,11 @@ class GenerationService:
             chunks=tuple(chunks),
         )
         adapter_ms = round((time.perf_counter() - adapter_started) * 1000)
-        result = self._answer_service.answer(request)
+        lane_budget = _lane_prompt_budget(bundle)
+        result = self._answer_service.answer(
+            request, prompt_token_budget=lane_budget
+        )
+        result = self._review_refusal(request, result, bundle, lane_budget)
         timings = result.timings
         if timings is None:
             return result
@@ -118,6 +164,50 @@ class GenerationService:
                 ),
             ),
         )
+
+
+    # One review, never a loop: a second refusal is the model's answer.
+    def _review_refusal(self, request, result, bundle, lane_budget=None):
+        """Re-ask once when a refusal contradicts the evidence on record.
+
+        The answer model decides sufficiency on its own and is measurably wrong
+        about it: on the 2026-08-23 beta run it refused 10 of 27 answerable
+        questions, ``real_004`` among them while holding 128 execution-verified
+        rows of the exact target-versus-actual data asked for. This checks the
+        refusal against what was actually retrieved -- no model involved in the
+        check -- and only re-asks when the record contradicts it. A question
+        with nothing behind it is left refused.
+        """
+        if not feature_enabled("refusal_review"):
+            return result
+        if not getattr(result, "insufficient_context", False):
+            return result
+        if request.evidence_notice is not None:
+            return result
+        snapshot = evidence_snapshot(bundle)
+        verified_rows = snapshot["verified_rows"]
+        ranked = snapshot["ranked_chunks"]
+        if verified_rows <= 0 and ranked < _REFUSAL_REVIEW_MIN_CHUNKS:
+            return result
+        held = []
+        if verified_rows:
+            held.append(f"{verified_rows} execution-verified workbook rows")
+        if ranked:
+            held.append(f"{ranked} ranked passages")
+        notice = (
+            "A first pass reported insufficient context, but the evidence "
+            f"above holds {' and '.join(held)}. Answer every part of the "
+            "question this evidence does support, and state plainly which "
+            "parts it does not. Report insufficient context only if none of "
+            "the question can be answered from it."
+        )
+        reviewed = self._answer_service.answer(
+            replace(request, evidence_notice=notice),
+            prompt_token_budget=lane_budget,
+        )
+        if getattr(reviewed, "insufficient_context", True):
+            return result
+        return reviewed
 
     def generate_mixed(
         self,
@@ -243,7 +333,10 @@ class GenerationService:
     def plan_retrieval(self, question: str) -> RetrievalPlan:
         if self._planner_provider is None:
             self._planner_provider = _create_planner_provider()
-        plan = build_retrieval_plan(question, self._planner_provider)
+        plan = _stamp_planner_model(
+            build_retrieval_plan(question, self._planner_provider),
+            self._planner_provider,
+        )
         if plan.source != "fallback":
             return plan
         # Local planner failure would silently degrade a multi-part question
@@ -251,7 +344,9 @@ class GenerationService:
         escalation = self._escalation_planner_provider()
         if escalation is None:
             return plan
-        escalated = build_retrieval_plan(question, escalation)
+        escalated = _stamp_planner_model(
+            build_retrieval_plan(question, escalation), escalation
+        )
         return escalated if escalated.source == "model" else plan
 
     _escalation_provider = None
@@ -319,11 +414,25 @@ def _chunks_from_bundle(bundle: RetrievalBundle) -> list[Chunk]:
             tuple(enumerate(bundle.calculations, start=1))
         ):
             chunks.insert(0, _calculation_chunk(calculation, index))
+    # Row windows lead the ranked evidence, with verified executions above
+    # them. Moving them after the ranked evidence was measured and reverted:
+    # 48.24 against 51.37, with refusals back up from 6 to 9 of 27. Evidence
+    # the model has to scroll past is evidence it declines to use.
+    for row_slice in reversed(getattr(bundle, "excel_rows", ())):
+        chunks.insert(0, _excel_rows_chunk(row_slice))
     verified_items = bundle.verified_excels or (
         (bundle.verified_excel,) if bundle.verified_excel is not None else ()
     )
     for answer in reversed(verified_items):
         chunks[0:0] = _verified_excel_chunks(answer)
+    # The corpus's shape, above everything derived from it. Several
+    # questions are answerable only from coverage and schema -- a year the
+    # workbooks do not reach, a field a table does not carry, two tables
+    # that share no key -- and with none of it in the prompt the model
+    # estimated instead of saying so.
+    manifest_chunk = _workbook_manifest_chunk(bundle)
+    if manifest_chunk is not None:
+        chunks.insert(0, manifest_chunk)
     chunks = deduplicate_chunks(chunks)
     # Different verified executions can share one card id. Preserve each
     # distinct result under a unique id so citation validation is unambiguous.
@@ -359,6 +468,37 @@ def _calculation_chunk(result: CalculationResult, index: int) -> Chunk:
     )
 
 
+def _workbook_manifest_chunk(bundle) -> Chunk | None:
+    """Coverage and schema for the workbooks, when the question touched them."""
+    if not feature_enabled("workbook_manifest"):
+        return None
+    touched_excel = bool(
+        bundle.verified_excels
+        or bundle.verified_excel
+        or getattr(bundle, "excel_rows", ())
+        or getattr(bundle.evidence, "groups", {}).get("excel")
+    )
+    if not touched_excel:
+        return None
+    connection = connect_db()
+    try:
+        rendered = load_manifest(connection).render()
+    finally:
+        connection.close()
+    if not rendered:
+        return None
+    return Chunk(
+        source_id="SDG&E quarterly data report",
+        chunk_id="workbook-manifest",
+        content=rendered,
+        metadata=ChunkMetadata(
+            source_file="SDG&E quarterly data report",
+            breadcrumb="Quarterly Data Report > coverage and schema",
+            content_type="excel_card",
+        ),
+    )
+
+
 def _computation_note_chunk(note: str, index: int) -> Chunk:
     return Chunk(
         source_id="Computation status",
@@ -370,6 +510,19 @@ def _computation_note_chunk(note: str, index: int) -> Chunk:
             content_type="calculation",
         ),
     )
+
+
+def _stamp_planner_model(plan: RetrievalPlan, provider) -> RetrievalPlan:
+    """Record which model produced a plan, including the escalation model.
+
+    ``plan.source == "model"`` is identical whether the configured planner or
+    the Groq escalation built the plan, so without this a planner comparison
+    can silently measure the same model twice.
+    """
+    model_id = getattr(provider, "model_id", None)
+    if plan.planner_model is not None or model_id is None:
+        return plan
+    return replace(plan, planner_model=str(model_id))
 
 
 def _create_planner_provider():
@@ -394,6 +547,33 @@ def _create_planner_provider():
     return create_provider_from_env(provider_name, environ=values)
 
 
+def _excel_rows_chunk(row_slice) -> Chunk:
+    """Render a window of workbook rows as one citable evidence chunk."""
+    return Chunk(
+        source_id=row_slice.source_file,
+        chunk_id=f"excel-rows-{row_slice.card_chunk_id}",
+        content=row_slice.render(),
+        metadata=ChunkMetadata(
+            source_file=row_slice.source_file,
+            sheet=f"Table {row_slice.table_number}",
+            breadcrumb=(
+                f"Quarterly Data Report > Table {row_slice.table_number}"
+            ),
+            content_type="excel_card",
+        ),
+    )
+
+
+# Rendering a result as one table chunk with a header row, instead of one
+# chunk per row, was measured over three replicates and reverted: 51.23 against
+# 54.79 on the sixteen workbook cases, every replicate worse. The compact form
+# is cheaper in tokens and easier to read, and it scored worse anyway -- a row
+# that is its own chunk is separately citable and carries its own provenance,
+# and the per-row path also computes percent-complete arithmetically per row.
+# This is the same result the previous session got when it moved row windows
+# after the ranked evidence. Do not re-try this without a measurement.
+
+
 def _verified_excel_chunks(answer) -> list[Chunk]:
     """Turn an executed Excel result into explicit, cited evidence chunks."""
     selected_keys = tuple(getattr(answer.plan, "select_json_keys", ()))
@@ -412,13 +592,25 @@ def _verified_excel_chunks(answer) -> list[Chunk]:
         for item in provenance
         if (number := _int_or_none(item.get("source_row"))) is not None
     ]
+    # Generated jsonb group aliases are named back for the reader; see
+    # ``generation.excel_rollup.display_columns``.
+    display = display_columns(answer.result, answer.plan)
     rendered_rows = [
         ", ".join(
             f"{column}={value}"
-            for column, value in zip(answer.result.columns, row, strict=False)
+            for column, value in zip(display, row, strict=False)
         )
         for row in answer.result.rows
     ]
+    # Components without their total is the single largest recoverable Excel
+    # loss: 20% of gold figures were fetched as groups and never combined,
+    # because the only deterministic roll-up in the system fired for one table
+    # read one way. These figures are computed here, never by the model.
+    rolled = (
+        roll_up(answer.result, answer.plan)
+        if feature_enabled("excel_rollups")
+        else []
+    )
     content = "\n".join(
         [
             "Execution-verified Excel result:",
@@ -427,6 +619,16 @@ def _verified_excel_chunks(answer) -> list[Chunk]:
             *rendered_rows,
             f"Unit: {answer.unit or 'not specified'}",
             f"Contributing facts: {answer.result.contributing_facts}",
+            *(
+                [
+                    "Deterministic roll-ups over the rows above "
+                    "(already calculated; quote them, do not recompute):",
+                    *[f"  {item.render()}" for item in rolled],
+                ]
+                if rolled
+                else []
+            ),
+            *[f"Note: {warning}" for warning in answer.result.warnings],
             *(
                 [
                     "Missing requested reporting years: "
@@ -460,25 +662,34 @@ def _verified_excel_chunks(answer) -> list[Chunk]:
     ]
 
 
-def _decimal(value) -> Decimal:
+def _decimal(value) -> Decimal | None:
+    """The value as a Decimal, or None when the workbook left it blank.
+
+    A blank target or actual is a reportable fact -- an activity carried no
+    target that year -- not a malformed row. Raising here aborted the whole
+    answer once plans widened beyond single-activity histories, where every
+    value happened to be populated.
+    """
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
     try:
         return Decimal(str(value))
-    except (InvalidOperation, TypeError, ValueError) as exc:
-        raise ValueError(f"Excel history value is not numeric: {value!r}") from exc
+    except (InvalidOperation, TypeError, ValueError):
+        return None
 
 
-def _format_decimal(value: Decimal) -> str:
-    return format(value.normalize(), "f")
+def _format_decimal(value: Decimal | None) -> str:
+    return "not reported" if value is None else format(value.normalize(), "f")
 
 
-def _percent_complete(actual: Decimal, target: Decimal) -> Decimal | None:
-    if target == 0:
+def _percent_complete(actual: Decimal | None, target: Decimal | None) -> Decimal | None:
+    if target is None or actual is None or target == 0:
         return None
     return (actual / target * 100).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
 
 
 def _format_percent(value: Decimal | None) -> str:
-    return "not defined (target is zero)" if value is None else f"{value}%"
+    return "not defined (target is zero or absent)" if value is None else f"{value}%"
 
 
 def _verified_entity_history_chunks(
@@ -486,7 +697,17 @@ def _verified_entity_history_chunks(
 ) -> list[Chunk]:
     columns = answer.result.columns
     year_index = columns.index("reporting_year")
-    record_index = columns.index("record_id")
+    # The plan chooses its own grouping now, so the row identifier may be
+    # record_id, entity_key, or title. Any of them names the row for a reader;
+    # only the absence of all three is a problem.
+    record_index = next(
+        (
+            columns.index(name)
+            for name in ("record_id", "entity_key", "title")
+            if name in columns
+        ),
+        None,
+    )
     selected_indexes = {
         key: columns.index(f"selected_{index}")
         for index, key in enumerate(selected_keys)
@@ -508,8 +729,8 @@ def _verified_entity_history_chunks(
         actual = _decimal(row[selected_indexes["quant_actual_progress_q1_4"]])
         unit = str(row[selected_indexes["quant_target_units"]])
         percent = _percent_complete(actual, target)
-        totals_target += target
-        totals_actual += actual
+        totals_target += target or Decimal(0)
+        totals_actual += actual or Decimal(0)
         source_file = (
             provenance.get("source_file")
             or f"sdge_table{answer.table_number:02d}.csv"
@@ -519,15 +740,16 @@ def _verified_entity_history_chunks(
             [
                 "Execution-verified Excel row:",
                 f"reporting_year={year}",
-                f"record_id={row[record_index]}",
+                f"record={row[record_index] if record_index is not None else 'unnamed'}",
                 f"annual_target={_format_decimal(target)}",
                 f"q4_year_end_actual={_format_decimal(actual)}",
                 f"unit={unit}",
                 f"percent_complete={_format_percent(percent)}",
                 (
-                    "calculation=undefined because target is zero"
+                    "calculation=undefined because the target is zero or absent"
                     if percent is None
-                    else f"calculation={_format_decimal(actual)} / {_format_decimal(target)} x 100"
+                    else f"calculation={_format_decimal(actual)} / "
+                         f"{_format_decimal(target)} x 100"
                 ),
             ]
         )

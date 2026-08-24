@@ -24,6 +24,8 @@ from retrieval.ingest.excel.contracts import (
     TableContract,
     load_contracts,
 )
+from generation.features import feature_enabled
+from retrieval.query.excel.scopes import overlapping_scope, scope_is_pinned
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +39,36 @@ AGGREGATES = {
     "count": "count({col})",
     "min": "min({col})",
     "max": "max({col})",
+    # A blank is a reportable fact, not an absence to be dropped. Table 13
+    # leaves 86.9% of its GO 95 priority field unpopulated, and an answer that
+    # reports the populated counts without the blank cohort misrepresents the
+    # data more than one that reports nothing.
+    "count_null": "count(*) FILTER (WHERE {col} IS NULL)",
+    "count_distinct": "count(DISTINCT {col})",
 }
+ORDERING_OPERATORS = {"gt", "gte", "lt", "lte"}
 OPERATORS = {"eq": "=", "ne": "<>", "gt": ">", "gte": ">=", "lt": "<", "lte": "<="}
+# "delayed or cancelled", "Level 2 or Level 3". Expressing these as a set of
+# ``ne`` complements needed the full vocabulary up front and silently included
+# any value the vocabulary had missed.
+SET_OPERATORS = {"in": "= ANY(%s)", "not_in": "<> ALL(%s)"}
+MAX_SET_VALUES = 25
+
+# jsonb ``->>`` yields text. Comparing it without a cast orders '2.0' above
+# '1000' and reads '0' as unequal to a stored '0.0', so a plan that looked
+# validated returned rows matching nothing the caller asked for -- and the
+# channel reported that as execution-verified. Casts are a fixed code
+# allowlist; nothing caller-supplied ever reaches the statement.
+CASTS = {"numeric": "::numeric", "date": "::date", "text": ""}
+# Guards the cast against rows whose attribute is blank or non-numeric, which
+# would otherwise abort the whole statement with a conversion error.
+_NUMERIC_GUARD = r"^-?[0-9]+(\.[0-9]+)?$"
+# Record tables keep the unit of a numeric attribute in a sibling attribute
+# rather than in a typed column, so the fact tables' unit guard never saw them.
+# Summing ``annual_quant_target`` across table 1 added Inspections, Structures,
+# Poles, Trees, Miles and Capacitors -- 23 distinct units -- into one number
+# and reported it as an answer.
+_UNIT_ATTRIBUTE_RE = re.compile(r"(^|_)units?$", re.I)
 
 # Typed columns that may be filtered, grouped, or ordered on. Anything else must
 # be addressed through the jsonb payload, by parameterized key.
@@ -79,6 +109,19 @@ RECORD_COLUMNS = {
 JSON_COLUMN = {FACTS: "dimensions", RECORDS: "attributes"}
 VALUE_COLUMN = {FACTS: "value_numeric", RECORDS: None}
 
+# ``sum`` and ``avg`` are arithmetic: naming a text column as their target
+# compiles to ``sum(t.unit)``, which Postgres rejects at execution time with a
+# bare ProgrammingError rather than a PlanError -- aborting the transaction and
+# taking every later plan in the same question down with it. The DSL knows the
+# column types, so refuse it while it is still a plan.
+ARITHMETIC_AGGREGATES = {"sum", "avg"}
+NUMERIC_COLUMNS = {
+    "value_numeric",
+    "reporting_year",
+    "reporting_quarter",
+    "source_vintage_year",
+}
+
 MAX_LIMIT = 200
 DEFAULT_LIMIT = 50
 # Tables 14/15 carry two year axes; a bare year filter is ambiguous there.
@@ -99,6 +142,31 @@ class Filter:
     operator: str = "eq"
     value: Any = None
     json_key: bool = False
+    # Only meaningful with json_key: how to read the text jsonb returns.
+    cast: str | None = None
+
+
+@dataclass(frozen=True)
+class GroupKey:
+    """A grouping column, which may live inside the jsonb payload.
+
+    Spend is grouped by initiative and expense type; work orders by priority.
+    Those are jsonb keys, so before this existed the planner could only group
+    by ``record_id`` -- opaque hashes -- and "our biggest capital programs"
+    came back as a ranked list of meaningless identifiers.
+    """
+
+    field: str
+    json_key: bool = False
+    cast: str | None = None
+
+
+@dataclass(frozen=True)
+class Having:
+    """A predicate on the aggregate, for 'beat the total but missed a year'."""
+
+    operator: str = "gt"
+    value: Any = 0
 
 
 @dataclass(frozen=True)
@@ -110,7 +178,14 @@ class ExcelQueryPlan:
     operation: Literal["aggregate", "select", "rank"] = "aggregate"
     aggregate: str = "sum"
     filters: tuple[Filter, ...] = ()
-    group_by: tuple[str, ...] = ()
+    group_by: tuple[Any, ...] = ()
+    # Aggregate a numeric attribute held in the record jsonb payload.
+    # ``excel_records`` has no typed value column, so before this the only
+    # aggregate available over tables 1 and 13 was count(*).
+    value_json_key: str | None = None
+    # Aggregate (or count nulls of) an allowlisted typed column.
+    value_column: str | None = None
+    having: Having | None = None
     # Reviewed JSON attributes to return for entity-record lookups. Keys remain
     # SQL parameters; generated aliases are fixed and never user controlled.
     select_json_keys: tuple[str, ...] = ()
@@ -131,6 +206,11 @@ class ExcelExecutionResult:
     provenance: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     blank_meanings: list[str] = field(default_factory=list)
+    # The statement that actually ran. Carried so an evaluation run can tell a
+    # figure that came from an executed query apart from one the answering
+    # model read off a card, which was previously indistinguishable.
+    sql: str | None = None
+    sql_params: list[Any] = field(default_factory=list)
 
     @property
     def is_answer(self) -> bool:
@@ -150,6 +230,69 @@ def _columns_for(source: str) -> set[str]:
     return FACT_COLUMNS if source == FACTS else RECORD_COLUMNS
 
 
+def _as_group_key(entry: Any) -> GroupKey:
+    """Accept a bare column name or a GroupKey, so old plans still compile."""
+    return entry if isinstance(entry, GroupKey) else GroupKey(str(entry))
+
+
+def _cast_suffix(cast: str | None) -> str:
+    """Resolve a cast name against the code allowlist. Never interpolated raw."""
+    if cast is None:
+        return ""
+    if cast not in CASTS:
+        raise PlanError(f"unknown cast {cast!r}")
+    return CASTS[cast]
+
+
+def _compile_filter(
+    flt: Filter, alias: str, json_column: str, params: list[Any]
+) -> str:
+    """One filter as a parameterized predicate.
+
+    Shared by the main statement and by the unit/provenance scope queries.
+    They used to compile filters separately, and the copies drifted: a new
+    operator worked in the result but raised KeyError while gathering the
+    metadata for that same result.
+    """
+    if flt.json_key:
+        expression = _json_expression(
+            f"{alias}.{json_column}", flt.cast, params, flt.field
+        )
+    else:
+        expression = f"{alias}.{flt.field}"
+    if flt.operator in SET_OPERATORS:
+        values = list(flt.value)
+        if flt.json_key and not flt.cast:
+            values = [str(item) for item in values]
+        params.append(values)
+        return f"{expression} {SET_OPERATORS[flt.operator]}"
+    if flt.json_key:
+        params.append(flt.value if flt.cast else str(flt.value))
+    else:
+        params.append(flt.value)
+    return f"{expression} {OPERATORS[flt.operator]} %s"
+
+
+def _json_expression(
+    json_column: str, cast: str | None, params: list[Any], field_name: str
+) -> str:
+    """``t.payload ->> %s`` read at the requested type, key bound as a parameter.
+
+    A numeric cast is guarded by a regex test so a blank or non-numeric
+    attribute yields NULL -- and so fails the predicate -- instead of aborting
+    the whole statement with a conversion error.
+    """
+    suffix = _cast_suffix(cast)
+    if cast == "numeric":
+        params.extend([field_name, _NUMERIC_GUARD, field_name])
+        return (
+            f"(CASE WHEN {json_column} ->> %s ~ %s "
+            f"THEN {json_column} ->> %s END)::numeric"
+        )
+    params.append(field_name)
+    return f"({json_column} ->> %s){suffix}" if suffix else f"{json_column} ->> %s"
+
+
 def _validate(plan: ExcelQueryPlan, contract: TableContract) -> None:
     if plan.source not in SOURCES:
         raise PlanError(f"unknown source {plan.source!r}")
@@ -160,13 +303,59 @@ def _validate(plan: ExcelQueryPlan, contract: TableContract) -> None:
 
     allowed = _columns_for(plan.source)
     for flt in plan.filters:
-        if flt.operator not in OPERATORS:
+        if flt.operator in SET_OPERATORS:
+            if not isinstance(flt.value, (list, tuple)) or not flt.value:
+                raise PlanError(f"{flt.operator!r} needs a non-empty list")
+            if len(flt.value) > MAX_SET_VALUES:
+                raise PlanError(f"{flt.operator!r} list exceeds {MAX_SET_VALUES}")
+        elif flt.operator not in OPERATORS:
             raise PlanError(f"unknown operator {flt.operator!r}")
         if not flt.json_key and flt.field not in allowed:
             raise PlanError(f"{flt.field!r} is not a filterable column")
-    for column in (*plan.group_by, *((plan.order_by,) if plan.order_by else ())):
-        if column not in allowed and column not in {"value", "aggregate"}:
-            raise PlanError(f"{column!r} is not groupable/orderable")
+        if flt.json_key:
+            _cast_suffix(flt.cast)
+            # Text ordering puts '2.0' above '1000'. A caller asking for a
+            # magnitude comparison on a jsonb attribute always means the
+            # number, so refuse rather than silently answer a different
+            # question -- this was returning 102 rows where 41 were correct.
+            if flt.operator in ORDERING_OPERATORS and flt.cast in (None, "text"):
+                raise PlanError(
+                    f"{flt.field!r} uses {flt.operator!r} on a jsonb attribute "
+                    "without a cast; text ordering is not numeric ordering"
+                )
+        if flt.cast is not None and not flt.json_key:
+            raise PlanError("cast applies only to jsonb attributes")
+
+    for entry in plan.group_by:
+        key = _as_group_key(entry)
+        _cast_suffix(key.cast)
+        if not key.json_key and key.field not in allowed:
+            raise PlanError(f"{key.field!r} is not groupable")
+    if plan.order_by and plan.order_by not in allowed | {"value", "aggregate"}:
+        raise PlanError(f"{plan.order_by!r} is not orderable")
+
+    if plan.value_column is not None and plan.value_column not in allowed:
+        raise PlanError(f"{plan.value_column!r} is not an aggregable column")
+    if (
+        plan.value_column is not None
+        and plan.aggregate in ARITHMETIC_AGGREGATES
+        and plan.value_column not in NUMERIC_COLUMNS
+    ):
+        raise PlanError(
+            f"{plan.aggregate!r} needs a numeric column; "
+            f"{plan.value_column!r} is not one"
+        )
+    if plan.value_json_key is not None and plan.value_column is not None:
+        raise PlanError("value_json_key and value_column are mutually exclusive")
+    if plan.value_json_key is not None and plan.source != RECORDS:
+        raise PlanError("value_json_key is supported only for entity records")
+    if plan.having is not None:
+        if plan.having.operator not in OPERATORS:
+            raise PlanError(f"unknown having operator {plan.having.operator!r}")
+        if not plan.group_by:
+            raise PlanError("having requires a group_by")
+        if plan.operation == "select":
+            raise PlanError("having requires an aggregate operation")
     if plan.select_json_keys and plan.operation != "select":
         raise PlanError("select_json_keys requires operation='select'")
     if plan.select_json_keys and plan.source != RECORDS:
@@ -204,12 +393,7 @@ def compile_plan(
         where.append("t.measure_name = %s")
         params.append(plan.measure_name)
     for flt in plan.filters:
-        if flt.json_key:
-            where.append(f"t.{json_column} ->> %s {OPERATORS[flt.operator]} %s")
-            params.extend([flt.field, str(flt.value)])
-        else:
-            where.append(f"t.{flt.field} {OPERATORS[flt.operator]} %s")
-            params.append(flt.value)
+        where.append(_compile_filter(flt, "t", json_column, params))
 
     # Contract-declared duplicate policy (Table 13 snapshots repeat work orders).
     dedupe = contract.dedupe.get("default_filter") if contract.dedupe else None
@@ -218,12 +402,41 @@ def compile_plan(
         params.extend([dedupe["field"], str(dedupe["value"])])
 
     where_sql = " AND ".join(where)
-    group_sql = ", ".join(f"t.{c}" for c in plan.group_by)
+
+    # Group keys are compiled before the SELECT list so their bound parameters
+    # keep source order; jsonb keys become generated aliases, never caller text.
+    group_params: list[Any] = []
+    group_expressions: list[str] = []
+    group_aliases: list[str] = []
+    for index, entry in enumerate(plan.group_by):
+        key = _as_group_key(entry)
+        if key.json_key:
+            expression = _json_expression(
+                f"t.{json_column}", key.cast, group_params, key.field
+            )
+            alias = f"group_{index}"
+        else:
+            expression = f"t.{key.field}"
+            alias = key.field
+        group_expressions.append(expression)
+        group_aliases.append(alias)
+    group_select = ", ".join(
+        expression if expression == f"t.{alias}" else f"{expression} AS {alias}"
+        for expression, alias in zip(group_expressions, group_aliases)
+    )
+    # Group and order by select-list ordinal rather than repeating the
+    # expression. A jsonb group key binds its key name as a parameter, and
+    # repeating the expression would bind it twice, in an order that is easy
+    # to get wrong and impossible to see in the compiled string.
+    group_ordinals = ", ".join(str(index + 1) for index in range(len(group_expressions)))
+    where_params = params
+    params = [*group_params, *where_params]
+
     value_column = VALUE_COLUMN[source]
 
     if plan.operation == "select":
-        select_columns = list(plan.group_by) or ["record_id"]
-        cols = ", ".join(f"t.{c}" for c in select_columns)
+        cols = group_select or "t.record_id"
+        order_cols = group_ordinals or "1"
         tail = f", t.{value_column}" if value_column else ""
         json_select = "".join(
             f", t.{json_column} ->> %s AS selected_{index}"
@@ -232,31 +445,103 @@ def compile_plan(
         sql = (
             f"SELECT {cols}{tail}{json_select} FROM {source} t "
             f"JOIN excel_revisions r ON r.id = t.revision_id "
-            f"WHERE {where_sql} ORDER BY {cols} LIMIT %s"
+            f"WHERE {where_sql} ORDER BY {order_cols} LIMIT %s"
         )
         return sql, [*plan.select_json_keys, *params, plan.limit]
 
-    target = value_column if value_column else "*"
-    agg_sql = AGGREGATES[plan.aggregate].format(col=f"t.{target}")
-    if plan.aggregate == "count" and not value_column:
+    # Aggregate target, in precedence order: an explicit jsonb attribute, an
+    # explicit typed column, then the source's natural value column.
+    agg_params: list[Any] = []
+    if plan.value_json_key is not None:
+        cast = None if plan.aggregate.startswith("count") else "numeric"
+        target_sql = _json_expression(
+            f"t.{json_column}", cast, agg_params, plan.value_json_key
+        )
+    elif plan.value_column is not None:
+        target_sql = f"t.{plan.value_column}"
+    elif value_column:
+        target_sql = f"t.{value_column}"
+    else:
+        target_sql = "*"
+    agg_sql = AGGREGATES[plan.aggregate].format(col=target_sql)
+    if plan.aggregate == "count" and target_sql == "*":
         agg_sql = "count(*)"
+    elif target_sql == "*":
+        # sum(*)/avg(*) are not SQL. A record table has no typed value column,
+        # so an arithmetic aggregate there needs value_json_key or
+        # value_column; without one the plan is malformed, and refusing here
+        # keeps a broken statement from reaching the database.
+        raise PlanError(
+            f"aggregate {plan.aggregate!r} needs value_json_key or value_column "
+            f"on {plan.source}"
+        )
 
-    select_parts = ([group_sql] if group_sql else []) + [f"{agg_sql} AS value"]
+    select_parts = ([group_select] if group_select else []) + [f"{agg_sql} AS value"]
     sql = (
         f"SELECT {', '.join(select_parts)} FROM {source} t "
         f"JOIN excel_revisions r ON r.id = t.revision_id "
         f"WHERE {where_sql}"
     )
-    if group_sql:
-        sql += f" GROUP BY {group_sql}"
+    # Placeholder order follows the statement text: group keys and the
+    # aggregate target appear in the SELECT list, then the WHERE predicates.
+    params = [*group_params, *agg_params, *where_params]
+    if group_ordinals:
+        sql += f" GROUP BY {group_ordinals}"
+    if plan.having is not None:
+        # HAVING cannot reference a select alias in PostgreSQL, so the
+        # aggregate expression -- and its parameters -- are emitted again.
+        sql += f" HAVING {agg_sql} {OPERATORS[plan.having.operator]} %s"
+        having_params: list[Any] = []
+        if plan.value_json_key is not None:
+            cast = None if plan.aggregate.startswith("count") else "numeric"
+            _json_expression(
+                f"t.{json_column}", cast, having_params, plan.value_json_key
+            )
+        params.extend([*having_params, plan.having.value])
     if plan.operation == "rank" or plan.order_by:
         direction = "DESC" if plan.descending else "ASC"
         sql += f" ORDER BY value {direction} NULLS LAST"
-    elif group_sql:
-        sql += f" ORDER BY {group_sql}"
+    elif group_ordinals:
+        sql += f" ORDER BY {group_ordinals}"
     sql += " LIMIT %s"
     params.append(plan.limit)
     return sql, params
+
+
+def _apply_canonical_scope(plan: ExcelQueryPlan) -> tuple[ExcelQueryPlan, list[str]]:
+    """Pin an overlapping scope column the plan left open.
+
+    Table 11 reports every WMP dollar twice -- once scoped ``Territory`` and
+    once scoped to the ``HFTD`` subset inside it. A plan that neither filters
+    nor groups that column sums both and double-counts the overlap: this is
+    ``excel_003``, where 2024 CAPEX came back as 932,371 instead of 473,986.
+
+    An unscoped aggregate is rewritten to the canonical whole rather than
+    refused, because "how much did we spend" does have a right answer --
+    the territory figure -- and refusing returns nothing at all. The rewrite
+    is reported as a warning so the trace and the evidence both show which
+    scope was actually read.
+    """
+    if not feature_enabled("excel_canonical_scope"):
+        return plan, []
+    scope = overlapping_scope(plan.table_number)
+    if scope is None or plan.source != FACTS:
+        return plan, []
+    if plan.operation == "select" or scope_is_pinned(scope, plan):
+        return plan, []
+    if plan.aggregate not in {"sum", "avg"}:
+        # count/min/max over the union do not double-count a magnitude.
+        return plan, []
+    scoped = replace(
+        plan,
+        filters=(*plan.filters, Filter(scope.column, "eq", scope.canonical)),
+    )
+    return scoped, [
+        f"{scope.column} values overlap ({', '.join(scope.values)}); "
+        f"scoped to the canonical {scope.canonical!r} rather than summing "
+        f"across them, which would double-count "
+        f"{', '.join(scope.contained)}."
+    ]
 
 
 def _resolve_unambiguous_year_basis(plan: ExcelQueryPlan, conn) -> ExcelQueryPlan:
@@ -305,14 +590,31 @@ def execute_plan(
     contracts = contracts or load_contracts()
     contract = contracts.for_table(plan.table_number)
     plan = _resolve_unambiguous_year_basis(plan, conn)
+    plan, scope_warnings = _apply_canonical_scope(plan)
     sql, params = compile_plan(plan, contract)
 
     with conn.cursor() as cur:
-        cur.execute(sql, params)
+        # Ask for one row beyond the limit. If it comes back, the result is a
+        # truncated head of a larger set, and saying so is the difference
+        # between "the eight largest initiatives" and a list the answering
+        # model presents as complete. 9 of 22 executed results on the beta set
+        # sat exactly at their limit with nothing in the evidence to say so.
+        # ``compile_plan`` always ends with an unconditional " LIMIT %s", so
+        # the row cap is the final parameter. Checking rather than assuming
+        # means a future change to the compiler degrades to "no truncation
+        # probe" instead of silently rewriting some other parameter.
+        probe_params = list(params)
+        can_probe = bool(probe_params) and probe_params[-1] == plan.limit
+        if can_probe:
+            probe_params[-1] = plan.limit + 1
+        cur.execute(sql, probe_params)
         rows = cur.fetchall()
         columns = [desc[0] for desc in cur.description]
+        truncated = can_probe and len(rows) > plan.limit
+        rows = rows[: plan.limit]
 
         unit = None
+        mixed_units: list[str] = []
         contributing = 0
         blanks: list[str] = []
         revision_id = None
@@ -337,10 +639,27 @@ def execute_plan(
             units = units or []
             blanks = list(blank_list or [])
             if len(units) > 1:
-                raise PlanError(
-                    "refusing to aggregate incompatible units: " + ", ".join(units)
-                )
-            unit = units[0] if units else None
+                # Mixed units are only a hazard when one number is the sum of
+                # all of them. A plan that groups by the metric -- or by any
+                # dimension that separates them -- returns one row per unit,
+                # each labeled, which is a legitimate breakdown rather than an
+                # apples-and-oranges total. Refusing those declined questions
+                # the corpus answers exactly.
+                separating_columns = {
+                    "semantic_metric_key", "metric_name", "measure_name", "unit"
+                }
+                separates_units = any(
+                    (entry.field if isinstance(entry, GroupKey) else str(entry))
+                    in separating_columns
+                    for entry in plan.group_by
+                ) or plan.operation == "select"
+                if not separates_units:
+                    raise PlanError(
+                        "refusing to aggregate incompatible units: "
+                        + ", ".join(units)
+                    )
+                mixed_units = sorted(units)
+            unit = units[0] if len(units) == 1 else None
             cur.execute(
                 f"""
                 SELECT f.provenance, f.value_raw
@@ -355,7 +674,19 @@ def execute_plan(
                 {**(row[0] or {}), "value_raw": row[1]} for row in cur.fetchall()
             ]
         else:
+            mixed_units = []
             meta_where, meta_params = _record_scope(plan, contract)
+            if plan.value_json_key and plan.aggregate in _UNIT_SENSITIVE_AGGREGATES:
+                mixed_units = _record_units_in_scope(
+                    cur, plan, contract, meta_where, meta_params
+                )
+                if len(mixed_units) > 1 and not _groups_separate_units(plan):
+                    raise PlanError(
+                        "refusing to aggregate "
+                        f"{plan.value_json_key!r} across incompatible units: "
+                        + ", ".join(mixed_units[:8])
+                        + (" ..." if len(mixed_units) > 8 else "")
+                    )
             cur.execute(
                 f"""
                 SELECT count(*), min(rec.revision_id)
@@ -386,7 +717,19 @@ def execute_plan(
             )
             provenance = [row[0] or {} for row in cur.fetchall()]
 
-    warnings: list[str] = []
+    warnings: list[str] = list(scope_warnings)
+    if truncated:
+        warnings.append(
+            f"Only the first {plan.limit} rows are shown and more exist; this "
+            "is a partial view, not the complete set. Do not present it as "
+            "exhaustive or total it as if it were."
+        )
+    if len(mixed_units) > 1:
+        warnings.append(
+            "This result spans several units ("
+            + ", ".join(mixed_units)
+            + "); read each row against its own metric and never total them."
+        )
     if plan.table_number in DUAL_YEAR_AXIS_TABLES:
         warnings.append(
             "Table "
@@ -403,7 +746,56 @@ def execute_plan(
         provenance=provenance,
         warnings=warnings,
         blank_meanings=blanks,
+        sql=sql,
+        sql_params=list(params),
     )
+
+
+# min/max pick an existing row's value, so they stay meaningful across units
+# as long as the unit travels with the answer; sum and avg do not.
+_UNIT_SENSITIVE_AGGREGATES = {"sum", "avg"}
+
+
+def _groups_separate_units(plan: ExcelQueryPlan) -> bool:
+    """True when each returned row belongs to a single unit."""
+    separating = {
+        "semantic_metric_key", "metric_name", "measure_name", "unit",
+        "entity_key", "record_id", "title",
+    }
+    for entry in plan.group_by:
+        field = entry.field if isinstance(entry, GroupKey) else str(entry)
+        if field in separating:
+            return True
+        if isinstance(entry, GroupKey) and entry.json_key and _UNIT_ATTRIBUTE_RE.search(field):
+            return True
+    return False
+
+
+def _record_units_in_scope(
+    cur,
+    plan: ExcelQueryPlan,
+    contract: TableContract,
+    meta_where: str,
+    meta_params: list[Any],
+) -> list[str]:
+    """Distinct unit labels covered by a record aggregate's scope."""
+    unit_keys = [
+        key for key in contract.json_dimensions if _UNIT_ATTRIBUTE_RE.search(key)
+    ]
+    if not unit_keys:
+        return []
+    cur.execute(
+        f"""
+        SELECT DISTINCT rec.attributes ->> %s
+        FROM excel_records rec
+        JOIN excel_revisions r ON r.id = rec.revision_id
+        WHERE {meta_where}
+          AND rec.attributes ->> %s IS NOT NULL
+          AND rec.attributes ->> %s <> ''
+        """,
+        [unit_keys[0], *meta_params, unit_keys[0], unit_keys[0]],
+    )
+    return sorted(row[0] for row in cur.fetchall())
 
 
 def _fact_scope(plan: ExcelQueryPlan, contract: TableContract) -> tuple[str, list[Any]]:
@@ -417,12 +809,7 @@ def _fact_scope(plan: ExcelQueryPlan, contract: TableContract) -> tuple[str, lis
         where.append("f.measure_name = %s")
         params.append(plan.measure_name)
     for flt in plan.filters:
-        if flt.json_key:
-            where.append(f"f.dimensions ->> %s {OPERATORS[flt.operator]} %s")
-            params.extend([flt.field, str(flt.value)])
-        else:
-            where.append(f"f.{flt.field} {OPERATORS[flt.operator]} %s")
-            params.append(flt.value)
+        where.append(_compile_filter(flt, "f", "dimensions", params))
     return " AND ".join(where), params
 
 
@@ -434,12 +821,7 @@ def _record_scope(
     where = ["r.state = 'active'", "rec.table_number = %s"]
     params: list[Any] = [plan.table_number]
     for flt in plan.filters:
-        if flt.json_key:
-            where.append(f"rec.attributes ->> %s {OPERATORS[flt.operator]} %s")
-            params.extend([flt.field, str(flt.value)])
-        else:
-            where.append(f"rec.{flt.field} {OPERATORS[flt.operator]} %s")
-            params.append(flt.value)
+        where.append(_compile_filter(flt, "rec", "attributes", params))
     dedupe = contract.dedupe.get("default_filter") if contract.dedupe else None
     if dedupe:
         where.append("rec.attributes ->> %s = %s")

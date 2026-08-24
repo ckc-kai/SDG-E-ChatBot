@@ -27,9 +27,9 @@ class RetrievalServiceTests(unittest.TestCase):
 
     @patch("services.retrieval_service.retrieve_configured")
     @patch("services.retrieval_service.connect_db")
-    @patch("services.retrieval_service.answer_from_excel")
+    @patch("services.retrieval_service.answer_from_excel_all")
     def test_returns_grouped_result_and_closes_connection(
-        self, answer_from_excel, connect_db, retrieve
+        self, answer_from_excel_all, connect_db, retrieve
     ):
         connection = MagicMock()
         connect_db.return_value = connection
@@ -46,9 +46,9 @@ class RetrievalServiceTests(unittest.TestCase):
 
     @patch("services.retrieval_service.retrieve_configured")
     @patch("services.retrieval_service.connect_db")
-    @patch("services.retrieval_service.answer_from_excel")
+    @patch("services.retrieval_service.answer_from_excel_all")
     def test_content_filter_maps_to_evidence_group(
-        self, answer_from_excel, connect_db, retrieve
+        self, answer_from_excel_all, connect_db, retrieve
     ):
         retrieve.return_value = EvidenceRetrievalResult(question="q", groups={})
         RetrievalService().retrieve("q", content_type="excel_card")
@@ -56,9 +56,9 @@ class RetrievalServiceTests(unittest.TestCase):
 
     @patch("services.retrieval_service.retrieve_configured")
     @patch("services.retrieval_service.connect_db")
-    @patch("services.retrieval_service.answer_from_excel")
+    @patch("services.retrieval_service.answer_from_excel_all")
     def test_multiple_content_filters_map_to_unique_groups(
-        self, answer_from_excel, connect_db, retrieve
+        self, answer_from_excel_all, connect_db, retrieve
     ):
         retrieve.return_value = EvidenceRetrievalResult(question="q", groups={})
         RetrievalService().retrieve(
@@ -70,11 +70,11 @@ class RetrievalServiceTests(unittest.TestCase):
 
     @patch("services.retrieval_service.retrieve_configured")
     @patch("services.retrieval_service.connect_db")
-    @patch("services.retrieval_service.answer_from_excel")
+    @patch("services.retrieval_service.answer_from_excel_all")
     def test_verified_excel_only_request_skips_semantic_cards(
-        self, answer_from_excel, connect_db, retrieve
+        self, answer_from_excel_all, connect_db, retrieve
     ):
-        answer_from_excel.return_value = self._excel_answer()
+        answer_from_excel_all.return_value = (self._excel_answer(),)
         retrieve.return_value = EvidenceRetrievalResult(question="q", groups={})
 
         result = RetrievalService().retrieve(
@@ -111,6 +111,8 @@ class RetrievalServiceTests(unittest.TestCase):
             evidence=EvidenceRetrievalResult(question="q", groups={}),
             verified_excel=None,
             verified_excels=(),
+            excel_rows=(),
+            excel_trace=(),
             timings=SimpleNamespace(
                 connection_ms=0,
                 grouped_retrieval_ms=0,
@@ -144,6 +146,8 @@ class RetrievalServiceTests(unittest.TestCase):
             evidence=EvidenceRetrievalResult(question="q", groups={}),
             verified_excel=partial,
             verified_excels=(partial,),
+            excel_rows=(),
+            excel_trace=(),
             timings=SimpleNamespace(
                 connection_ms=0,
                 grouped_retrieval_ms=0,

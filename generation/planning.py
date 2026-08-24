@@ -153,6 +153,11 @@ class RetrievalPlan:
     atomic_task_count: int = 1
     dropped_task_count: int = 0
     requirements: tuple[Requirement, ...] = ()
+    # Which model actually produced this plan. ``source="model"`` alone hides
+    # the escalation path in generation_service, so a planner A/B could compare
+    # two configurations that were both silently planned by the escalation
+    # model. Recorded here so plan_diagnostics can report it.
+    planner_model: str | None = None
 
 
 def supports_multistep_generation(plan: RetrievalPlan) -> bool:
@@ -451,20 +456,17 @@ source role. Use 5-6 tasks only when the original question has that many truly
 independent factual requirements. Do not add tasks for facts that merely might
 be useful. Omit optional keys when their value would only be N/A or unknown.
 
-Every task MUST contain the keys "question" and "source". "source" MUST be
-exactly "pdf" or "excel". Use "excel" for values reported in SDG&E's cleaned
+Use "excel" for values reported in SDG&E's cleaned
 quarterly workbook (QDR tables): activity targets, actuals, status (Table 1);
 spend/CAPEX/OPEX (Table 11); circuit-mile inventories and upgrades (Tables
 7-9); ignitions, events, findings, weather days (Tables 2-6, 10); risk by
 tier or segment (Tables 14-15); work orders (Table 13). Use "pdf" for filings,
-guidelines, decisions, and narrative content. Use only the keys shown above;
-never use source_type, narrative_needed, calculations, or explanatory text.
+guidelines, decisions, and narrative content.
 For PDF, narrative is automatic; set need_table or need_figure only when
-needed. Excel tasks do not need PDF support flags. Preserve entities (keep
+needed. Preserve entities (keep
 exact ids like WMP.473 in task questions), periods, metrics, document roles,
 and table roles from the question. Do not assume an answer or a cause.
-Every requirement MUST have a stable ID such as R1, R2, and every ID MUST
-appear in at least one task's requirement_ids. Closely related requirements
+Give every requirement a stable ID (R1, R2, ...). Closely related requirements
 that use the same source, document scope, entity, period, or table should share
 one retrieval task rather than being omitted.
 

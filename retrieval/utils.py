@@ -270,8 +270,15 @@ QUERY_PROMPT_NAME = "query"
 
 
 def model_encodes_asymmetrically(model: SentenceTransformer) -> bool:
-    """True when the model ships a dedicated query prompt."""
-    return QUERY_PROMPT_NAME in (getattr(model, "prompts", None) or {})
+    """True when the model ships a NON-EMPTY dedicated query prompt.
+
+    Presence of the key is not enough. bge-base-en-v1.5 ships
+    ``prompts={'query': '', 'document': ''}`` -- both empty -- so a membership
+    test called it asymmetric and then prompted every query with the empty
+    string, which is exactly the same vector as no prompt at all. Requiring a
+    non-empty prompt makes the predicate mean what its callers assume.
+    """
+    return bool((getattr(model, "prompts", None) or {}).get(QUERY_PROMPT_NAME))
 
 
 def encode_query(model: SentenceTransformer, text: str):
@@ -297,6 +304,30 @@ def get_reranker_model() -> CrossEncoder:
     if config.get("provider", "sentence_transformers") != "sentence_transformers":
         raise ValueError("Configured reranker provider is not implemented")
     return CrossEncoder(config["name"])
+
+
+def rerank_scores(pairs: list[tuple[str, str]], *, batch_size: int) -> list[float]:
+    """Score (query, passage) pairs on a 0-1 scale whatever the reranker emits.
+
+    Cross-encoders disagree about their output range. A single-label model such
+    as bge-reranker-base already returns a sigmoid probability; a generative
+    reranker such as Qwen3-Reranker returns the raw yes/no logit difference, on
+    this corpus roughly -12 to +12. Every downstream threshold -- the Excel
+    channel's minimum card score, the caption weight added to each score -- was
+    calibrated against 0-1, and silently means nothing against logits: a 0.25
+    caption weight is a quarter of the bge range but a fiftieth of Qwen's.
+
+    Normalising here rather than at each threshold keeps the reranker a
+    swappable part, so choosing a model stays a retrieval-quality decision
+    instead of a recalibration exercise.
+    """
+    if not pairs:
+        return []
+    raw = get_reranker_model().predict(pairs, batch_size=batch_size)
+    scores = [float(value) for value in raw]
+    if all(0.0 <= score <= 1.0 for score in scores):
+        return scores
+    return [1.0 / (1.0 + math.exp(-score)) for score in scores]
 
 
 @functools.lru_cache(maxsize=1)

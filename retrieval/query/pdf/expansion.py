@@ -226,6 +226,11 @@ def expand_to_parent_sections(
         # compatibility column or any other SQL error. Retrieval is read-only,
         # so rolling back here is safe and lets the caller continue with the
         # original child chunks as this fallback promises.
+        # Degrading gracefully means degrading the *connection* too. A failed
+        # statement leaves psycopg2 in an aborted transaction, so without this
+        # rollback every subsequent query on the same connection dies with
+        # InFailedSqlTransaction -- turning a recoverable "narrower context"
+        # into a hard failure several questions later, far from the cause.
         try:
             conn.rollback()
         except Exception:  # pragma: no cover - a closed connection will fail later

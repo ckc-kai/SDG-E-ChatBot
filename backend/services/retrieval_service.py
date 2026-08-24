@@ -2,25 +2,32 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
+from generation.comparison import asks_for_comparison, missing_arms
+from generation.evidence_audit import evidence_snapshot
 from generation.coverage import assess_plan_coverage
 from generation.computation import CalculationResult
 from generation.features import feature_enabled
 from generation.planning import RetrievalPlan
 from retrieval.query.excel.channel import (
     ExcelAnswer,
-    answer_from_excel,
+    answer_from_excel_all,
     is_entity_history_question,
 )
 from retrieval.query.excel.query import bind_entity_key
+from retrieval.query.excel.rows import ExcelRowSlice, fetch_card_rows
+from retrieval.query.excel.trace import outcome_trace
 from retrieval.query.pdf import EvidenceGroup, EvidenceRetrievalResult, retrieve_configured
 from retrieval.query.pdf.query import required_source_roles
 from retrieval.source_manifest import filenames_for_document_scope
 from retrieval.utils import connect_db
+
+logger = logging.getLogger(__name__)
 
 
 _CONTENT_TYPE_TO_GROUP = {
@@ -55,6 +62,10 @@ class RetrievalBundle:
     plan: RetrievalPlan | None = None
     step_bundles: tuple["RetrievalBundle", ...] = ()
     computation_notes: tuple[str, ...] = ()
+    excel_rows: tuple[ExcelRowSlice, ...] = ()
+    # Diagnostic only: what the Excel channel attempted and what came back.
+    # Never rendered into a prompt; read by eval/excel_lane_report.py.
+    excel_trace: tuple[dict, ...] = ()
 
 
 def _groups_for_types(content_types) -> tuple[str, ...]:
@@ -109,6 +120,50 @@ def _reattach_entity_key(original_question: str, step_question: str) -> str:
     return f"{step_question} ({original_key})"
 
 
+
+# How many passages one uncovered arm may contribute. Small on purpose: the
+# arm needs representation, not parity, and the budget is fixed.
+_ARM_COVERAGE_TOP_K = 5
+
+
+def _arm_source_patterns(arm: str) -> tuple[str, ...]:
+    """ILIKE patterns matching documents that belong to one comparison arm.
+
+    Filenames encode the cycle (``sdge__wmp__2023-2025__r5-...``), so a cycle
+    arm matches directly. A bare year arm has no filename to match, which is
+    correct: workbook years are a column, not a document, and the Excel lane
+    covers those arms with its own plan per arm.
+    """
+    cleaned = arm.strip()
+    if not cleaned:
+        return ()
+    return (f"%{cleaned}%",) if "-" in cleaned else ()
+
+
+def _evidence_source_text(groups) -> str:
+    """Every source filename behind the current evidence, as one blob."""
+    names: list[str] = []
+    for group in (groups or {}).values():
+        for result in getattr(group, "results", ()):
+            names.append(str(result.query_object.source_pdf))
+    return " ".join(names)
+
+
+class _SnapshotView:
+    """Adapt the assembled pieces to what ``evidence_snapshot`` reads.
+
+    ``plan_diagnostics`` is built before the ``RetrievalBundle`` exists, so the
+    snapshot is taken over the merged groups, row slices, and verified answers
+    that will go into it.
+    """
+
+    def __init__(self, merged_groups, excel_rows, verified_items):
+        self.evidence = type("_Ev", (), {"groups": merged_groups})()
+        self.excel_rows = excel_rows
+        self.verified_excels = tuple(verified_items)
+        self.verified_excel = verified_items[0] if verified_items else None
+
+
 class RetrievalService:
     def retrieve(
         self,
@@ -145,6 +200,9 @@ class RetrievalService:
         grouped_retrieval_ms = 0
         excel_verification_ms = 0
         verified_excel = None
+        verified_excels: tuple[ExcelAnswer, ...] = ()
+        excel_rows: tuple[ExcelRowSlice, ...] = ()
+        excel_trace: tuple[dict, ...] = ()
         try:
             source_roles = required_source_roles(question)
             excel_requested = (
@@ -177,14 +235,16 @@ class RetrievalService:
             ):
                 excel_started = time.perf_counter()
                 try:
-                    excel_result = answer_from_excel(question, connection)
+                    excel_result = answer_from_excel_all(question, connection)
                     excel_attempted = True
                 finally:
                     excel_verification_ms = round(
                         (time.perf_counter() - excel_started) * 1000
                     )
-                if isinstance(excel_result, ExcelAnswer):
-                    verified_excel = excel_result
+                excel_trace = tuple(outcome_trace(excel_result))
+                if isinstance(excel_result, tuple) and excel_result:
+                    verified_excels = excel_result
+                    verified_excel = excel_result[0]
                     if only_excel_requested or (
                         content_type is None and content_types is None
                     ):
@@ -203,13 +263,24 @@ class RetrievalService:
             if should_try_excel and not excel_attempted:
                 excel_started = time.perf_counter()
                 try:
-                    excel_result = answer_from_excel(question, connection)
+                    excel_result = answer_from_excel_all(question, connection)
                 finally:
                     excel_verification_ms = round(
                         (time.perf_counter() - excel_started) * 1000
                     )
-                if isinstance(excel_result, ExcelAnswer):
-                    verified_excel = excel_result
+                excel_trace = tuple(outcome_trace(excel_result))
+                if isinstance(excel_result, tuple) and excel_result:
+                    verified_excels = excel_result
+                    verified_excel = excel_result[0]
+
+            # A retrieved card describes a table; these are the rows it
+            # describes. Verified execution, when it fired, is stronger and is
+            # rendered ahead of this, so the two do not compete.
+            excel_group = getattr(result, "groups", {}).get("excel")
+            if excel_group is not None and feature_enabled("excel_row_evidence"):
+                excel_rows = fetch_card_rows(
+                    question, excel_group.results, connection
+                )
         finally:
             connection.close()
 
@@ -217,8 +288,10 @@ class RetrievalService:
             raise TypeError("Task 2 did not return grouped evidence")
         return RetrievalBundle(
             evidence=result,
+            excel_rows=excel_rows,
             verified_excel=verified_excel,
-            verified_excels=((verified_excel,) if verified_excel else ()),
+            verified_excels=verified_excels,
+            excel_trace=excel_trace,
             timings=RetrievalTimings(
                 connection_ms=connection_ms,
                 grouped_retrieval_ms=grouped_retrieval_ms,
@@ -226,6 +299,68 @@ class RetrievalService:
                 total_ms=round((time.perf_counter() - started) * 1000),
             ),
         )
+
+
+    # One retrieval per uncovered arm, never a loop.
+    def _cover_missing_arms(self, question: str, merged: dict) -> tuple[str, ...]:
+        """Fetch evidence for a named comparison arm that retrieved nothing.
+
+        A comparison whose evidence all came from one side cannot be answered,
+        and the model answers it anyway rather than reporting the gap. Ranking
+        cannot prevent that, because every passage it returned really is
+        relevant -- what is missing is the other arm, and the arm that dominates
+        the corpus wins the ranking on its own merits.
+
+        Arms come from the question text, so this holds for a cycle, year, or
+        quarter the corpus has never seen. It is a floor, not a rebalance: an
+        arm gets representation, not parity.
+        """
+        if not feature_enabled("comparison_arm_coverage"):
+            return ()
+        if not asks_for_comparison(question):
+            return ()
+        absent = missing_arms(question, _evidence_source_text(merged))
+        covered: list[str] = []
+        for arm in absent:
+            patterns = _arm_source_patterns(arm)
+            if not patterns:
+                continue
+            try:
+                extra = self.retrieve(
+                    question,
+                    rewrite_mode="off",
+                    content_types=("narrative", "table"),
+                    source_patterns=patterns,
+                )
+            except Exception:  # noqa: BLE001 - a missing arm must not fail the turn
+                logger.warning("arm retrieval failed for %s", arm, exc_info=True)
+                continue
+            added = False
+            for name, group in (extra.evidence.groups or {}).items():
+                target = merged.get(name)
+                if target is None or not group.results:
+                    continue
+                seen = {str(r.query_object.chunk_id) for r in target.results}
+                fresh = [
+                    result for result in group.results[:_ARM_COVERAGE_TOP_K]
+                    if str(result.query_object.chunk_id) not in seen
+                ]
+                if not fresh:
+                    continue
+                # Replace the tail rather than append: the prompt budget is
+                # fixed, and one side's surplus is what crowded the other out.
+                keep = max(len(target.results) - len(fresh), 0)
+                merged[name] = EvidenceGroup(
+                    name=target.name,
+                    content_types=target.content_types,
+                    results=[*target.results[:keep], *fresh],
+                    diagnostics=target.diagnostics,
+                )
+                added = True
+            if added:
+                covered.append(arm)
+                logger.info("covered missing comparison arm %s", arm)
+        return tuple(covered)
 
     def retrieve_plan(
         self, question: str, plan: RetrievalPlan, **kwargs
@@ -322,6 +457,8 @@ class RetrievalService:
                 diagnostics=exemplar.diagnostics,
             )
 
+        arm_retry_arms = self._cover_missing_arms(question, merged)
+
         verified_list: list[ExcelAnswer] = []
         verified_keys: set[tuple[int, str]] = set()
         for bundle in step_bundles:
@@ -332,6 +469,42 @@ class RetrievalService:
                 if key not in verified_keys:
                     verified_keys.add(key)
                     verified_list.append(answer)
+
+        plan_excel_trace = [
+            trace for bundle in step_bundles for trace in bundle.excel_trace
+        ]
+        # A decomposed question whose every step was labelled "pdf" never
+        # reached the workbooks, even when the figures it asked for -- unit
+        # targets missed across the cycle, inspection counts by year -- are
+        # held only there. Rather than teach the step router to predict this,
+        # attempt the workbooks once on the whole question. The channel is
+        # generate-and-verify, so a question the workbooks cannot answer costs
+        # one bounded query and contributes nothing to the prompt.
+        if not verified_list and not required_source_roles(question):
+            excel_connection = connect_db()
+            try:
+                whole_question = answer_from_excel_all(question, excel_connection)
+            except Exception:  # pragma: no cover - defensive, never fatal
+                logger.warning("Whole-question Excel attempt failed", exc_info=True)
+                whole_question = None
+            finally:
+                excel_connection.close()
+            plan_excel_trace.extend(outcome_trace(whole_question))
+            if isinstance(whole_question, tuple):
+                for answer in whole_question:
+                    key = (answer.card_chunk_id, answer.question)
+                    if key not in verified_keys:
+                        verified_keys.add(key)
+                        verified_list.append(answer)
+
+        merged_excel_rows: tuple[ExcelRowSlice, ...] = ()
+        seen_row_scopes: set[tuple] = set()
+        for bundle in step_bundles:
+            for row_slice in bundle.excel_rows:
+                scope = (row_slice.table_number, row_slice.card_chunk_id)
+                if scope not in seen_row_scopes:
+                    seen_row_scopes.add(scope)
+                    merged_excel_rows += (row_slice,)
 
         calculations: tuple[CalculationResult, ...] = ()
         computation_notes: tuple[str, ...] = ()
@@ -369,13 +542,16 @@ class RetrievalService:
         )
         return RetrievalBundle(
             evidence=EvidenceRetrievalResult(question=question, groups=merged),
+            excel_rows=merged_excel_rows,
             verified_excel=verified_items[0] if verified_items else None,
             verified_excels=verified_items,
+            excel_trace=tuple(plan_excel_trace),
             timings=timings,
             calculations=calculations,
             computation_notes=computation_notes,
             plan_diagnostics={
                 "source": plan.source,
+                "planner_model": plan.planner_model,
                 "trigger_reason": plan.trigger_reason,
                 "subquestion_count": len(plan.steps),
                 "atomic_task_count": plan.atomic_task_count,
@@ -383,6 +559,10 @@ class RetrievalService:
                 "retry_count": retry_count,
                 "retry_step_index": retry_step_index,
                 "coverage": coverage.to_dict(),
+                "covered_missing_arms": list(arm_retry_arms),
+                "evidence_snapshot": evidence_snapshot(
+                    _SnapshotView(merged, merged_excel_rows, verified_items)
+                ),
                 "steps": [
                     {
                         "question": step.question,

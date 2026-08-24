@@ -25,7 +25,7 @@ from retrieval.query.pdf.query import (
     required_source_roles,
 )
 from retrieval.query.pdf import query as pdf_query
-from retrieval.utils import _validate_config, load_config
+from retrieval.utils import _validate_config, load_config, rerank_scores
 
 
 class QueryScopeTests(unittest.TestCase):
@@ -134,7 +134,7 @@ class QueryScopeTests(unittest.TestCase):
 
         _validate_config(config)
 
-    @patch("retrieval.query.pdf.query.get_reranker_model")
+    @patch("retrieval.utils.get_reranker_model")
     def test_reranker_uses_configured_small_batch(self, get_model):
         candidate = Mock(
             breadcrumb="Section",
@@ -301,3 +301,86 @@ class QueryScopeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RerankScoreNormalisationTests(unittest.TestCase):
+    """A reranker's output range must not leak into downstream thresholds."""
+
+    @patch("retrieval.utils.get_reranker_model")
+    def test_probability_scores_pass_through_unchanged(self, get_model):
+        get_model.return_value.predict.return_value = [0.0, 0.3, 1.0]
+
+        scores = rerank_scores([("q", "a"), ("q", "b"), ("q", "c")], batch_size=8)
+
+        self.assertEqual(scores, [0.0, 0.3, 1.0])
+
+    @patch("retrieval.utils.get_reranker_model")
+    def test_logit_scores_are_squashed_into_zero_to_one(self, get_model):
+        # Qwen3-Reranker emits a yes/no logit difference, not a probability.
+        get_model.return_value.predict.return_value = [11.9, -11.2, 0.0]
+
+        scores = rerank_scores([("q", "a"), ("q", "b"), ("q", "c")], batch_size=8)
+
+        self.assertTrue(all(0.0 <= score <= 1.0 for score in scores))
+        self.assertAlmostEqual(scores[2], 0.5)
+        self.assertGreater(scores[0], 0.99)
+        self.assertLess(scores[1], 0.01)
+        # Order must survive the transform, or reranking itself changes.
+        self.assertEqual(scores, sorted(scores, reverse=True)[:1] + scores[1:])
+
+    @patch("retrieval.utils.get_reranker_model")
+    def test_empty_pairs_never_reach_the_model(self, get_model):
+        self.assertEqual(rerank_scores([], batch_size=8), [])
+        get_model.return_value.predict.assert_not_called()
+
+
+class ExcelHistoryWithoutNamedYearTests(unittest.TestCase):
+    """A row select needs no reporting period; only an aggregate does."""
+
+    def test_no_named_year_selects_the_whole_recorded_history(self):
+        from retrieval.query.excel import channel
+
+        captured = {}
+
+        def fake_execute(plan, conn, *, contracts):
+            captured["plan"] = plan
+            raise channel.PlanError("stop after plan construction")
+
+        with patch.object(channel, "execute_plan", fake_execute):
+            channel._card_entity_history_answer(
+                "What progress was reported for strategic undergrounding?",
+                Mock(query_object=Mock(chunk_id="1", caption="c")),
+                "WMP.478",
+                (),
+                conn=None,
+                contracts=None,
+            )
+
+        plan = captured["plan"]
+        self.assertEqual(
+            [f.field for f in plan.filters], ["entity_key"],
+            "an unnamed year must not become a reporting_year filter",
+        )
+        self.assertEqual(plan.limit, channel._FULL_HISTORY_ROW_LIMIT)
+
+    def test_a_named_year_still_constrains_the_select(self):
+        from retrieval.query.excel import channel
+
+        captured = {}
+
+        def fake_execute(plan, conn, *, contracts):
+            captured["plan"] = plan
+            raise channel.PlanError("stop after plan construction")
+
+        with patch.object(channel, "execute_plan", fake_execute):
+            channel._card_entity_history_answer(
+                "What was the 2024 target?",
+                Mock(query_object=Mock(chunk_id="1", caption="c")),
+                "WMP.478",
+                (2024,),
+                conn=None,
+                contracts=None,
+            )
+
+        filters = {f.field: f.value for f in captured["plan"].filters}
+        self.assertEqual(filters["reporting_year"], 2024)

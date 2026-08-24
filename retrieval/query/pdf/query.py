@@ -44,7 +44,7 @@ from retrieval.utils import (
     encode_query,
     get_anthropic_client,
     get_embedding_model,
-    get_reranker_model,
+    rerank_scores,
     load_config,
 )
 
@@ -519,25 +519,58 @@ def _validate_embedding_mode(conn, embedding_mode: str) -> str:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT EXISTS (
-                    SELECT 1
+                SELECT
+                    count(*) FILTER (
+                        WHERE contextual_embedding IS NULL
+                           OR contextual_embedding_model IS DISTINCT FROM %s
+                    ) AS unusable,
+                    array_agg(DISTINCT contextual_embedding_recipe) AS recipes
                 FROM chunks
-                WHERE contextual_embedding IS NULL
-                   OR contextual_embedding_model IS DISTINCT FROM %s
-                   OR contextual_embedding_recipe IS DISTINCT FROM %s
-                    LIMIT 1
-                )
                 """,
-                (EMBEDDING_MODEL_NAME, CONTEXTUAL_EMBEDDING_RECIPE),
+                (EMBEDDING_MODEL_NAME,),
             )
-            incomplete = cur.fetchone()[0]
-        if incomplete:
+            unusable, recipes = cur.fetchone()
+        if unusable:
             raise RuntimeError(
-                "One or more contextual embeddings are missing or stale. "
+                f"{unusable} chunks have no contextual embedding or were "
+                f"embedded with a model other than {EMBEDDING_MODEL_NAME!r}. "
                 "Run `uv run python -m retrieval.ingest.pdf.ingest` to "
                 "re-ingest them."
             )
+        recipes = [recipe for recipe in (recipes or ()) if recipe]
+        # A corpus embedded under a *mix* of recipes is half-migrated: its
+        # vectors are not mutually comparable and ranking across them is
+        # meaningless. A corpus embedded uniformly under an older recipe is
+        # not: the recipe only describes how neighbouring context was
+        # prepended before encoding, and the query vector is encoded plain
+        # either way. Pinning this to the current recipe also rejected every
+        # internally consistent older index, which is what the 768d bge
+        # corpus on port 5433 is.
+        if len(recipes) > 1:
+            raise RuntimeError(
+                "Contextual embeddings are half-migrated: the corpus mixes "
+                f"recipes {sorted(recipes)}. Run `uv run python -m "
+                "retrieval.ingest.pdf.ingest` to re-ingest them."
+            )
+        if recipes and recipes[0] != CONTEXTUAL_EMBEDDING_RECIPE:
+            _warn_older_contextual_recipe(recipes[0])
     return _EMBEDDING_COLUMNS[embedding_mode]
+
+
+_warned_recipes: set[str] = set()
+
+
+def _warn_older_contextual_recipe(recipe: str) -> None:
+    """Say once that the corpus predates the current contextualisation."""
+    if recipe in _warned_recipes:
+        return
+    _warned_recipes.add(recipe)
+    logger.warning(
+        "Corpus contextual embeddings use recipe %r; the current recipe is "
+        "%r. Retrieval is consistent but reflects the older contextualisation.",
+        recipe,
+        CONTEXTUAL_EMBEDDING_RECIPE,
+    )
 
 
 def _search_by_vector(
@@ -924,7 +957,7 @@ def rerank(
     if not candidates:
         return []
     pairs = [(question, _candidate_text(candidate)) for candidate in candidates]
-    scores = get_reranker_model().predict(pairs, batch_size=RERANK_BATCH_SIZE)
+    scores = rerank_scores(pairs, batch_size=RERANK_BATCH_SIZE)
     ranked = sorted(
         (
             (

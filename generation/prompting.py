@@ -267,6 +267,8 @@ def prepare_prompt(
         "allowed_citation_ids": [chunk.chunk_id for chunk in prompt_chunks],
         "evidence": evidence,
     }
+    if request.evidence_notice:
+        payload["evidence_notice"] = request.evidence_notice
     text = f"{SYSTEM_INSTRUCTIONS}\nINPUT:{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}"
     estimated_tokens = _base_prompt_tokens(request) + sum(
         _chunk_prompt_tokens(chunk) for chunk in prompt_chunks

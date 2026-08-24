@@ -16,6 +16,27 @@ DEFAULTS = {
     "multistep_generation": True,
     "parent_child_expansion": True,
     "model_excel_planner": True,
+    "excel_row_evidence": True,
+    # Coverage and schema for the workbooks, injected as standing evidence.
+    "workbook_manifest": True,
+    # Deterministic totals, shares, and per-year subtotals over a grouped
+    # Excel result. Closes the measured "fetched as components and never
+    # combined" bucket without the answer model doing arithmetic.
+    "excel_rollups": True,
+    # Pin an overlapping scope column (table 11's Territory/HFTD) that the
+    # plan left open, instead of summing across it and double-counting.
+    "excel_canonical_scope": True,
+    # More requirements per question, each labelled with the part of the
+    # question it answers, and a required-output ledger in the answer prompt.
+    "excel_wide_fanout": True,
+    # Check a refusal against the evidence actually in hand before accepting
+    # it. The 2026-08-23 beta run refused 10 of 27 answerable questions, one
+    # holding 128 execution-verified rows of exactly what was asked for.
+    "refusal_review": True,
+    # Guarantee every arm a comparison names has evidence. Both weak lanes fail
+    # the same way -- multi_excel compares a number across periods, multi_pdf a
+    # policy across filing cycles -- so one flag governs both.
+    "comparison_arm_coverage": True,
 }
 
 

@@ -51,6 +51,12 @@ class AnswerRequest:
     request_id: str
     question: str
     chunks: tuple[Chunk, ...]
+    # Set only on a refusal review. The first pass reported insufficient
+    # context; this states what the record actually holds, so the second pass
+    # answers the supported part instead of the whole question or nothing.
+    # Absent by default, and an absent field leaves the rendered prompt
+    # byte-identical to before this existed.
+    evidence_notice: str | None = None
 
     def __post_init__(self) -> None:
         if not self.request_id.strip():
