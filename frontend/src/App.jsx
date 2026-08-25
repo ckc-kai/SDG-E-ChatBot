@@ -106,7 +106,7 @@ function App() {
             id: makeId(),
             role: 'assistant',
             content: result.answer,
-            sources: result.sources,
+            sources: result.citations,
           },
         ],
       }));

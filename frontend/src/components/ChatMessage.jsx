@@ -16,7 +16,7 @@ function ChatMessage({ role, content, sources, onToggleSave, saved }) {
         {sources && sources.length > 0 && (
           <div className="sources-row">
             {sources.map((source) => (
-              <SourceCard key={`${source.doc_id}-${source.page_start}`} source={source} />
+              <SourceCard key={`${source.chunk_id}-${source.page_start}`} source={source} />
             ))}
           </div>
         )}
